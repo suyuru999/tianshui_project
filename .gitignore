@@ -1,0 +1,41 @@
+# Logs
+# --------------------
+# 这些是通用规则，可以匹配项目内任何地方的日志文件，所以保留原样
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# 如果有专门存放日志的文件夹，现在它在frontend里，所以要指明路径
+frontend/logs/
+backend/logs/
+
+# Dependencies, build artifacts, and local files
+# --------------------
+# 【关键】明确指定忽略 frontend 目录下的 node_modules 和 dist 文件夹
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+backend/db.sqlite3/
+
+# 忽略所有 .local 文件，比如 .env.local
+*.local
+
+
+# Editor directories and files
+# --------------------
+# 这些是针对整个项目的编辑器配置，通常放在根目录
+# 使用 / 开头可以确保只匹配根目录下的文件夹，是更好的实践
+/.vscode/*
+!/.vscode/extensions.json
+/.idea/
+
+# 这些是通用的系统和编辑器文件，保留原样即可
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
