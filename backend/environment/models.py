@@ -185,3 +185,30 @@ class ProcessingTask(models.Model):
     
     def __str__(self):
         return f"{self.task_type} - {self.remote_sensing_image.name} ({self.get_status_display()})" 
+
+
+class CitizenFeedback(models.Model):
+    """民众意见反馈模型"""
+    CATEGORY_CHOICES = [
+        ('suggestion', '功能建议'),
+        ('bug', '问题报告'),
+        ('data_issue', '数据纠错'),
+        ('other', '其他'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, verbose_name='反馈类型')
+    title = models.CharField(max_length=80, verbose_name='标题')
+    content = models.TextField(verbose_name='详细描述')
+    contact = models.CharField(max_length=120, blank=True, null=True, verbose_name='联系方式')
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='提交用户')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='提交时间')
+
+    class Meta:
+        verbose_name = '民众意见反馈'
+        verbose_name_plural = '民众意见反馈'
+        db_table = 'citizen_feedbacks'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.get_category_display()} - {self.title[:20]}"

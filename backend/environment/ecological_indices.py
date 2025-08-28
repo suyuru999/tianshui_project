@@ -145,6 +145,8 @@ class EcologicalIndexCalculator:
             
             available_bands = self.bands.shape[0]
             logger.info(f"可用波段数: {available_bands}")
+            logger.info(f"波段数组形状: {self.bands.shape}")
+            logger.info(f"波段数组类型: {type(self.bands)}")
             
             if available_bands < 3:
                 logger.error(f"波段数不足，需要至少3个波段，当前只有{available_bands}个")
@@ -153,16 +155,25 @@ class EcologicalIndexCalculator:
             # 对于Sentinel-2数据，使用B8A（近红外）和B4（红波段）
             if available_bands >= 8:
                 # Sentinel-2: B8A (近红外), B4 (红波段)
+                logger.info(f"进入 >= 8 分支，available_bands = {available_bands}")
                 nir_band = self.bands[7]  # B8A
                 red_band = self.bands[3]   # B4
                 logger.info("使用Sentinel-2波段: B8A (近红外), B4 (红波段)")
-            elif available_bands >= 4:
+            elif available_bands >= 5:
                 # Landsat-8: B5 (近红外), B4 (红波段)
+                logger.info(f"进入 >= 5 分支，available_bands = {available_bands}")
                 nir_band = self.bands[4]  # B5
                 red_band = self.bands[3]   # B4
                 logger.info("使用Landsat-8波段: B5 (近红外), B4 (红波段)")
+            elif available_bands == 4:
+                # 4波段数据，使用B4 (近红外) 和 B3 (红波段)
+                logger.info(f"进入 == 4 分支，available_bands = {available_bands}")
+                nir_band = self.bands[3]  # B4 (近红外)
+                red_band = self.bands[2]   # B3 (红波段)
+                logger.info("使用4波段数据: B4 (近红外), B3 (红波段)")
             elif available_bands == 3:
                 # RGB图像，使用G (绿波段) 和 R (红波段) 作为近似
+                logger.info(f"进入 == 3 分支，available_bands = {available_bands}")
                 nir_band = self.bands[1]  # G
                 red_band = self.bands[0]   # R
                 logger.info("使用RGB波段: G (绿波段), R (红波段) 作为近似")
@@ -213,6 +224,8 @@ class EcologicalIndexCalculator:
             
             available_bands = self.bands.shape[0]
             logger.info(f"可用波段数: {available_bands}")
+            logger.info(f"波段数组形状: {self.bands.shape}")
+            logger.info(f"波段数组类型: {type(self.bands)}")
             
             if available_bands < 3:
                 logger.error(f"波段数不足，需要至少3个波段，当前只有{available_bands}个")
@@ -221,16 +234,25 @@ class EcologicalIndexCalculator:
             # 对于Sentinel-2数据，使用B3（绿波段）和B8A（近红外）
             if available_bands >= 8:
                 # Sentinel-2: B3 (绿波段), B8A (近红外)
+                logger.info(f"进入 >= 8 分支，available_bands = {available_bands}")
                 green_band = self.bands[2]  # B3
                 nir_band = self.bands[7]    # B8A
                 logger.info("使用Sentinel-2波段: B3 (绿波段), B8A (近红外)")
-            elif available_bands >= 4:
-                # Landsat-8: B3 (绿波段), B5 (近红外)
+            elif available_bands >= 5:
+                # Landsat-2: B3 (绿波段), B5 (近红外)
+                logger.info(f"进入 >= 5 分支，available_bands = {available_bands}")
                 green_band = self.bands[2]  # B3
                 nir_band = self.bands[4]    # B5
                 logger.info("使用Landsat-8波段: B3 (绿波段), B5 (近红外)")
+            elif available_bands == 4:
+                # 4波段数据，使用B2 (绿波段) 和 B4 (近红外) 或 B3 (红波段)
+                logger.info(f"进入 == 4 分支，available_bands = {available_bands}")
+                green_band = self.bands[1]  # B2 (绿波段)
+                nir_band = self.bands[3]    # B4 (近红外) 或使用B3作为替代
+                logger.info("使用4波段数据: B2 (绿波段), B4 (近红外)")
             elif available_bands == 3:
                 # RGB图像，使用G (绿波段) 和 R (红波段) 作为近似
+                logger.info(f"进入 == 3 分支，available_bands = {available_bands}")
                 green_band = self.bands[1]  # G
                 nir_band = self.bands[0]    # R
                 logger.info("使用RGB波段: G (绿波段), R (红波段) 作为近似")
@@ -355,13 +377,21 @@ class EcologicalIndexCalculator:
                 ndsi = (green_band - blue_band) / denominator
                 logger.info("使用RGB影像计算简化NDSI")
             else:
-                # 多光谱影像：使用绿波段(1)和中红外波段(4)
-                if not self._check_band_availability(5):
-                    logger.warning("需要至少5个波段来计算标准NDSI")
+                # 多光谱影像：根据可用波段数选择合适的波段
+                available_bands = self.bands.shape[0]
+                if available_bands >= 5:
+                    # 使用绿波段(1)和中红外波段(4)
+                    green_band = self.bands[1].astype(float)  # 绿波段
+                    swir_band = self.bands[4].astype(float)  # 中红外波段
+                    logger.info("使用标准NDSI计算: 绿波段(1)和中红外波段(4)")
+                elif available_bands == 4:
+                    # 4波段数据：使用绿波段(1)和红波段(2)作为替代
+                    green_band = self.bands[1].astype(float)  # 绿波段
+                    swir_band = self.bands[2].astype(float)  # 红波段作为替代
+                    logger.info("使用4波段数据计算简化NDSI: 绿波段(1)和红波段(2)")
+                else:
+                    logger.warning(f"波段数不足，无法计算NDSI，当前波段数: {available_bands}")
                     return None
-                
-                green_band = self.bands[1].astype(float)  # 绿波段
-                swir_band = self.bands[4].astype(float)  # 中红外波段
                 
                 denominator = green_band + swir_band
                 denominator[denominator == 0] = 1e-10

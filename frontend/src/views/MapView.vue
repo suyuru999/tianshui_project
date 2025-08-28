@@ -216,6 +216,9 @@ const handleBusinessFunctionClick = (func) => {
     router.push('/remote-sensing-analysis')
     console.log('func')
   }
+  if (func.name === '民众意见反馈') {
+    router.push('/feedback')
+  }
   // 可扩展其他功能跳转
 }
 
@@ -292,6 +295,7 @@ const toggleBusinessFunctions = () => {
   display: flex;
   flex-direction: column;
   box-shadow: 2px 0 8px rgba(0,0,0,0.1);
+  overflow-y: auto;
 }
 
 .sidebar-header {

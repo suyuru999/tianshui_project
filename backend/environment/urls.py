@@ -6,7 +6,8 @@ from .views import (
     # RSEIResultViewSet,
     ProcessingTaskViewSet,
     simple_test,
-    test_upload
+    test_upload,
+    CitizenFeedbackViewSet
 )
 # from .spatial_views import (
 #     wms_capabilities,
@@ -23,6 +24,7 @@ router.register(r'remote-sensing-images', RemoteSensingImageViewSet)
 # router.register(r'ecological-indices', EcologicalIndexViewSet)
 # router.register(r'rsei-results', RSEIResultViewSet)
 router.register(r'processing-tasks', ProcessingTaskViewSet)
+router.register(r'feedback', CitizenFeedbackViewSet)
 
 app_name = 'environment'
 

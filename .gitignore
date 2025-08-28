@@ -1,41 +1,220 @@
-# Logs
-# --------------------
-# 这些是通用规则，可以匹配项目内任何地方的日志文件，所以保留原样
+# Django
 *.log
+*.pot
+*.pyc
+__pycache__/
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.env
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Vue.js / Node.js
+node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
 lerna-debug.log*
+.pnpm-debug.log*
 
-# 如果有专门存放日志的文件夹，现在它在frontend里，所以要指明路径
-frontend/logs/
-backend/logs/
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
 
-# Dependencies, build artifacts, and local files
-# --------------------
-# 【关键】明确指定忽略 frontend 目录下的 node_modules 和 dist 文件夹
-frontend/node_modules/
-frontend/dist/
-frontend/dist-ssr/
-backend/*.sqlite3/
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
 
-# 忽略所有 .local 文件，比如 .env.local
-*.local
+# nyc test coverage
+.nyc_output
 
+# Grunt intermediate storage (https://gruntjs.com/creating-plugins#storing-task-files)
+.grunt
 
-# Editor directories and files
-# --------------------
-# 这些是针对整个项目的编辑器配置，通常放在根目录
-# 使用 / 开头可以确保只匹配根目录下的文件夹，是更好的实践
-/.vscode/*
-!/.vscode/extensions.json
-/.idea/
+# Bower dependency directory (https://bower.io/)
+bower_components
 
-# 这些是通用的系统和编辑器文件，保留原样即可
+# node-waf configuration
+.lock-wscript
+
+# Compiled binary addons (https://nodejs.org/api/addons.html)
+build/Release
+
+# Dependency directories
+jspm_packages/
+
+# TypeScript v1 declaration files
+typings/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Microbundle cache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# dotenv environment variable files
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# parcel-bundler cache (https://parceljs.org/)
+.cache
+.parcel-cache
+
+# Next.js build output
+.next
+out
+
+# Nuxt.js build / generate output
+.nuxt
+dist
+
+# Gatsby files
+.cache/
+public
+
+# Vuepress build output
+.vuepress/dist
+
+# Serverless directories
+.serverless/
+
+# FuseBox cache
+.fusebox/
+
+# DynamoDB Local files
+.dynamodb/
+
+# TernJS port file
+.tern-port
+
+# Stores VSCode versions used for testing VSCode extensions
+.vscode-test
+
+# yarn v2
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# 媒体文件
+media/
+uploads/
+user_uploads/
+
+# 日志文件
+logs/
+*.log
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+
+# 配置文件（包含敏感信息）
+config/local.py
+config/production.py
+.env.local
+.env.production
+
+# 备份文件
+*.bak
+*.backup
+*.old
+
+# 测试覆盖率报告
+htmlcov/
+.coverage
+coverage.xml
+
+# 构建输出
+build/
+dist/
+staticfiles/
+
+# 缓存文件
+.cache/
+__pycache__/
+*.pyc
+*.pyo
+
+# 虚拟环境
+venv/
+env/
+.venv/
+.env/
+
+# 依赖锁定文件（可选，根据需要取消注释）
+# package-lock.json
+# yarn.lock
+# Pipfile.lock

@@ -172,6 +172,22 @@ export const spatialService = {
   }
 }
 
+// 民众意见反馈服务
+export const feedbackService = {
+  // 提交反馈
+  create(data) {
+    return request.post(buildApiUrl(API_ENDPOINTS.FEEDBACK.CREATE), data)
+  },
+  // 获取反馈列表（可选：管理员查看）
+  getList(params = {}) {
+    return request.get(buildApiUrl(API_ENDPOINTS.FEEDBACK.LIST), params)
+  },
+  // 获取反馈详情
+  getDetail(id) {
+    return request.get(buildApiUrl(API_ENDPOINTS.FEEDBACK.DETAIL(id)))
+  }
+}
+
 // 导出所有服务
 export default {
   auth: authService,
@@ -179,4 +195,5 @@ export default {
   ecologicalIndices: ecologicalIndicesService,
   processingTask: processingTaskService,
   spatial: spatialService
+  , feedback: feedbackService
 }

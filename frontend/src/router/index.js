@@ -2,6 +2,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import MapView from '../views/MapView.vue'
 import RemoteSensingAnalysis from '../views/RemoteSensingAnalysis.vue'
+import CitizenFeedback from '../views/CitizenFeedback.vue'
 
 const routes = [
   {
@@ -14,6 +15,11 @@ const routes = [
     path: '/remote-sensing-analysis',
     name: 'RemoteSensingAnalysis',
     component: RemoteSensingAnalysis
+  },
+  {
+    path: '/feedback',
+    name: 'CitizenFeedback',
+    component: CitizenFeedback
   }
 ]
 

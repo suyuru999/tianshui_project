@@ -16,7 +16,8 @@ from .models import (
     RemoteSensingImage, 
     EcologicalIndex, 
     RSEIResult, 
-    ProcessingTask
+    ProcessingTask,
+    CitizenFeedback
 )
 from .serializers import (
     RemoteSensingImageSerializer,
@@ -25,7 +26,8 @@ from .serializers import (
     ProcessingTaskSerializer,
     RemoteSensingImageUploadSerializer,
     EcologicalIndexCalculationSerializer,
-    RSEICalculationSerializer
+    RSEICalculationSerializer,
+    CitizenFeedbackSerializer
 )
 from .tasks import calculate_ecological_indices, calculate_rsei_only
 
@@ -159,6 +161,19 @@ class ProcessingTaskViewSet(viewsets.ModelViewSet):
             'started_at': task.started_at,
             'completed_at': task.completed_at
         })
+
+
+class CitizenFeedbackViewSet(viewsets.ModelViewSet):
+    """民众意见反馈视图集"""
+    queryset = CitizenFeedback.objects.all()
+    serializer_class = CitizenFeedbackSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def perform_create(self, serializer):
+        if self.request.user.is_authenticated:
+            serializer.save(created_by=self.request.user)
+        else:
+            serializer.save(created_by=None)
 
 @api_view(['GET'])
 @permission_classes([AllowAny])

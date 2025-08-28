@@ -29,10 +29,10 @@
     </el-button>
     <div class="group-title-apple">图层选择</div>
     <el-radio-group v-model="localIndex" @change="onIndexChange" class="radio-group-apple">
-      <el-radio class="apple-radio" value="NDVI">绿化指数 (NDVI)</el-radio>
-      <el-radio class="apple-radio" value="LST">热度指数 (LST)</el-radio>
-      <el-radio class="apple-radio" value="NDWI">湿度指数</el-radio>
-      <el-radio class="apple-radio" value="NDBSI">干度指数</el-radio>
+      <el-radio class="apple-radio" value="ndvi">绿化指数 (NDVI)</el-radio>
+      <el-radio class="apple-radio" value="heat">热度指数 (LST)</el-radio>
+      <el-radio class="apple-radio" value="ndwi">湿度指数 (NDWI)</el-radio>
+      <el-radio class="apple-radio" value="dryness">干度指数 (NDBSI)</el-radio>
     </el-radio-group>
   </div>
 </template>

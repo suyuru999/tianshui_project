@@ -3,7 +3,8 @@ from .models import (
     RemoteSensingImage, 
     EcologicalIndex, 
     RSEIResult, 
-    ProcessingTask
+    ProcessingTask,
+    CitizenFeedback
 )
 from users.serializers import UserSerializer
 
@@ -122,9 +123,9 @@ class RemoteSensingImageUploadSerializer(serializers.ModelSerializer):
                 f"不支持的文件格式。支持的格式: {', '.join(allowed_extensions)}"
             )
         
-        # 检查文件大小（500MB限制）
-        if value.size > 500 * 1024 * 1024:
-            raise serializers.ValidationError("文件大小不能超过500MB")
+        # 检查文件大小（900MB限制）
+        if value.size > 900 * 1024 * 1024:
+            raise serializers.ValidationError("文件大小不能超过900MB")
         
         return value
     
@@ -187,3 +188,14 @@ class EcologicalIndexStatisticsSerializer(serializers.Serializer):
     bad_percentage = serializers.FloatField()
     mean_value = serializers.FloatField()
     std_value = serializers.FloatField() 
+
+
+class CitizenFeedbackSerializer(serializers.ModelSerializer):
+    """民众意见反馈序列化器"""
+    created_by = UserSerializer(read_only=True)
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+
+    class Meta:
+        model = CitizenFeedback
+        fields = ['id', 'category', 'category_display', 'title', 'content', 'contact', 'created_by', 'created_at']
+        read_only_fields = ['id', 'created_by', 'created_at']

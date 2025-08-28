@@ -25,7 +25,7 @@
         <div v-if="status === 'analyzing'" class="analysis-progress">
           <h3 class="progress-title">正在分析遥感影像...</h3>
           <ProgressBar
-            v-model="analysisProgress"
+            :value="analysisProgress"
             title="分析进度"
             type="primary"
             :show-info="true"
@@ -129,10 +129,10 @@ function handleFileChange(file) {
       return;
     }
     
-    // 验证文件大小（500MB限制）
-    const maxSize = 500 * 1024 * 1024;
+    // 验证文件大小（900MB限制）
+    const maxSize = 900 * 1024 * 1024;
     if (file.size > maxSize) {
-      messageStore.error('文件大小不能超过500MB');
+      messageStore.error('文件大小不能超过900MB');
       return;
     }
     
@@ -159,6 +159,8 @@ async function handleStartAnalysis() {
     status.value = 'analyzing';
     analysisProgress.value = 0;
     isPaused.value = false;
+    
+    console.log('开始分析，初始进度:', analysisProgress.value); // 添加调试日志
     
     // 模拟分析步骤
     const analysisSteps = [
@@ -323,6 +325,8 @@ async function simulateAnalysisProgress(steps) {
     analysisProgress.value = step.progress;
     currentStep.value = step.step;
     stepDetail.value = step.detail;
+    
+    console.log(`进度更新: ${step.progress}%`); // 添加调试日志
     
     // 模拟处理时间
     await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));

@@ -3,4 +3,5 @@
 python manage.py runserver --settings=tianshuipy.settings_dev
 http://127.0.0.1:8000/admin/
 
- q 
+ celery启动
+ celery -A tianshuipy worker --loglevel=INFO -P eventlet

@@ -67,6 +67,13 @@ export const API_ENDPOINTS = {
     SPATIAL_LAYERS: '/environment/spatial/layers/',
     PUBLISH_TO_GEOSERVER: '/environment/spatial/publish/',
     GEOSERVER_STATUS: '/environment/spatial/geoserver/status/',
+  },
+
+  // 民众意见反馈
+  FEEDBACK: {
+    CREATE: '/environment/feedback/',
+    LIST: '/environment/feedback/',
+    DETAIL: (id) => `/environment/feedback/${id}/`
   }
 }
 
