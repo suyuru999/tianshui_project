@@ -49,6 +49,10 @@ export const API_ENDPOINTS = {
     DETAIL: (id) => `/environment/ecological-indices/${id}/`,
     CALCULATE: '/environment/ecological-indices/calculate/',
     RSEI_CALCULATE: '/environment/rsei-results/calculate/',
+    // 新增：生态环境结构指数计算
+    STRUCTURE_INDICES: '/environment/ecological-structure-indices/',
+    // 新增：生态环境胁迫指数计算
+    STRESS_INDICES: '/environment/ecological-stress-indices/',
   },
   
   // 处理任务

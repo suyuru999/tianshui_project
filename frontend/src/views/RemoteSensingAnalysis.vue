@@ -455,7 +455,9 @@ function handleIndexChange(index) {
   gap: 32px;
   padding: 48px 5vw;
   min-height: 100vh;
+  max-height: 100vh;
   background: linear-gradient(135deg, #f8fafc 0%, #e9eff5 100%);
+  overflow: hidden;
 }
 
 .sidebar-apple {
@@ -469,6 +471,28 @@ function handleIndexChange(index) {
   flex-direction: column;
   align-items: stretch;
   transition: box-shadow 0.2s;
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+/* 侧边栏滚动条样式 */
+.sidebar-apple::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-apple::-webkit-scrollbar-track {
+  background: rgba(241, 245, 249, 0.5);
+  border-radius: 3px;
+}
+
+.sidebar-apple::-webkit-scrollbar-thumb {
+  background: rgba(203, 213, 225, 0.8);
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+.sidebar-apple::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.9);
 }
 
 .result-area-apple {
@@ -482,6 +506,28 @@ function handleIndexChange(index) {
   align-items: center;
   justify-content: center;
   transition: box-shadow 0.2s;
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+/* 结果区域滚动条样式 */
+.result-area-apple::-webkit-scrollbar {
+  width: 6px;
+}
+
+.result-area-apple::-webkit-scrollbar-track {
+  background: rgba(241, 245, 249, 0.5);
+  border-radius: 3px;
+}
+
+.result-area-apple::-webkit-scrollbar-thumb {
+  background: rgba(203, 213, 225, 0.8);
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+.result-area-apple::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.9);
 }
 
 /* 分析进度样式 */
@@ -525,6 +571,8 @@ function handleIndexChange(index) {
     flex-direction: column;
     gap: 24px;
     padding: 24px 2vw;
+    max-height: none;
+    overflow: visible;
   }
   
   .sidebar-apple, .result-area-apple {
@@ -532,6 +580,8 @@ function handleIndexChange(index) {
     min-width: unset;
     border-radius: 20px;
     padding: 24px 12px;
+    max-height: none;
+    overflow-y: visible;
   }
   
   .analysis-progress {

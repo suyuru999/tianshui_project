@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import MapView from '../views/MapView.vue'
 import RemoteSensingAnalysis from '../views/RemoteSensingAnalysis.vue'
 import CitizenFeedback from '../views/CitizenFeedback.vue'
+import EcologicalIndex from '../views/EcologicalIndex.vue'
 
 const routes = [
   {
@@ -20,6 +21,11 @@ const routes = [
     path: '/feedback',
     name: 'CitizenFeedback',
     component: CitizenFeedback
+  },
+  {
+    path: '/ecological-index',
+    name: 'EcologicalIndex',
+    component: EcologicalIndex
   }
 ]
 

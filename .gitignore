@@ -179,7 +179,6 @@ Thumbs.db
 # 临时文件
 tmp/
 temp/
-*.tmp
 
 # 配置文件（包含敏感信息）
 config/local.py
@@ -197,6 +196,15 @@ htmlcov/
 .coverage
 coverage.xml
 
+# 测试文件（已删除，但防止重新添加）
+*test*.py
+*test*.js
+*test*.md
+*test*.zip
+*debug*.py
+*debug*.md
+*diagnose*.py
+
 # 构建输出
 build/
 /frontend/dist/
@@ -213,6 +221,16 @@ venv/
 env/
 .venv/
 .env/
+
+# 临时处理文件
+/backend/landuse_analysis/tmp/
+/backend/media/landuse_analysis/tmp/
+*.tmp
+
+# 测试数据文件
+*landuse_ecological*.zip
+*landuse_example*.tif
+*landuse_example*.zip
 
 # 依赖锁定文件（可选，根据需要取消注释）
 # package-lock.json

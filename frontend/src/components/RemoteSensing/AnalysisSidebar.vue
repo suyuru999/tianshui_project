@@ -34,6 +34,7 @@
       <el-radio class="apple-radio" value="ndwi">湿度指数 (NDWI)</el-radio>
       <el-radio class="apple-radio" value="dryness">干度指数 (NDBSI)</el-radio>
     </el-radio-group>
+  
   </div>
 </template>
 
@@ -78,7 +79,30 @@ function onIndexChange(val) {
   flex-direction: column;
   gap: 32px;
   background: transparent;
+  height: 100%;
+  overflow-y: auto;
 }
+
+/* 自定义滚动条样式 */
+.sidebar-panel-apple::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-panel-apple::-webkit-scrollbar-track {
+  background: rgba(241, 245, 249, 0.3);
+  border-radius: 3px;
+}
+
+.sidebar-panel-apple::-webkit-scrollbar-thumb {
+  background: rgba(203, 213, 225, 0.6);
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+.sidebar-panel-apple::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.8);
+}
+
 .sidebar-title-apple {
   display: flex;
   align-items: center;
@@ -183,6 +207,8 @@ function onIndexChange(val) {
   margin-bottom: 4px;
   transition: background 0.2s, color 0.2s;
 }
+ 
+
 .apple-radio.is-checked {
   background: linear-gradient(90deg, #5e9cff 0%, #aee2ff 100%);
   color: #fff;

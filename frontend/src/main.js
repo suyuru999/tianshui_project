@@ -9,6 +9,10 @@ import 'element-plus/theme-chalk/dark/css-vars.css'
 import App from './App.vue'
 import router from './router'
 
+// OpenLayers 配置
+import { useGeographic } from 'ol/proj'
+useGeographic()
+
 const app = createApp(App)
 const pinia = createPinia()
 

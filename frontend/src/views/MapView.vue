@@ -216,6 +216,9 @@ const handleBusinessFunctionClick = (func) => {
     router.push('/remote-sensing-analysis')
     console.log('func')
   }
+  if (func.name === '生态环境指数计算') {
+    router.push('/ecological-index')
+  }
   if (func.name === '民众意见反馈') {
     router.push('/feedback')
   }

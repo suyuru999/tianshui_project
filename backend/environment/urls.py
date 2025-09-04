@@ -5,9 +5,9 @@ from .views import (
     # EcologicalIndexViewSet,
     # RSEIResultViewSet,
     ProcessingTaskViewSet,
-    simple_test,
-    test_upload,
-    CitizenFeedbackViewSet
+    CitizenFeedbackViewSet,
+    calculate_ecological_structure_indices,
+    calculate_ecological_stress_indices
 )
 # from .spatial_views import (
 #     wms_capabilities,
@@ -31,9 +31,10 @@ app_name = 'environment'
 urlpatterns = [
     path('', include(router.urls)),  # 启用路由器
     
-    # 测试路由
-    path('simple/', simple_test, name='simple_test'),
-    path('test-upload/', test_upload, name='test_upload'),
+    
+    # 生态环境指数计算API
+    path('ecological-structure-indices/', calculate_ecological_structure_indices, name='calculate_ecological_structure_indices'),
+    path('ecological-stress-indices/', calculate_ecological_stress_indices, name='calculate_ecological_stress_indices'),
     
     # 暂时注释掉所有地理空间服务路由
     # path('spatial/wms/capabilities/', wms_capabilities, name='wms_capabilities'),

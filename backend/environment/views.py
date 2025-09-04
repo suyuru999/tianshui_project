@@ -30,6 +30,9 @@ from .serializers import (
     CitizenFeedbackSerializer
 )
 from .tasks import calculate_ecological_indices, calculate_rsei_only
+from .gdal_land_use_analysis import LandUseAnalyzer  # 导入土地利用分析器
+from .vector_rasterize import rasterize_shapefile_to_tiff
+from .file_utils import safe_file_cleanup, get_cleanup_files
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +165,6 @@ class ProcessingTaskViewSet(viewsets.ModelViewSet):
             'completed_at': task.completed_at
         })
 
-
 class CitizenFeedbackViewSet(viewsets.ModelViewSet):
     """民众意见反馈视图集"""
     queryset = CitizenFeedback.objects.all()
@@ -175,43 +177,332 @@ class CitizenFeedbackViewSet(viewsets.ModelViewSet):
         else:
             serializer.save(created_by=None)
 
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def simple_test(request):
-    """最简单的测试视图"""
-    return Response({'message': 'Simple test works!'})
-
 @api_view(['POST'])
 @permission_classes([AllowAny])
-def test_upload(request):
-    """测试上传视图，用于调试"""
+def calculate_ecological_structure_indices(request):
+    """
+    计算生态环境结构指数
+    包括：破碎度指数、内聚力指数、多样性指数、脆弱度指数
+    """
     try:
-        # 打印请求信息
-        print("请求方法:", request.method)
-        print("请求内容类型:", request.content_type)
-        print("请求数据:", request.data)
-        print("请求文件:", request.FILES)
+        # 获取上传的土地利用数据文件
+        if 'landuse_file' not in request.FILES:
+            return Response({
+                'error': '请上传土地利用数据文件'
+            }, status=400)
         
-        # 检查是否有文件
-        if 'file' in request.FILES:
-            file_obj = request.FILES['file']
-            print("文件信息:", {
-                'name': file_obj.name,
-                'size': file_obj.size,
-                'content_type': file_obj.content_type
+        landuse_file = request.FILES['landuse_file']
+        
+        # 保存文件到临时位置
+        file_path = default_storage.save(
+            f'landuse_analysis/{landuse_file.name}',
+            ContentFile(landuse_file.read())
+        )
+        try:
+            # 转换为绝对路径
+            abs_file_path = default_storage.path(file_path)
+            
+            # 如果是矢量（.zip/.shp），先栅格化为整型GeoTIFF
+            raster_input = abs_file_path
+            lower = file_path.lower()
+            if lower.endswith('.zip') or lower.endswith('.shp'):
+                # 选择分类字段：前端可传入 landuse_attr，否则尝试常见字段
+                attr = request.data.get('landuse_attr') or 'class'
+                try_fields = [attr, 'landuse', 'code', 'class_id']
+                tmp_tif = os.path.splitext(abs_file_path)[0] + '.tif'
+                last_err = None
+                for field in try_fields:
+                    try:
+                        rasterize_shapefile_to_tiff(abs_file_path, tmp_tif, attribute_field=field)
+                        raster_input = tmp_tif
+                        break
+                    except Exception as e:
+                        last_err = e
+                        continue
+                else:
+                    raise last_err or ValueError('栅格化失败，未找到有效属性字段')
+
+            # 创建土地利用分析器
+            analyzer = LandUseAnalyzer(raster_input)
+            
+            # 加载土地利用数据
+            if not analyzer.load_landuse_data():
+                return Response({
+                    'error': '土地利用数据加载失败'
+                }, status=400)
+            
+            # 计算各项生态环境结构指数
+            results = {}
+            
+            # 1. 计算破碎度指数
+            fragmentation_result = analyzer.calculate_fragmentation_index()
+            if fragmentation_result:
+                results['fragmentation'] = fragmentation_result
+            else:
+                results['fragmentation'] = {'error': '破碎度指数计算失败'}
+            
+            # 2. 计算内聚力指数
+            cohesion_result = analyzer.calculate_cohesion_index()
+            if cohesion_result:
+                results['cohesion'] = cohesion_result
+            else:
+                results['cohesion'] = {'error': '内聚力指数计算失败'}
+            
+            # 3. 计算多样性指数
+            diversity_result = analyzer.calculate_diversity_index()
+            if diversity_result:
+                results['diversity'] = diversity_result
+            else:
+                results['diversity'] = {'error': '多样性指数计算失败'}
+            
+            # 4. 计算脆弱度指数
+            fragility_result = analyzer.calculate_fragility_index()
+            if fragility_result:
+                results['fragility'] = fragility_result
+            else:
+                results['fragility'] = {'error': '脆弱度指数计算失败'}
+            
+            # 清理临时文件
+            abs_file_path = default_storage.path(file_path)
+            if os.path.exists(abs_file_path):
+                try:
+                    os.remove(abs_file_path)
+                except PermissionError:
+                    logger.warning(f"无法删除文件 {abs_file_path}，可能仍被占用")
+            # 若生成了临时tif也清理
+            tif_candidate = os.path.splitext(abs_file_path)[0] + '.tif'
+            if os.path.exists(tif_candidate):
+                try:
+                    os.remove(tif_candidate)
+                except PermissionError:
+                    logger.warning(f"无法删除文件 {tif_candidate}，可能仍被占用")
+            
+            return Response({
+                'message': '生态环境结构指数计算完成',
+                'results': results,
+                'summary': {
+                    'fragmentation_index': results.get('fragmentation', {}).get('overall_fragmentation', 0),
+                    'cohesion_index': results.get('cohesion', {}).get('cohesion_index', 0),
+                    'shannon_diversity': results.get('diversity', {}).get('shannon_diversity', 0),
+                    'fragility_index': results.get('fragility', {}).get('fragility_index', 0)
+                }
             })
-        
-        # 返回成功响应
-        return Response({
-            'message': '测试上传成功',
-            'data': request.data,
-            'files': list(request.FILES.keys()) if request.FILES else []
-        })
+            
+        except Exception as e:
+            # 清理临时文件
+            abs_file_path = default_storage.path(file_path)
+            if os.path.exists(abs_file_path):
+                try:
+
+                    os.remove(abs_file_path)
+
+                except PermissionError:
+
+                    logger.warning(f"无法删除文件 {abs_file_path}，可能仍被占用")
+            tif_candidate = os.path.splitext(abs_file_path)[0] + '.tif'
+            if os.path.exists(tif_candidate):
+                try:
+
+                    os.remove(tif_candidate)
+
+                except PermissionError:
+
+                    logger.warning(f"无法删除文件 {tif_candidate}，可能仍被占用")
+            raise e
+            
     except Exception as e:
-        print("错误:", str(e))
+        # 关闭分析器资源
+        if 'analyzer' in locals():
+            analyzer.close()
+        
+        # 清理临时文件
+        try:
+            abs_file_path = default_storage.path(file_path)
+            if os.path.exists(abs_file_path):
+                try:
+                    os.remove(abs_file_path)
+                except PermissionError:
+                    logger.warning(f"无法删除文件 {abs_file_path}，可能仍被占用")
+            tif_candidate = os.path.splitext(abs_file_path)[0] + '.tif'
+            if os.path.exists(tif_candidate):
+                try:
+                    os.remove(tif_candidate)
+                except PermissionError:
+                    logger.warning(f"无法删除文件 {tif_candidate}，可能仍被占用")
+        except Exception as cleanup_error:
+            logger.warning(f"清理临时文件时出错: {cleanup_error}")
+        
+        logger.error(f"计算生态环境结构指数失败: {e}")
         import traceback
         traceback.print_exc()
         return Response({
-            'error': str(e),
+            'error': f'计算失败: {str(e)}',
+            'traceback': traceback.format_exc()
+        }, status=500)
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def calculate_ecological_stress_indices(request):
+    """
+    计算生态环境胁迫指数
+    包括：土壤侵蚀指数、未利用地面积比例、耕地建设用地面积比例、土地退化指数
+    """
+    try:
+        # 获取上传的土地利用数据文件
+        if 'landuse_file' not in request.FILES:
+            return Response({
+                'error': '请上传土地利用数据文件'
+            }, status=400)
+        
+        landuse_file = request.FILES['landuse_file']
+        
+        # 保存文件到临时位置
+        file_path = default_storage.save(
+            f'landuse_analysis/{landuse_file.name}',
+            ContentFile(landuse_file.read())
+        )
+        try:
+            # 转换为绝对路径
+            abs_file_path = default_storage.path(file_path)
+            
+            # 如果是矢量（.zip/.shp），先栅格化为整型GeoTIFF
+            raster_input = abs_file_path
+            lower = file_path.lower()
+            if lower.endswith('.zip') or lower.endswith('.shp'):
+                attr = request.data.get('landuse_attr') or 'class'
+                try_fields = [attr, 'landuse', 'code', 'class_id']
+                tmp_tif = os.path.splitext(abs_file_path)[0] + '.tif'
+                last_err = None
+                for field in try_fields:
+                    try:
+                        rasterize_shapefile_to_tiff(abs_file_path, tmp_tif, attribute_field=field)
+                        raster_input = tmp_tif
+                        break
+                    except Exception as e:
+                        last_err = e
+                        continue
+                else:
+                    raise last_err or ValueError('栅格化失败，未找到有效属性字段')
+
+            # 创建土地利用分析器
+            analyzer = LandUseAnalyzer(raster_input)
+            
+            # 加载土地利用数据
+            if not analyzer.load_landuse_data():
+                return Response({
+                    'error': '土地利用数据加载失败'
+                }, status=400)
+            
+            # 计算各项生态环境胁迫指数
+            results = {}
+            
+            # 1. 计算土壤侵蚀指数
+            soil_erosion_result = analyzer.calculate_soil_erosion_index()
+            if soil_erosion_result:
+                results['soil_erosion'] = soil_erosion_result
+            else:
+                results['soil_erosion'] = {'error': '土壤侵蚀指数计算失败'}
+            
+            # 2. 计算未利用地面积比例
+            unused_land_result = analyzer.calculate_unused_land_ratio()
+            if unused_land_result:
+                results['unused_land'] = unused_land_result
+            else:
+                results['unused_land'] = {'error': '未利用地面积比例计算失败'}
+            
+            # 3. 计算耕地建设用地面积比例
+            cultivated_construction_result = analyzer.calculate_development_ratio()
+            if cultivated_construction_result:
+                results['cultivated_construction'] = cultivated_construction_result
+            else:
+                results['cultivated_construction'] = {'error': '耕地建设用地面积比例计算失败'}
+            
+            # 4. 计算土地退化指数
+            land_degradation_result = analyzer.calculate_land_degradation_index()
+            if land_degradation_result:
+                results['land_degradation'] = land_degradation_result
+            else:
+                results['land_degradation'] = {'error': '土地退化指数计算失败'}
+            
+            # 清理临时文件
+            abs_file_path = default_storage.path(file_path)
+            if os.path.exists(abs_file_path):
+                try:
+
+                    os.remove(abs_file_path)
+
+                except PermissionError:
+
+                    logger.warning(f"无法删除文件 {abs_file_path}，可能仍被占用")
+            tif_candidate = os.path.splitext(abs_file_path)[0] + '.tif'
+            if os.path.exists(tif_candidate):
+                try:
+
+                    os.remove(tif_candidate)
+
+                except PermissionError:
+
+                    logger.warning(f"无法删除文件 {tif_candidate}，可能仍被占用")
+            
+            return Response({
+                'message': '生态环境胁迫指数计算完成',
+                'results': results,
+                'summary': {
+                    'soil_erosion_index': results.get('soil_erosion', {}).get('soil_erosion_index', 0),
+                    'unused_land_proportion': results.get('unused_land', {}).get('unused_land_ratio', 0),
+                    'cultivated_construction_proportion': results.get('cultivated_construction', {}).get('development_ratio', 0),
+                    'land_degradation_index': results.get('land_degradation', {}).get('land_degradation_index', 0)
+                }
+            })
+            
+        except Exception as e:
+            # 清理临时文件
+            abs_file_path = default_storage.path(file_path)
+            if os.path.exists(abs_file_path):
+                try:
+
+                    os.remove(abs_file_path)
+
+                except PermissionError:
+
+                    logger.warning(f"无法删除文件 {abs_file_path}，可能仍被占用")
+            tif_candidate = os.path.splitext(abs_file_path)[0] + '.tif'
+            if os.path.exists(tif_candidate):
+                try:
+
+                    os.remove(tif_candidate)
+
+                except PermissionError:
+
+                    logger.warning(f"无法删除文件 {tif_candidate}，可能仍被占用")
+            raise e
+            
+    except Exception as e:
+        # 关闭分析器资源
+        if 'analyzer' in locals():
+            analyzer.close()
+        
+        # 清理临时文件
+        try:
+            abs_file_path = default_storage.path(file_path)
+            if os.path.exists(abs_file_path):
+                try:
+                    os.remove(abs_file_path)
+                except PermissionError:
+                    logger.warning(f"无法删除文件 {abs_file_path}，可能仍被占用")
+            tif_candidate = os.path.splitext(abs_file_path)[0] + '.tif'
+            if os.path.exists(tif_candidate):
+                try:
+                    os.remove(tif_candidate)
+                except PermissionError:
+                    logger.warning(f"无法删除文件 {tif_candidate}，可能仍被占用")
+        except Exception as cleanup_error:
+            logger.warning(f"清理临时文件时出错: {cleanup_error}")
+        
+        logger.error(f"计算生态环境胁迫指数失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return Response({
+            'error': f'计算失败: {str(e)}',
             'traceback': traceback.format_exc()
         }, status=500) 
