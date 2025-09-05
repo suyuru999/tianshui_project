@@ -201,9 +201,27 @@ coverage.xml
 *test*.js
 *test*.md
 *test*.zip
+*test*.csv
+*test*.xlsx
 *debug*.py
 *debug*.md
+*debug*.csv
 *diagnose*.py
+
+# 测试数据文件
+*test_data*
+*test_climate_data*
+*debug_test*
+*test_wrong*
+*climate_data_anomaly*
+*climate_data_extreme*
+*climate_data_header_only*
+*climate_data_empty*
+
+# 重复的测试文件（保留示例文件）
+climate_data_2024_*.csv
+!climate_data_2024.csv
+!sample_climate_data.csv
 
 # 构建输出
 build/
@@ -236,3 +254,46 @@ env/
 # package-lock.json
 # yarn.lock
 # Pipfile.lock
+
+# 敏感信息文件
+*密码*.txt
+*password*.txt
+*secret*.txt
+*admin*.txt
+超级管理员账户密码.txt
+
+# 临时Shapefile文件
+*.dbf
+*.prj
+*.shp
+*.shx
+*.shp.xml
+
+# 临时处理文件
+/backend/landuse_analysis/tmp/
+/backend/media/landuse_analysis/tmp/
+/backend/media/thumbnails/
+/backend/media/visualizations/
+
+# 用户上传的临时文件
+/backend/media/climate_data/*_*
+!/backend/media/climate_data/climate_data_2024.csv
+!/backend/media/climate_data/sample_climate_data.csv
+
+# 生态指数临时文件
+/backend/media/ecological_indices/*/
+
+# 遥感数据临时文件
+/backend/media/remote_sensing/*.tif
+/backend/media/remote_sensing/stacked_image*.tif
+
+# 文档草稿
+*_DRAFT.md
+*_TODO.md
+*_TEMP.md
+DATA_VALIDATION_IMPROVEMENTS.md
+
+# 开发环境文件
+.env.development
+.env.test
+.env.staging

@@ -200,7 +200,7 @@ const businessFunctions = reactive([
   },
   {
     id: 4,
-    name: '气候环境监测图表',
+    name: '气候环境监测统计',
     icon: '📈'
   },
   {
@@ -218,6 +218,9 @@ const handleBusinessFunctionClick = (func) => {
   }
   if (func.name === '生态环境指数计算') {
     router.push('/ecological-index')
+  }
+  if (func.name === '气候环境监测统计') {
+    router.push('/climate-monitoring')
   }
   if (func.name === '民众意见反馈') {
     router.push('/feedback')

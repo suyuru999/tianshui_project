@@ -15,13 +15,13 @@ export default defineConfig({
     proxy: {
       // 代理API请求到Django后端
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
       },
       // 代理媒体文件
       '/media': {
-        target: 'http://127.0.0.1:8000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
       }

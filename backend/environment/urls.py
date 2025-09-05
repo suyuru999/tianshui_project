@@ -6,8 +6,12 @@ from .views import (
     # RSEIResultViewSet,
     ProcessingTaskViewSet,
     CitizenFeedbackViewSet,
+    ClimateDataFileViewSet,
     calculate_ecological_structure_indices,
-    calculate_ecological_stress_indices
+    calculate_ecological_stress_indices,
+    upload_climate_data,
+    analyze_climate_data_api,
+    get_climate_analysis_results
 )
 # from .spatial_views import (
 #     wms_capabilities,
@@ -25,6 +29,7 @@ router.register(r'remote-sensing-images', RemoteSensingImageViewSet)
 # router.register(r'rsei-results', RSEIResultViewSet)
 router.register(r'processing-tasks', ProcessingTaskViewSet)
 router.register(r'feedback', CitizenFeedbackViewSet)
+router.register(r'climate-data-files', ClimateDataFileViewSet)
 
 app_name = 'environment'
 
@@ -35,6 +40,11 @@ urlpatterns = [
     # 生态环境指数计算API
     path('ecological-structure-indices/', calculate_ecological_structure_indices, name='calculate_ecological_structure_indices'),
     path('ecological-stress-indices/', calculate_ecological_stress_indices, name='calculate_ecological_stress_indices'),
+    
+    # 气候监测API
+    path('climate-monitoring/upload/', upload_climate_data, name='upload_climate_data'),
+    path('climate-monitoring/analyze/', analyze_climate_data_api, name='analyze_climate_data'),
+    path('climate-monitoring/results/<uuid:task_id>/', get_climate_analysis_results, name='get_climate_analysis_results'),
     
     # 暂时注释掉所有地理空间服务路由
     # path('spatial/wms/capabilities/', wms_capabilities, name='wms_capabilities'),

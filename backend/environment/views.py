@@ -17,7 +17,9 @@ from .models import (
     EcologicalIndex, 
     RSEIResult, 
     ProcessingTask,
-    CitizenFeedback
+    CitizenFeedback,
+    ClimateDataFile,
+    ClimateAnalysisResult
 )
 from .serializers import (
     RemoteSensingImageSerializer,
@@ -27,7 +29,11 @@ from .serializers import (
     RemoteSensingImageUploadSerializer,
     EcologicalIndexCalculationSerializer,
     RSEICalculationSerializer,
-    CitizenFeedbackSerializer
+    CitizenFeedbackSerializer,
+    ClimateDataFileSerializer,
+    ClimateDataFileUploadSerializer,
+    ClimateAnalysisResultSerializer,
+    ClimateAnalysisRequestSerializer
 )
 from .tasks import calculate_ecological_indices, calculate_rsei_only
 from .gdal_land_use_analysis import LandUseAnalyzer  # 导入土地利用分析器
@@ -505,4 +511,441 @@ def calculate_ecological_stress_indices(request):
         return Response({
             'error': f'计算失败: {str(e)}',
             'traceback': traceback.format_exc()
+        }, status=500)
+
+
+# 气候监测相关视图
+class ClimateDataFileViewSet(viewsets.ModelViewSet):
+    """气候数据文件视图集"""
+    queryset = ClimateDataFile.objects.all()
+    serializer_class = ClimateDataFileSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    permission_classes = [permissions.AllowAny]
+    
+    def get_serializer_class(self):
+        """根据操作选择序列化器"""
+        if self.action == 'create':
+            return ClimateDataFileUploadSerializer
+        return ClimateDataFileSerializer
+    
+    def perform_create(self, serializer):
+        """创建时设置上传用户"""
+        if self.request.user.is_authenticated:
+            serializer.save(uploaded_by=self.request.user)
+        else:
+            serializer.save(uploaded_by=None)
+    
+    @action(detail=True, methods=['post'])
+    def analyze(self, request, pk=None):
+        """开始气候数据分析"""
+        try:
+            from .climate_analysis import analyze_climate_data
+            from .tasks import analyze_climate_data_task
+            
+            data_file = self.get_object()
+            
+            # 验证文件状态
+            if data_file.status != 'uploaded':
+                return Response({
+                    'error': f'文件状态不正确，当前状态: {data_file.get_status_display()}'
+                }, status=400)
+            
+            # 获取分析类型
+            analysis_type = request.data.get('analysis_type', 'comprehensive')
+            
+            # 更新文件状态
+            data_file.status = 'processing'
+            data_file.save()
+            
+            # 创建处理任务
+            task = ProcessingTask.objects.create(
+                task_type=f'气候数据分析 - {analysis_type}',
+                status='pending',
+                created_by=request.user if request.user.is_authenticated else None
+            )
+            
+            # 启动异步分析任务
+            # 确保参数类型正确
+            file_id_str = str(data_file.id)
+            task_id_str = str(task.id)
+            analyze_climate_data_task.delay(file_id_str, task_id_str, analysis_type)
+            
+            return Response({
+                'success': True,
+                'message': '分析任务已启动',
+                'task_id': task.id,
+                'file_id': data_file.id
+            })
+            
+        except Exception as e:
+            logger.error(f"启动气候数据分析失败: {str(e)}")
+            return Response({
+                'error': f'启动分析失败: {str(e)}'
+            }, status=500)
+    
+    @action(detail=True, methods=['get'])
+    def results(self, request, pk=None):
+        """获取分析结果"""
+        try:
+            data_file = self.get_object()
+            results = ClimateAnalysisResult.objects.filter(data_file=data_file).order_by('-created_at')
+            
+            if not results.exists():
+                return Response({
+                    'error': '暂无分析结果'
+                }, status=404)
+            
+            latest_result = results.first()
+            serializer = ClimateAnalysisResultSerializer(latest_result)
+            
+            return Response({
+                'success': True,
+                'data': serializer.data
+            })
+            
+        except Exception as e:
+            logger.error(f"获取分析结果失败: {str(e)}")
+            return Response({
+                'error': f'获取结果失败: {str(e)}'
+            }, status=500)
+
+
+def validate_climate_file(file_obj):
+    """验证气候数据文件"""
+    errors = []
+    
+    # 1. 检查文件是否存在
+    if not file_obj:
+        errors.append('文件对象不存在')
+        return errors
+    
+    # 2. 检查文件大小（限制为50MB）
+    max_size = 50 * 1024 * 1024  # 50MB
+    if file_obj.size > max_size:
+        errors.append(f'文件大小不能超过50MB，当前大小: {file_obj.size / (1024*1024):.2f}MB')
+    
+    # 3. 检查文件是否为空
+    if file_obj.size == 0:
+        errors.append('文件不能为空')
+    
+    # 4. 检查文件类型
+    file_name = file_obj.name.lower()
+    if not file_name.endswith(('.csv', '.xlsx', '.xls')):
+        errors.append('只支持CSV和Excel文件格式(.csv, .xlsx, .xls)')
+    
+    # 5. 检查文件名
+    if not file_name or file_name.strip() == '':
+        errors.append('文件名不能为空')
+    
+    # 6. 检查文件名长度
+    if len(file_name) > 255:
+        errors.append('文件名过长，不能超过255个字符')
+    
+    return errors
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def upload_climate_data(request):
+    """上传气候数据文件"""
+    try:
+        # 验证请求数据
+        if not request.data:
+            return Response({
+                'error': '请求数据为空'
+            }, status=400)
+        
+        # 验证文件是否存在
+        if 'file' not in request.FILES:
+            return Response({
+                'error': '没有找到文件'
+            }, status=400)
+        
+        file_obj = request.FILES['file']
+        
+        # 验证文件
+        file_errors = validate_climate_file(file_obj)
+        if file_errors:
+            return Response({
+                'error': '文件验证失败',
+                'details': file_errors
+            }, status=400)
+        
+        # 验证请求数据
+        required_fields = ['name']
+        for field in required_fields:
+            if field not in request.data or not request.data[field]:
+                return Response({
+                    'error': f'缺少必需字段: {field}'
+                }, status=400)
+        
+        # 验证字段长度
+        if len(request.data['name']) > 255:
+            return Response({
+                'error': '名称过长，不能超过255个字符'
+            }, status=400)
+        
+        # 序列化数据
+        serializer = ClimateDataFileUploadSerializer(data=request.data)
+        if serializer.is_valid():
+            # 确定文件类型
+            file_name = file_obj.name.lower()
+            if file_name.endswith('.csv'):
+                file_type = 'csv'
+            elif file_name.endswith(('.xlsx', '.xls')):
+                file_type = 'xlsx'
+            else:
+                return Response({
+                    'error': '不支持的文件格式'
+                }, status=400)
+            
+            # 创建文件记录
+            try:
+                data_file = ClimateDataFile.objects.create(
+                    name=serializer.validated_data['name'],
+                    file=file_obj,
+                    file_type=file_type,
+                    description=serializer.validated_data.get('description', ''),
+                    uploaded_by=request.user if request.user.is_authenticated else None
+                )
+                
+                logger.info(f"气候数据文件上传成功: {data_file.id} - {data_file.name}")
+                
+                return Response({
+                    'success': True,
+                    'file_id': data_file.id,
+                    'message': '文件上传成功'
+                })
+            except Exception as e:
+                logger.error(f"创建文件记录失败: {str(e)}")
+                return Response({
+                    'error': '文件保存失败',
+                    'details': str(e)
+                }, status=500)
+        else:
+            logger.warning(f"文件上传数据验证失败: {serializer.errors}")
+            return Response({
+                'error': '数据验证失败',
+                'details': serializer.errors
+            }, status=400)
+            
+    except Exception as e:
+        logger.error(f"文件上传异常: {str(e)}")
+        return Response({
+            'error': '文件上传失败',
+            'details': str(e)
+        }, status=500)
+
+
+def validate_analysis_request(data):
+    """验证分析请求数据"""
+    errors = []
+    
+    # 1. 检查必需字段
+    required_fields = ['file_id', 'analysis_type']
+    for field in required_fields:
+        if field not in data or not data[field]:
+            errors.append(f'缺少必需字段: {field}')
+    
+    # 2. 验证file_id格式
+    if 'file_id' in data and data['file_id']:
+        try:
+            import uuid
+            uuid.UUID(data['file_id'])
+        except (ValueError, TypeError):
+            errors.append('file_id格式无效，应为UUID格式')
+    
+    # 3. 验证analysis_type
+    if 'analysis_type' in data and data['analysis_type']:
+        valid_types = ['comprehensive', 'temperature', 'precipitation', 'humidity', 'wind']
+        if data['analysis_type'] not in valid_types:
+            errors.append(f'analysis_type无效，支持的类型: {", ".join(valid_types)}')
+    
+    return errors
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def analyze_climate_data_api(request):
+    """气候数据分析API"""
+    try:
+        # 验证请求数据
+        if not request.data:
+            return Response({
+                'error': '请求数据为空'
+            }, status=400)
+        
+        # 验证分析请求
+        validation_errors = validate_analysis_request(request.data)
+        if validation_errors:
+            return Response({
+                'error': '请求数据验证失败',
+                'details': validation_errors
+            }, status=400)
+        
+        serializer = ClimateAnalysisRequestSerializer(data=request.data)
+        if serializer.is_valid():
+            file_id = serializer.validated_data['file_id']
+            analysis_type = serializer.validated_data['analysis_type']
+            
+            # 验证文件是否存在
+            try:
+                data_file = ClimateDataFile.objects.get(id=file_id)
+            except ClimateDataFile.DoesNotExist:
+                logger.warning(f"分析请求失败: 文件不存在 - {file_id}")
+                return Response({
+                    'error': '文件不存在'
+                }, status=404)
+            except Exception as e:
+                logger.error(f"查询文件失败: {str(e)}")
+                return Response({
+                    'error': '文件查询失败'
+                }, status=500)
+            
+            # 检查文件状态
+            if data_file.status != 'uploaded':
+                logger.warning(f"分析请求失败: 文件状态不正确 - {data_file.id}, 状态: {data_file.status}")
+                return Response({
+                    'error': f'文件状态不正确，当前状态: {data_file.get_status_display()}'
+                }, status=400)
+            
+            # 检查文件是否真的存在
+            if not data_file.file or not data_file.file.name:
+                logger.error(f"文件记录存在但文件不存在: {data_file.id}")
+                return Response({
+                    'error': '文件数据损坏，请重新上传'
+                }, status=400)
+            
+            # 更新文件状态
+            try:
+                data_file.status = 'processing'
+                data_file.save()
+                logger.info(f"文件状态更新为processing: {data_file.id}")
+            except Exception as e:
+                logger.error(f"更新文件状态失败: {str(e)}")
+                return Response({
+                    'error': '更新文件状态失败'
+                }, status=500)
+            
+            # 创建处理任务
+            try:
+                task = ProcessingTask.objects.create(
+                    task_type=f'气候数据分析 - {analysis_type}',
+                    status='pending',
+                    created_by=request.user if request.user.is_authenticated else None
+                )
+                logger.info(f"创建分析任务: {task.id} - {task.task_type}")
+            except Exception as e:
+                logger.error(f"创建处理任务失败: {str(e)}")
+                return Response({
+                    'error': '创建分析任务失败'
+                }, status=500)
+            
+            # 启动分析任务
+            from .tasks import analyze_climate_data_task
+            from django.conf import settings
+            
+            # 在开发环境中直接执行任务，生产环境中使用异步
+            if getattr(settings, 'CELERY_TASK_ALWAYS_EAGER', False):
+                # 开发环境：直接执行
+                try:
+                    # 确保参数类型正确
+                    file_id_str = str(file_id)
+                    task_id_str = str(task.id)
+                    result = analyze_climate_data_task(file_id_str, task_id_str, analysis_type)
+                    logger.info(f"任务直接执行完成: {result}")
+                except Exception as e:
+                    logger.error(f"任务直接执行失败: {str(e)}")
+                    task.status = 'failed'
+                    task.error_message = str(e)
+                    task.save()
+            else:
+                # 生产环境：异步执行
+                # 确保参数类型正确
+                file_id_str = str(file_id)
+                task_id_str = str(task.id)
+                analyze_climate_data_task.delay(file_id_str, task_id_str, analysis_type)
+            
+            return Response({
+                'success': True,
+                'task_id': task.id,
+                'message': '分析任务已启动'
+            })
+        else:
+            return Response({
+                'error': '数据验证失败',
+                'details': serializer.errors
+            }, status=400)
+            
+    except Exception as e:
+        logger.error(f"气候数据分析API失败: {str(e)}")
+        return Response({
+            'error': f'分析失败: {str(e)}'
+        }, status=500)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_climate_analysis_results(request, task_id):
+    """获取气候分析结果"""
+    try:
+        task = ProcessingTask.objects.get(id=task_id)
+        
+        if task.status != 'completed':
+            return Response({
+                'success': False,
+                'status': task.status,
+                'message': '分析尚未完成'
+            })
+        
+        # 查找对应的分析结果
+        try:
+            # 根据任务类型查找对应的分析结果
+            if '气候数据分析' in task.task_type:
+                # 查找气候分析结果
+                from .models import ClimateAnalysisResult
+                
+                # 查找最近的气候分析结果
+                results = ClimateAnalysisResult.objects.all().order_by('-created_at')[:1]
+                
+                if results.exists():
+                    latest_result = results.first()
+                    serializer = ClimateAnalysisResultSerializer(latest_result)
+                    
+                    return Response({
+                        'success': True,
+                        'status': task.status,
+                        'task_id': task.id,
+                        'message': '分析完成',
+                        'data': serializer.data
+                    })
+                else:
+                    return Response({
+                        'success': False,
+                        'status': task.status,
+                        'message': '未找到分析结果数据'
+                    })
+            else:
+                # 其他类型的任务
+                return Response({
+                    'success': True,
+                    'status': task.status,
+                    'task_id': task.id,
+                    'message': '分析完成'
+                })
+                
+        except Exception as e:
+            logger.error(f"查找分析结果失败: {str(e)}")
+            return Response({
+                'success': False,
+                'status': task.status,
+                'message': f'查找分析结果失败: {str(e)}'
+            })
+        
+    except ProcessingTask.DoesNotExist:
+        return Response({
+            'error': '任务不存在'
+        }, status=404)
+    except Exception as e:
+        logger.error(f"获取气候分析结果失败: {str(e)}")
+        return Response({
+            'error': f'获取结果失败: {str(e)}'
         }, status=500) 

@@ -125,6 +125,30 @@ REST_FRAMEWORK = {
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
+# 允许的请求头
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+    'x-request-time',  # 添加自定义请求时间头
+]
+
+# 允许的HTTP方法
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
 # 文件上传配置
 FILE_UPLOAD_MAX_MEMORY_SIZE = 943718400  # 900MB
 DATA_UPLOAD_MAX_MEMORY_SIZE = 943718400  # 900MB
@@ -164,4 +188,23 @@ os.makedirs(BASE_DIR / 'logs', exist_ok=True)
 os.makedirs(BASE_DIR / 'media' / 'remote_sensing', exist_ok=True)
 os.makedirs(BASE_DIR / 'media' / 'thumbnails', exist_ok=True)
 os.makedirs(BASE_DIR / 'media' / 'ecological_indices', exist_ok=True)
-os.makedirs(BASE_DIR / 'media' / 'visualizations', exist_ok=True) 
+os.makedirs(BASE_DIR / 'media' / 'visualizations', exist_ok=True)
+
+# Celery配置
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_ENABLE_UTC = True
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30分钟
+CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25分钟
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_WORKER_MAX_TASKS_PER_CHILD = 1000
+# 开发环境使用同步模式
+CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_EAGER_PROPAGATES = True
+# 禁用result backend以避免问题
+CELERY_RESULT_BACKEND = None 

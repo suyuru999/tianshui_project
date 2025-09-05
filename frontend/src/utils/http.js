@@ -9,8 +9,8 @@ import { API_CONFIG } from '../config/api.js'
 
 // 创建axios实例
 const http = axios.create({
-  // 使用绝对路径请求，确保所有请求都从根路径开始
-  baseURL: '/',
+  // 使用API配置中的完整URL
+  baseURL: API_CONFIG.BASE_URL,
   timeout: API_CONFIG.TIMEOUT,
   headers: API_CONFIG.HEADERS,
   withCredentials: true, // 支持跨域携带cookie
@@ -123,8 +123,10 @@ export const request = {
   // 文件上传
   upload(url, formData, config = {}) {
     return http.post(url, formData, {
+      // 不手动设置Content-Type，让浏览器自动设置boundary
       headers: {
-        'Content-Type': 'multipart/form-data',
+        // 移除默认的Content-Type，让浏览器自动设置multipart/form-data
+        'Content-Type': undefined,
       },
       ...config,
     })

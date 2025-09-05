@@ -6,8 +6,8 @@
 // API基础配置
 export const API_CONFIG = {
   // 基础URL
-  // 开发环境与生产环境统一使用 '/api'，由 Vite 代理到后端
-  BASE_URL: '/api',
+  // 使用localhost绕过DNS重定向问题
+  BASE_URL: 'http://localhost:8000/api',
   
   // 版本
   VERSION: 'v1',
@@ -78,6 +78,15 @@ export const API_ENDPOINTS = {
     CREATE: '/environment/feedback/',
     LIST: '/environment/feedback/',
     DETAIL: (id) => `/environment/feedback/${id}/`
+  },
+  
+  // 气候监测统计
+  CLIMATE_MONITORING: {
+    UPLOAD: '/environment/climate-monitoring/upload/',
+    ANALYZE: '/environment/climate-monitoring/analyze/',
+    RESULTS: (taskId) => `/environment/climate-monitoring/results/${taskId}/`,
+    STATUS: (taskId) => `/environment/processing-tasks/${taskId}/status/`,
+    DOWNLOAD_REPORT: (taskId) => `/environment/climate-monitoring/report/${taskId}/download/`
   }
 }
 

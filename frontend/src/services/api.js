@@ -188,12 +188,118 @@ export const feedbackService = {
   }
 }
 
+// 气候监测服务
+export const climateMonitoringService = {
+  // 上传气候数据文件
+  uploadClimateData(file, metadata = {}) {
+    // 验证文件
+    if (!file) {
+      return Promise.reject(new Error('文件不能为空'))
+    }
+    
+    if (!(file instanceof File)) {
+      return Promise.reject(new Error('无效的文件对象'))
+    }
+    
+    // 验证文件大小（50MB限制）
+    const maxSize = 50 * 1024 * 1024
+    if (file.size > maxSize) {
+      return Promise.reject(new Error('文件大小不能超过50MB'))
+    }
+    
+    // 验证文件类型
+    const allowedTypes = ['.csv', '.xlsx', '.xls']
+    const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'))
+    if (!allowedTypes.includes(fileExtension)) {
+      return Promise.reject(new Error('只支持CSV和Excel格式文件'))
+    }
+    
+    const formData = new FormData()
+    formData.append('file', file)
+    
+    // 添加元数据
+    Object.keys(metadata).forEach(key => {
+      if (metadata[key] !== null && metadata[key] !== undefined) {
+        formData.append(key, metadata[key])
+      }
+    })
+    
+    return request.upload(buildApiUrl(API_ENDPOINTS.CLIMATE_MONITORING.UPLOAD), formData)
+  },
+  
+  // 开始气候数据分析
+  analyzeClimateData(fileId, analysisType = 'comprehensive') {
+    // 验证文件ID
+    if (!fileId) {
+      return Promise.reject(new Error('文件ID不能为空'))
+    }
+    
+    if (typeof fileId !== 'string' && typeof fileId !== 'number') {
+      return Promise.reject(new Error('文件ID格式无效'))
+    }
+    
+    // 验证分析类型
+    const validAnalysisTypes = ['comprehensive', 'temperature', 'precipitation', 'humidity', 'wind_speed']
+    if (!validAnalysisTypes.includes(analysisType)) {
+      return Promise.reject(new Error(`无效的分析类型: ${analysisType}`))
+    }
+    
+    return request.post(buildApiUrl(API_ENDPOINTS.CLIMATE_MONITORING.ANALYZE), {
+      file_id: fileId,
+      analysis_type: analysisType
+    })
+  },
+  
+  // 获取分析结果
+  getAnalysisResults(taskId) {
+    // 验证任务ID
+    if (!taskId) {
+      return Promise.reject(new Error('任务ID不能为空'))
+    }
+    
+    if (typeof taskId !== 'string' && typeof taskId !== 'number') {
+      return Promise.reject(new Error('任务ID格式无效'))
+    }
+    
+    return request.get(buildApiUrl(API_ENDPOINTS.CLIMATE_MONITORING.RESULTS(taskId)))
+  },
+  
+  // 获取分析状态
+  getAnalysisStatus(taskId) {
+    // 验证任务ID
+    if (!taskId) {
+      return Promise.reject(new Error('任务ID不能为空'))
+    }
+    
+    if (typeof taskId !== 'string' && typeof taskId !== 'number') {
+      return Promise.reject(new Error('任务ID格式无效'))
+    }
+    
+    return request.get(buildApiUrl(API_ENDPOINTS.CLIMATE_MONITORING.STATUS(taskId)))
+  },
+  
+  // 下载分析报告
+  downloadReport(taskId) {
+    // 验证任务ID
+    if (!taskId) {
+      return Promise.reject(new Error('任务ID不能为空'))
+    }
+    
+    if (typeof taskId !== 'string' && typeof taskId !== 'number') {
+      return Promise.reject(new Error('任务ID格式无效'))
+    }
+    
+    return request.download(buildApiUrl(API_ENDPOINTS.CLIMATE_MONITORING.DOWNLOAD_REPORT(taskId)))
+  }
+}
+
 // 导出所有服务
 export default {
   auth: authService,
   remoteSensing: remoteSensingService,
   ecologicalIndices: ecologicalIndicesService,
   processingTask: processingTaskService,
-  spatial: spatialService
-  , feedback: feedbackService
+  spatial: spatialService,
+  feedback: feedbackService,
+  climateMonitoring: climateMonitoringService
 }

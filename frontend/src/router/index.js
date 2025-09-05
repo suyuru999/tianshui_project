@@ -4,6 +4,7 @@ import MapView from '../views/MapView.vue'
 import RemoteSensingAnalysis from '../views/RemoteSensingAnalysis.vue'
 import CitizenFeedback from '../views/CitizenFeedback.vue'
 import EcologicalIndex from '../views/EcologicalIndex.vue'
+import ClimateMonitoring from '../views/ClimateMonitoring.vue'
 
 const routes = [
   {
@@ -26,6 +27,11 @@ const routes = [
     path: '/ecological-index',
     name: 'EcologicalIndex',
     component: EcologicalIndex
+  },
+  {
+    path: '/climate-monitoring',
+    name: 'ClimateMonitoring',
+    component: ClimateMonitoring
   }
 ]
 

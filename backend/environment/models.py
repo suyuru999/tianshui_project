@@ -158,7 +158,7 @@ class ProcessingTask(models.Model):
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    remote_sensing_image = models.ForeignKey(RemoteSensingImage, on_delete=models.CASCADE, verbose_name='遥感影像')
+    remote_sensing_image = models.ForeignKey(RemoteSensingImage, on_delete=models.CASCADE, null=True, blank=True, verbose_name='遥感影像')
     task_type = models.CharField(max_length=50, verbose_name='任务类型')
     status = models.CharField(max_length=20, choices=TASK_STATUS_CHOICES, default='pending', verbose_name='任务状态')
     
@@ -212,3 +212,78 @@ class CitizenFeedback(models.Model):
 
     def __str__(self):
         return f"{self.get_category_display()} - {self.title[:20]}"
+
+
+class ClimateDataFile(models.Model):
+    """气候数据文件模型"""
+    STATUS_CHOICES = [
+        ('uploaded', '已上传'),
+        ('processing', '处理中'),
+        ('completed', '完成'),
+        ('failed', '失败'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255, verbose_name='文件名')
+    file = models.FileField(upload_to='climate_data/', verbose_name='文件')
+    file_type = models.CharField(max_length=10, choices=[('csv', 'CSV'), ('xlsx', 'Excel')], default='csv', verbose_name='文件类型')
+    description = models.TextField(blank=True, null=True, verbose_name='描述')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='uploaded', verbose_name='状态')
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='上传用户')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    processed_at = models.DateTimeField(null=True, blank=True, verbose_name='处理完成时间')
+    error_message = models.TextField(blank=True, null=True, verbose_name='错误信息')
+    
+    class Meta:
+        verbose_name = '气候数据文件'
+        verbose_name_plural = '气候数据文件'
+        db_table = 'climate_data_files'
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.name} ({self.get_status_display()})"
+
+
+class ClimateAnalysisResult(models.Model):
+    """气候分析结果模型"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    data_file = models.ForeignKey(ClimateDataFile, on_delete=models.CASCADE, related_name='analysis_results', verbose_name='数据文件')
+    analysis_type = models.CharField(max_length=50, default='comprehensive', verbose_name='分析类型')
+    
+    # 统计数据
+    temperature_avg = models.FloatField(null=True, blank=True, verbose_name='平均温度')
+    temperature_max = models.FloatField(null=True, blank=True, verbose_name='最高温度')
+    temperature_min = models.FloatField(null=True, blank=True, verbose_name='最低温度')
+    temperature_std = models.FloatField(null=True, blank=True, verbose_name='温度标准差')
+    
+    precipitation_avg = models.FloatField(null=True, blank=True, verbose_name='平均降水量')
+    precipitation_max = models.FloatField(null=True, blank=True, verbose_name='最大降水量')
+    precipitation_min = models.FloatField(null=True, blank=True, verbose_name='最小降水量')
+    precipitation_std = models.FloatField(null=True, blank=True, verbose_name='降水量标准差')
+    
+    humidity_avg = models.FloatField(null=True, blank=True, verbose_name='平均湿度')
+    humidity_max = models.FloatField(null=True, blank=True, verbose_name='最大湿度')
+    humidity_min = models.FloatField(null=True, blank=True, verbose_name='最小湿度')
+    humidity_std = models.FloatField(null=True, blank=True, verbose_name='湿度标准差')
+    
+    wind_speed_avg = models.FloatField(null=True, blank=True, verbose_name='平均风速')
+    wind_speed_max = models.FloatField(null=True, blank=True, verbose_name='最大风速')
+    wind_speed_min = models.FloatField(null=True, blank=True, verbose_name='最小风速')
+    wind_speed_std = models.FloatField(null=True, blank=True, verbose_name='风速标准差')
+    
+    # 图表数据（JSON格式存储）
+    chart_data = models.JSONField(default=dict, verbose_name='图表数据')
+    
+    # 分析报告
+    report_file = models.FileField(upload_to='climate_reports/', null=True, blank=True, verbose_name='分析报告')
+    
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    
+    class Meta:
+        verbose_name = '气候分析结果'
+        verbose_name_plural = '气候分析结果'
+        db_table = 'climate_analysis_results'
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.data_file.name} - {self.analysis_type}"

@@ -1,10 +1,12 @@
 from rest_framework import serializers
 from .models import (
-    RemoteSensingImage, 
-    EcologicalIndex, 
-    RSEIResult, 
+    RemoteSensingImage,
+    EcologicalIndex,
+    RSEIResult,
     ProcessingTask,
-    CitizenFeedback
+    CitizenFeedback,
+    ClimateDataFile,
+    ClimateAnalysisResult
 )
 from users.serializers import UserSerializer
 
@@ -199,3 +201,57 @@ class CitizenFeedbackSerializer(serializers.ModelSerializer):
         model = CitizenFeedback
         fields = ['id', 'category', 'category_display', 'title', 'content', 'contact', 'created_by', 'created_at']
         read_only_fields = ['id', 'created_by', 'created_at']
+
+
+class ClimateDataFileSerializer(serializers.ModelSerializer):
+    """气候数据文件序列化器"""
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    uploaded_by_username = serializers.CharField(source='uploaded_by.username', read_only=True)
+    
+    class Meta:
+        model = ClimateDataFile
+        fields = [
+            'id', 'name', 'file', 'file_type', 'description', 'status', 'status_display',
+            'uploaded_by', 'uploaded_by_username', 'created_at', 'processed_at', 'error_message'
+        ]
+        read_only_fields = ['id', 'uploaded_by', 'created_at', 'processed_at']
+
+
+class ClimateDataFileUploadSerializer(serializers.ModelSerializer):
+    """气候数据文件上传序列化器"""
+    
+    class Meta:
+        model = ClimateDataFile
+        fields = ['name', 'file', 'description']
+    
+    def validate_file(self, value):
+        """验证文件类型"""
+        if not value.name.lower().endswith(('.csv', '.xlsx', '.xls')):
+            raise serializers.ValidationError("只支持CSV和Excel文件格式")
+        return value
+
+
+class ClimateAnalysisResultSerializer(serializers.ModelSerializer):
+    """气候分析结果序列化器"""
+    data_file_name = serializers.CharField(source='data_file.name', read_only=True)
+    
+    class Meta:
+        model = ClimateAnalysisResult
+        fields = [
+            'id', 'data_file', 'data_file_name', 'analysis_type',
+            'temperature_avg', 'temperature_max', 'temperature_min', 'temperature_std',
+            'precipitation_avg', 'precipitation_max', 'precipitation_min', 'precipitation_std',
+            'humidity_avg', 'humidity_max', 'humidity_min', 'humidity_std',
+            'wind_speed_avg', 'wind_speed_max', 'wind_speed_min', 'wind_speed_std',
+            'chart_data', 'report_file', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
+
+
+class ClimateAnalysisRequestSerializer(serializers.Serializer):
+    """气候分析请求序列化器"""
+    file_id = serializers.UUIDField()
+    analysis_type = serializers.ChoiceField(
+        choices=[('comprehensive', '综合分析'), ('temperature', '温度分析'), ('precipitation', '降水分析')],
+        default='comprehensive'
+    )
