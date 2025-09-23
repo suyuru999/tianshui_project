@@ -5,3 +5,8 @@ http://127.0.0.1:8000/admin/
 
  celery启动
  celery -A tianshuipy worker --loglevel=INFO -P eventlet
+
+ 
+Redis启动
+ 1.切换到redis安装目录 cmd
+ 2.redis-server.exe redis.windows.conf

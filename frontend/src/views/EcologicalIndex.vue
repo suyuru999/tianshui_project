@@ -130,8 +130,8 @@
                 >
                   <div class="value-name">{{ getIndexName(key) }}</div>
                   <div class="value-number">{{ value.toFixed(4) }}</div>
-                  <div class="value-status" :class="getStatusClass(value)">
-                    {{ getStatusText(value) }}
+                  <div class="value-status" :class="getStatusClass(key, value)">
+                    {{ getStatusText(key, value) }}
                   </div>
                   <div class="value-unit">{{ getIndexUnit(key) }}</div>
                 </div>
@@ -476,16 +476,141 @@ export default {
       return index ? index.name : key
     }
     
-    const getStatusClass = (value) => {
-      if (value < 30) return 'status-good'
-      if (value < 70) return 'status-warning'
-      return 'status-danger'
+    const getStatusClass = (key, value) => {
+      // 根据不同指数类型和值返回对应的状态类
+      switch (key) {
+        case 'fragmentation_index':
+          // 破碎化指数：0表示完全未破碎，1表示极度破碎
+          if (value === 0) return 'status-excellent' // 优：完全未破碎
+          if (value < 0.3) return 'status-good'      // 良：轻微破碎
+          if (value < 0.5) return 'status-moderate'  // 中：中度破碎
+          if (value < 0.7) return 'status-poor'      // 差：严重破碎
+          return 'status-bad'                        // 劣：极度破碎
+        
+        case 'shannon_diversity':
+          // 多样性指数：值越高表示多样性越丰富
+          if (value > 2.0) return 'status-excellent' // 优：非常丰富的多样性
+          if (value > 1.5) return 'status-good'      // 良：较好的多样性
+          if (value > 1.0) return 'status-moderate'  // 中：中等多样性
+          if (value > 0.5) return 'status-poor'      // 差：较低多样性
+          return 'status-bad'                        // 劣：极低多样性
+          
+        case 'cohesion_index':
+          // 内聚力指数：值越高表示连接性越好
+          if (value === 0) return 'status-bad'       // 劣：无连接性
+          if (value < 0.3) return 'status-poor'      // 差：低连接性
+          if (value < 0.5) return 'status-moderate'  // 中：中等连接性
+          if (value < 0.8) return 'status-good'      // 良：良好连接性
+          return 'status-excellent'                  // 优：极佳连接性
+          
+        case 'fragility_index':
+          // 脆弱性指数：值越低表示抵抗力越强
+          if (value < 0.2) return 'status-excellent' // 优：极低脆弱性
+          if (value < 0.3) return 'status-good'      // 良：低脆弱性
+          if (value < 0.5) return 'status-moderate'  // 中：中等脆弱性
+          if (value < 0.7) return 'status-poor'      // 差：高脆弱性
+          return 'status-bad'                        // 劣：极高脆弱性
+          
+        case 'soil_erosion_index':
+          // 土壤侵蚀指数：值越低表示侵蚀程度越轻
+          if (value < 0.2) return 'status-excellent' // 优：微度侵蚀
+          if (value < 0.3) return 'status-good'      // 良：轻度侵蚀
+          if (value < 0.5) return 'status-moderate'  // 中：中度侵蚀
+          if (value < 0.7) return 'status-poor'      // 差：重度侵蚀
+          return 'status-bad'                        // 劣：极重度侵蚀
+          
+        case 'land_degradation_index':
+          // 土地退化指数：值越低表示退化程度越轻
+          if (value < 0.2) return 'status-excellent' // 优：微度退化
+          if (value < 0.3) return 'status-good'      // 良：轻度退化
+          if (value < 0.5) return 'status-moderate'  // 中：中度退化
+          if (value < 0.7) return 'status-poor'      // 差：重度退化
+          return 'status-bad'                        // 劣：极重度退化
+          
+        case 'unused_land_proportion':
+          // 未利用土地比例：按照生态环境评估界面标准
+          if (value < 5) return 'status-excellent'   // 优：极低比例
+          if (value < 10) return 'status-good'       // 良：低比例
+          if (value < 15) return 'status-moderate'   // 中：中等比例
+          if (value < 20) return 'status-poor'       // 差：高比例
+          return 'status-bad'                        // 劣：极高比例
+          
+        case 'cultivated_construction_proportion':
+          // 耕地与建设用地比例：按照生态环境评估界面标准
+          if (value >= 35 && value <= 45) return 'status-excellent' // 优：最佳平衡
+          if (value >= 30 && value < 35 || value > 45 && value <= 50) return 'status-good' // 良：良好平衡
+          if (value >= 25 && value < 30 || value > 50 && value <= 55) return 'status-moderate' // 中：一般平衡
+          if (value >= 20 && value < 25 || value > 55 && value <= 60) return 'status-poor' // 差：较差平衡
+          return 'status-bad' // 劣：严重失衡
+          
+        default:
+          // 默认情况
+          return 'status-unknown'
+      }
     }
     
-    const getStatusText = (value) => {
-      if (value < 30) return '良好'
-      if (value < 70) return '一般'
-      return '较差'
+    const getStatusText = (key, value) => {
+      // 根据不同指数类型和值返回对应的状态文本
+      switch (key) {
+        case 'fragmentation_index':
+          if (value === 0) return '优' 
+          if (value < 0.3) return '良'
+          if (value < 0.5) return '中'
+          if (value < 0.7) return '差'
+          return '劣'
+        
+        case 'shannon_diversity':
+          if (value > 2.0) return '优'
+          if (value > 1.5) return '良'
+          if (value > 1.0) return '中'
+          if (value > 0.5) return '差'
+          return '劣'
+          
+        case 'cohesion_index':
+          if (value === 0) return '劣'
+          if (value < 0.3) return '差'
+          if (value < 0.5) return '中'
+          if (value < 0.8) return '良'
+          return '优'
+          
+        case 'fragility_index':
+          if (value < 0.2) return '优'
+          if (value < 0.3) return '良'
+          if (value < 0.5) return '中'
+          if (value < 0.7) return '差'
+          return '劣'
+          
+        case 'soil_erosion_index':
+          if (value < 0.2) return '优'
+          if (value < 0.3) return '良'
+          if (value < 0.5) return '中'
+          if (value < 0.7) return '差'
+          return '劣'
+          
+        case 'land_degradation_index':
+          if (value < 0.2) return '优'
+          if (value < 0.3) return '良'
+          if (value < 0.5) return '中'
+          if (value < 0.7) return '差'
+          return '劣'
+          
+        case 'unused_land_proportion':
+          if (value < 5) return '优'
+          if (value < 10) return '良'
+          if (value < 15) return '中'
+          if (value < 20) return '差'
+          return '劣'
+          
+        case 'cultivated_construction_proportion':
+          if (value >= 35 && value <= 45) return '优'
+          if (value >= 30 && value < 35 || value > 45 && value <= 50) return '良'
+          if (value >= 25 && value < 30 || value > 50 && value <= 55) return '中'
+          if (value >= 20 && value < 25 || value > 55 && value <= 60) return '差'
+          return '劣'
+          
+        default:
+          return '未知'
+      }
     }
     
     const getIndexUnit = (key) => {
@@ -990,19 +1115,34 @@ export default {
   font-style: italic;
 }
 
-.status-good {
+.status-excellent {
   background: #dcfce7;
   color: #166534;
 }
 
-.status-warning {
-  background: #fef3c7;
-  color: #92400e;
+.status-good {
+  background: #e6f7ff;
+  color: #1890ff;
 }
 
-.status-danger {
-  background: #fee2e2;
-  color: #991b1b;
+.status-moderate {
+  background: #fffbe6;
+  color: #faad14;
+}
+
+.status-poor {
+  background: #fff7e6;
+  color: #fa8c16;
+}
+
+.status-bad {
+  background: #fff1f0;
+  color: #f5222d;
+}
+
+.status-unknown {
+  background: #f5f5f5;
+  color: #999;
 }
 
 /* 图表区域 */

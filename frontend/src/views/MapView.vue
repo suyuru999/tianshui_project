@@ -225,6 +225,9 @@ const handleBusinessFunctionClick = (func) => {
   if (func.name === '民众意见反馈') {
     router.push('/feedback')
   }
+  if (func.name === '重大工程叠加分析') {
+    router.push('/overlay-analysis')
+  }
   // 可扩展其他功能跳转
 }
 

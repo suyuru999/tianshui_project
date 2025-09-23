@@ -5,6 +5,7 @@ import RemoteSensingAnalysis from '../views/RemoteSensingAnalysis.vue'
 import CitizenFeedback from '../views/CitizenFeedback.vue'
 import EcologicalIndex from '../views/EcologicalIndex.vue'
 import ClimateMonitoring from '../views/ClimateMonitoring.vue'
+import OverlayAnalysis from '../views/OverlayAnalysis.vue'
 
 const routes = [
   {
@@ -32,6 +33,11 @@ const routes = [
     path: '/climate-monitoring',
     name: 'ClimateMonitoring',
     component: ClimateMonitoring
+  },
+  {
+    path: '/overlay-analysis',
+    name: 'OverlayAnalysis',
+    component: OverlayAnalysis
   }
 ]
 
