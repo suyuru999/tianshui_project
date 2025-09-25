@@ -598,11 +598,13 @@ watch(() => props.overlayLayers, (newLayers) => {
     economicLayer.setVisible(shouldShow)
   }
   
-  // 控制自定义图层显示
-  customLayers.forEach((layer, layerId) => {
-    const shouldShow = visibleLayerIds.includes(layerId)
-    layer.setVisible(shouldShow)
-  })
+  // 控制自定义图层显示（容错处理）
+  if (customLayers && typeof customLayers.forEach === 'function') {
+    customLayers.forEach((layer, layerId) => {
+      const shouldShow = visibleLayerIds.includes(layerId)
+      layer.setVisible(shouldShow)
+    })
+  }
 }, { deep: true })
 
 // 添加自定义图层

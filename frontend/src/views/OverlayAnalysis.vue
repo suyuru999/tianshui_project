@@ -4,7 +4,7 @@
     <div class="control-panel">
       <!-- 页面标题 -->
       <div class="panel-header">
-        <h1>生态修复工程监控</h1>
+        <h1>重大工程叠加分析</h1>
         <p class="panel-subtitle">叠加展示与分析修复工程、环境质量与社会经济数据。</p>
       </div>
 
@@ -21,10 +21,9 @@
           <div class="layer-list">
             <div class="layer-item" v-for="layer in defaultLayers" :key="layer.id">
               <label class="layer-checkbox">
-                <input 
-                  type="checkbox" 
+                <input
+                  type="checkbox"
                   v-model="layer.visible"
-                  @change="toggleLayer(layer.id)"
                 />
                 <span class="checkmark"></span>
                 <span class="layer-name">{{ layer.name }}</span>
@@ -374,14 +373,6 @@ const overlayLayers = computed(() => {
   return defaultLayers.filter(layer => layer.visible)
 })
 
-// 切换图层显示
-const toggleLayer = (layerId) => {
-  const layer = defaultLayers.find(l => l.id === layerId)
-  if (layer) {
-    layer.visible = !layer.visible
-    console.log('切换图层:', layer.name, layer.visible)
-  }
-}
 
 // 处理GeoJSON文件加载
 const handleGeoJSONLoaded = ({ file, data }) => {
