@@ -5,10 +5,17 @@ import { fileURLToPath, URL } from 'node:url'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [vue()],
+  define: {
+    global: 'globalThis',
+  },
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      buffer: 'buffer'
     }
+  },
+  optimizeDeps: {
+    include: ['buffer']
   },
   server: {
     port: 3000,
