@@ -77,7 +77,7 @@
 <script setup>
 import { ref, reactive, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
 import 'ol/ol.css'
-import Map from 'ol/Map'
+import { Map as OLMap } from 'ol'
 import View from 'ol/View'
 import { defaults as defaultControls } from 'ol/control'
 import TileLayer from 'ol/layer/Tile'
@@ -105,7 +105,8 @@ const props = defineProps({
 let projectLayer = null
 let environmentalLayer = null
 let economicLayer = null
-let customLayers = new Map() // 存储自定义图层
+let customLayersMap = new Map() // 存储自定义图层
+console.log('初始化 customLayersMap:', customLayersMap, typeof customLayersMap)
 
 // Emits
 const emit = defineEmits(['project-click'])
@@ -440,7 +441,7 @@ const initMap = () => {
   economicLayer = createSocioEconomicLayer()
 
   // 创建地图，添加底图和标注图层
-  map = new Map({
+  map = new OLMap({
     target: 'overlay-map',
     layers: [
       baseLayer,
@@ -576,49 +577,84 @@ watch(() => props.selectedProject, (newProjectId) => {
 // 监听叠加图层变化
 watch(() => props.overlayLayers, (newLayers) => {
   if (!map) return
-  
-  // 获取所有图层ID
-  const visibleLayerIds = newLayers.map(layer => layer.id)
-  
+
+  console.log('图层变化监听触发:', newLayers)
+
+  // 创建图层可见性映射
+  const layerVisibilityMap = new Map()
+  newLayers.forEach(layer => {
+    layerVisibilityMap.set(layer.id, layer.visible)
+    console.log(`图层 ${layer.id} 可见性: ${layer.visible}`)
+  })
+
   // 控制项目图层显示
   if (projectLayer) {
-    const shouldShow = visibleLayerIds.includes('restoration_projects')
+    const shouldShow = layerVisibilityMap.get('restoration_projects') || false
+    console.log(`设置项目图层可见性: ${shouldShow}`)
     projectLayer.setVisible(shouldShow)
   }
-  
+
   // 控制环境质量图层显示
   if (environmentalLayer) {
-    const shouldShow = visibleLayerIds.includes('environmental_quality')
+    const shouldShow = layerVisibilityMap.get('environmental_quality') || false
+    console.log(`设置环境图层可见性: ${shouldShow}`)
     environmentalLayer.setVisible(shouldShow)
   }
-  
+
   // 控制社会经济图层显示
   if (economicLayer) {
-    const shouldShow = visibleLayerIds.includes('socio_economic')
+    const shouldShow = layerVisibilityMap.get('socio_economic') || false
+    console.log(`设置经济图层可见性: ${shouldShow}`)
     economicLayer.setVisible(shouldShow)
   }
-  
+
   // 控制自定义图层显示（容错处理）
-  if (customLayers && typeof customLayers.forEach === 'function') {
-    customLayers.forEach((layer, layerId) => {
-      const shouldShow = visibleLayerIds.includes(layerId)
+  if (customLayersMap && typeof customLayersMap.forEach === 'function') {
+    console.log('自定义图层数量:', customLayersMap.size)
+    customLayersMap.forEach((layer, layerId) => {
+      const shouldShow = layerVisibilityMap.get(layerId) || false
+      console.log(`设置自定义图层 ${layerId} 可见性: ${shouldShow}`)
       layer.setVisible(shouldShow)
     })
+  } else {
+    console.log('customLayersMap 不可用:', customLayersMap)
   }
 }, { deep: true })
 
 // 添加自定义图层
 const addCustomLayer = (layerData) => {
   if (!map) return
-  
+
+  console.log('添加图层时 customLayersMap:', customLayersMap, typeof customLayersMap)
+
   const customLayer = createCustomLayer(layerData)
-  customLayers.set(layerData.id, customLayer)
+  customLayersMap.set(layerData.id, customLayer)
   map.addLayer(customLayer)
+  console.log(`添加自定义图层: ${layerData.id}`)
+}
+
+// 移除自定义图层
+const removeCustomLayer = (layerId) => {
+  if (!map) return
+
+  console.log('customLayersMap 类型:', typeof customLayersMap, customLayersMap)
+  console.log('customLayersMap 是否为 Map:', customLayersMap instanceof Map)
+  console.log('customLayersMap 方法:', Object.getOwnPropertyNames(customLayersMap))
+
+  const layer = customLayersMap.get(layerId)
+  if (layer) {
+    map.removeLayer(layer)
+    customLayersMap.delete(layerId)
+    console.log(`移除自定义图层: ${layerId}`)
+  } else {
+    console.log(`未找到图层: ${layerId}`)
+  }
 }
 
 // 暴露方法给父组件
 defineExpose({
-  addCustomLayer
+  addCustomLayer,
+  removeCustomLayer
 })
 
   // 监听底图类型变化，切换底图

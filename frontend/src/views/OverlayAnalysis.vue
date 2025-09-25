@@ -14,12 +14,12 @@
           <i class="section-icon">📊</i>
           <span>数据图层管理</span>
         </div>
-        
+
         <!-- 默认图层 -->
         <div class="layer-group">
           <div class="layer-group-title">默认图层</div>
           <div class="layer-list">
-            <div class="layer-item" v-for="layer in defaultLayers" :key="layer.id">
+            <div class="layer-item" v-for="layer in baseLayers" :key="layer.id">
               <label class="layer-checkbox">
                 <input
                   type="checkbox"
@@ -35,52 +35,52 @@
         <!-- 上传自定义图层 -->
         <div class="layer-group">
           <div class="layer-group-title">上传自定义图层</div>
-          
+
           <!-- 文件类型选择 -->
           <div class="file-type-selector">
-            <div 
-              class="file-type-option" 
+            <div
+              class="file-type-option"
               :class="{ active: selectedFileType === 'geojson' }"
               @click="selectedFileType = 'geojson'"
             >
               GeoJSON
             </div>
-            <div 
-              class="file-type-option" 
+            <div
+              class="file-type-option"
               :class="{ active: selectedFileType === 'shapefile' }"
               @click="selectedFileType = 'shapefile'"
             >
               Shapefile
             </div>
-            <div 
-              class="file-type-option" 
+            <div
+              class="file-type-option"
               :class="{ active: selectedFileType === 'ecological' }"
               @click="selectedFileType = 'ecological'"
             >
               生态指数
             </div>
           </div>
-          
+
           <div class="upload-section">
             <!-- GeoJSON上传组件 -->
-            <GeoJSONUploader 
+            <GeoJSONUploader
               v-if="selectedFileType === 'geojson'"
               @file-loaded="handleGeoJSONLoaded"
               @file-cleared="handleGeoJSONClear"
               @load-to-map="addGeoJSONToMap"
               @generate-sample="handleSampleData"
             />
-            
+
             <!-- Shapefile上传组件 -->
-            <ShapefileUploader 
+            <ShapefileUploader
               v-if="selectedFileType === 'shapefile'"
               @file-loaded="handleShapefileLoaded"
               @file-cleared="handleShapefileClear"
               @load-to-map="addShapefileToMap"
             />
-            
+
             <!-- 生态指数上传组件 -->
-            <EcologicalIndicesUploader 
+            <EcologicalIndicesUploader
               v-if="selectedFileType === 'ecological'"
               @file-loaded="handleEcologicalIndicesLoaded"
               @file-cleared="handleEcologicalIndicesClear"
@@ -88,6 +88,26 @@
               @analyze-with-layers="analyzeEcologicalIndices"
             />
           </div>
+
+            <!-- 已加载的自定义图层（可勾选显示/隐藏） -->
+            <div class="layer-group" v-if="customUploadedLayers.length">
+              <div class="layer-group-title">已加载自定义图层</div>
+              <div class="layer-list">
+                <div class="layer-item" v-for="layer in customUploadedLayers" :key="layer.id">
+                  <label class="layer-checkbox">
+                    <input
+                      type="checkbox"
+                      v-model="layer.visible"
+                      @change="onLayerVisibilityChange(layer)"
+                    />
+                    <span class="checkmark"></span>
+                    <span class="layer-name">{{ layer.name }}</span>
+                  </label>
+                  <button class="remove-layer-btn" @click="removeCustomLayer(layer.id)" title="移除图层">×</button>
+                </div>
+              </div>
+            </div>
+
         </div>
       </div>
 
@@ -109,7 +129,7 @@
               </option>
             </select>
           </div>
-          
+
           <!-- 项目分析报告 -->
           <div v-if="selectedProject && projectAnalysis" class="analysis-report">
             <div class="report-header">
@@ -142,7 +162,7 @@
                   </div>
                 </div>
               </div>
-              
+
               <!-- 环境风险评估 -->
               <div class="report-section">
                 <h5>环境风险评估</h5>
@@ -156,7 +176,7 @@
                   </div>
                 </div>
               </div>
-              
+
               <!-- 社会经济影响 -->
               <div class="report-section">
                 <h5>社会经济影响</h5>
@@ -183,13 +203,13 @@
 
     <!-- 右侧地图区域 -->
     <div class="map-area">
-      <OverlayMapContainer 
+      <OverlayMapContainer
         ref="mapContainer"
         :overlay-layers="overlayLayers"
         :selected-project="selectedProject"
         @project-click="handleProjectClick"
       />
-      
+
       <!-- 生态指数图层 -->
       <EcologicalIndicesLayer
         v-if="showEcologicalIndicesLayer && ecologicalIndicesData"
@@ -227,6 +247,8 @@ const defaultLayers = reactive([
     id: 'restoration_projects',
     name: '生态修复工程 (SHP)',
     visible: true,
+
+
     type: 'vector',
     color: '#52c41a'
   },
@@ -246,9 +268,17 @@ const defaultLayers = reactive([
   }
 ])
 
+// 基础图层与自定义图层分组（用于左侧勾选列表）
+const baseLayerIds = ['restoration_projects', 'environmental_quality', 'socio_economic']
+const baseLayers = computed(() => defaultLayers.filter(l => baseLayerIds.includes(l.id)))
+const customUploadedLayers = computed(() => defaultLayers.filter(l => !baseLayerIds.includes(l.id)))
+
+
 // 项目数据
 const projects = reactive([
   {
+
+
     id: 1,
     name: '天水市生态修复工程',
     type: '生态修复',
@@ -368,9 +398,18 @@ const projectAnalysisData = {
   }
 }
 
-// 计算叠加图层
+// 计算叠加图层（传递所有图层及其可见状态，而不是只传递可见的）
 const overlayLayers = computed(() => {
-  return defaultLayers.filter(layer => layer.visible)
+  const layers = defaultLayers.map(layer => ({
+    id: layer.id,
+    name: layer.name,
+    visible: layer.visible,
+    type: layer.type,
+    color: layer.color,
+    data: layer.data
+  }))
+  console.log('overlayLayers 计算结果:', layers)
+  return layers
 })
 
 
@@ -396,21 +435,21 @@ const addGeoJSONToMap = ({ data, fileName }) => {
     color: '#722ed1',
     data: data
   }
-  
+
   defaultLayers.push(newLayer)
-  
+
   // 通知地图组件加载新图层
   if (mapContainer.value) {
     mapContainer.value.addCustomLayer(newLayer)
   }
-  
+
   console.log('GeoJSON已添加到地图')
 }
 
 // 处理示例数据
 const handleSampleData = (sampleData) => {
   console.log('生成示例数据:', sampleData)
-  
+
   // 将示例数据添加到地图
   const newLayer = {
     id: `sample_${Date.now()}`,
@@ -420,9 +459,9 @@ const handleSampleData = (sampleData) => {
     color: '#eb2f96',
     data: sampleData
   }
-  
+
   defaultLayers.push(newLayer)
-  
+
   // 通知地图组件加载新图层
   if (mapContainer.value) {
     mapContainer.value.addCustomLayer(newLayer)
@@ -452,14 +491,14 @@ const addShapefileToMap = ({ data, fileName }) => {
     color: '#13c2c2',
     data: data
   }
-  
+
   defaultLayers.push(newLayer)
-  
+
   // 通知地图组件加载新图层
   if (mapContainer.value) {
     mapContainer.value.addCustomLayer(newLayer)
   }
-  
+
   console.log('Shapefile已添加到地图')
 }
 
@@ -468,7 +507,7 @@ const addShapefileToMap = ({ data, fileName }) => {
 const handleEcologicalIndicesLoaded = ({ file, data }) => {
   console.log('生态指数文件已加载:', file.name)
   console.log('生态指数数据:', data)
-  
+
   // 保存生态指数数据
   ecologicalIndicesData.value = data
 }
@@ -483,11 +522,11 @@ const handleEcologicalIndicesClear = () => {
 // 在地图上可视化生态指数
 const visualizeEcologicalIndices = ({ data, fileName }) => {
   console.log('在地图上可视化生态指数:', fileName)
-  
+
   // 显示生态指数图层
   ecologicalIndicesData.value = data
   showEcologicalIndicesLayer.value = true
-  
+
   // 在地图上高亮显示对应区域
   // 这里可以根据实际需求添加高亮逻辑
 }
@@ -495,11 +534,11 @@ const visualizeEcologicalIndices = ({ data, fileName }) => {
 // 与其他图层叠加分析生态指数
 const analyzeEcologicalIndices = ({ data, fileName }) => {
   console.log('生态指数与其他图层叠加分析:', fileName)
-  
+
   // 保存生态指数数据
   ecologicalIndicesData.value = data
   showEcologicalIndicesLayer.value = true
-  
+
   // 添加叠加分析图层
   const newLayer = {
     id: `ecological_${Date.now()}`,
@@ -508,9 +547,9 @@ const analyzeEcologicalIndices = ({ data, fileName }) => {
     type: 'ecological',
     data: data
   }
-  
+
   defaultLayers.push(newLayer)
-  
+
   // 通知地图组件加载新图层
   if (mapContainer.value) {
     // 这里可以添加特殊的生态指数图层处理逻辑
@@ -545,6 +584,26 @@ const handleProjectClick = (projectId) => {
   projectAnalysis.value = projectAnalysisData[projectId] || null
   console.log('选择项目:', projectId)
 }
+// 图层可见性变化处理
+const onLayerVisibilityChange = (layer) => {
+  console.log(`图层 ${layer.name} (${layer.id}) 可见性变更为: ${layer.visible}`)
+}
+
+// 移除自定义图层
+const removeCustomLayer = (layerId) => {
+  console.log('移除图层:', layerId)
+
+  // 从defaultLayers中移除
+  const index = defaultLayers.findIndex(layer => layer.id === layerId)
+  if (index > -1) {
+    defaultLayers.splice(index, 1)
+  }
+
+  // 通知地图组件移除图层
+  if (mapContainer.value && mapContainer.value.removeCustomLayer) {
+    mapContainer.value.removeCustomLayer(layerId)
+  }
+}
 
 // 监听项目选择变化
 watch(selectedProject, (newProjectId) => {
@@ -559,6 +618,7 @@ watch(selectedProject, (newProjectId) => {
 <style scoped>
 .overlay-analysis {
   display: flex;
+
   width: 100vw;
   height: 100vh;
   overflow: hidden;
@@ -635,6 +695,8 @@ watch(selectedProject, (newProjectId) => {
 .layer-item {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
 }
 
 /* 图层复选框样式 */
@@ -646,10 +708,33 @@ watch(selectedProject, (newProjectId) => {
   font-size: 13px;
   color: #333;
   user-select: none;
+  flex: 1;
 }
 
 .layer-checkbox input[type="checkbox"] {
   display: none;
+}
+
+/* 移除图层按钮样式 */
+.remove-layer-btn {
+  background: #ff4d4f;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 8px;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.remove-layer-btn:hover {
+  opacity: 1;
 }
 
 .checkmark {
