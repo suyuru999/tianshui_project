@@ -7,6 +7,9 @@ from .views import (
     ProcessingTaskViewSet,
     CitizenFeedbackViewSet,
     ClimateDataFileViewSet,
+    EcologicalIndexFileViewSet,
+    EcologicalProjectFileViewSet,
+    OverlayAnalysisTaskViewSet,
     calculate_ecological_structure_indices,
     calculate_ecological_stress_indices,
     upload_climate_data,
@@ -30,6 +33,9 @@ router.register(r'remote-sensing-images', RemoteSensingImageViewSet)
 router.register(r'processing-tasks', ProcessingTaskViewSet)
 router.register(r'feedback', CitizenFeedbackViewSet)
 router.register(r'climate-data-files', ClimateDataFileViewSet)
+router.register(r'ecological-index-files', EcologicalIndexFileViewSet)
+router.register(r'ecological-project-files', EcologicalProjectFileViewSet)
+router.register(r'overlay-analysis-tasks', OverlayAnalysisTaskViewSet)
 
 app_name = 'environment'
 

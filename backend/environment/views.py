@@ -9,17 +9,21 @@ from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
 from django.utils import timezone
 import os
+import json
 import logging
 
 # 取消注释必要的导入
 from .models import (
-    RemoteSensingImage, 
-    EcologicalIndex, 
-    RSEIResult, 
+    RemoteSensingImage,
+    EcologicalIndex,
+    RSEIResult,
     ProcessingTask,
     CitizenFeedback,
     ClimateDataFile,
-    ClimateAnalysisResult
+    ClimateAnalysisResult,
+    EcologicalIndexFile,
+    EcologicalProjectFile,
+    OverlayAnalysisTask
 )
 from .serializers import (
     RemoteSensingImageSerializer,
@@ -33,7 +37,13 @@ from .serializers import (
     ClimateDataFileSerializer,
     ClimateDataFileUploadSerializer,
     ClimateAnalysisResultSerializer,
-    ClimateAnalysisRequestSerializer
+    ClimateAnalysisRequestSerializer,
+    EcologicalIndexFileSerializer,
+    EcologicalIndexFileUploadSerializer,
+    EcologicalProjectFileSerializer,
+    EcologicalProjectFileUploadSerializer,
+    OverlayAnalysisTaskSerializer,
+    OverlayAnalysisTaskCreateSerializer
 )
 from .tasks import calculate_ecological_indices, calculate_rsei_only
 from .gdal_land_use_analysis import LandUseAnalyzer  # 导入土地利用分析器
@@ -948,4 +958,176 @@ def get_climate_analysis_results(request, task_id):
         logger.error(f"获取气候分析结果失败: {str(e)}")
         return Response({
             'error': f'获取结果失败: {str(e)}'
-        }, status=500) 
+        }, status=500)
+
+
+# 叠加分析相关视图集
+
+class EcologicalIndexFileViewSet(viewsets.ModelViewSet):
+    """生态指数文件视图集"""
+    queryset = EcologicalIndexFile.objects.all()
+    serializer_class = EcologicalIndexFileSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    permission_classes = [AllowAny]
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return EcologicalIndexFileUploadSerializer
+        return EcologicalIndexFileSerializer
+
+    def perform_create(self, serializer):
+        """处理文件上传"""
+        instance = serializer.save(uploaded_by=self.request.user if self.request.user.is_authenticated else None)
+
+        # 处理上传的JSON文件
+        try:
+            file_content = instance.file.read().decode('utf-8')
+            indices_data = json.loads(file_content)
+
+            # 保存解析后的数据
+            instance.indices_data = indices_data
+            instance.timestamp = timezone.now()
+            instance.status = 'completed'
+            instance.processed_at = timezone.now()
+            instance.save()
+
+        except Exception as e:
+            instance.status = 'failed'
+            instance.error_message = f"文件解析失败: {str(e)}"
+            instance.save()
+            logger.error(f"生态指数文件解析失败: {str(e)}")
+
+
+class EcologicalProjectFileViewSet(viewsets.ModelViewSet):
+    """生态修复工程文件视图集"""
+    queryset = EcologicalProjectFile.objects.all()
+    serializer_class = EcologicalProjectFileSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    permission_classes = [AllowAny]
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return EcologicalProjectFileUploadSerializer
+        return EcologicalProjectFileSerializer
+
+    def perform_create(self, serializer):
+        """处理文件上传"""
+        instance = serializer.save(uploaded_by=self.request.user if self.request.user.is_authenticated else None)
+
+        # 处理上传的GeoJSON文件
+        try:
+            file_content = instance.file.read().decode('utf-8')
+            geojson_data = json.loads(file_content)
+
+            # 验证GeoJSON格式
+            if geojson_data.get('type') != 'FeatureCollection':
+                raise ValueError("文件必须是有效的GeoJSON FeatureCollection格式")
+
+            # 保存解析后的数据
+            instance.geojson_data = geojson_data
+            instance.status = 'completed'
+            instance.processed_at = timezone.now()
+            instance.save()
+
+        except Exception as e:
+            instance.status = 'failed'
+            instance.error_message = f"文件解析失败: {str(e)}"
+            instance.save()
+            logger.error(f"生态修复工程文件解析失败: {str(e)}")
+
+
+class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
+    """叠加分析任务视图集"""
+    queryset = OverlayAnalysisTask.objects.all()
+    serializer_class = OverlayAnalysisTaskSerializer
+    permission_classes = [AllowAny]
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return OverlayAnalysisTaskCreateSerializer
+        return OverlayAnalysisTaskSerializer
+
+    def perform_create(self, serializer):
+        """创建叠加分析任务"""
+        instance = serializer.save(created_by=self.request.user if self.request.user.is_authenticated else None)
+
+        # 异步执行分析（这里简化为同步执行）
+        try:
+            from .overlay_analysis import perform_overlay_analysis
+            perform_overlay_analysis(str(instance.id))
+        except Exception as e:
+            logger.error(f"启动叠加分析失败: {str(e)}")
+            instance.status = 'failed'
+            instance.error_message = str(e)
+            instance.save()
+
+    @action(detail=True, methods=['post'])
+    def restart_analysis(self, request, pk=None):
+        """重新启动分析"""
+        task = self.get_object()
+
+        if task.status in ['processing']:
+            return Response({
+                'error': '任务正在进行中，无法重新启动'
+            }, status=400)
+
+        try:
+            # 重置任务状态
+            task.status = 'pending'
+            task.progress = 0
+            task.current_step = None
+            task.error_message = None
+            task.analysis_results = {}
+            task.overall_risk_level = None
+            task.started_at = None
+            task.completed_at = None
+            task.save()
+
+            # 重新执行分析
+            from .overlay_analysis import perform_overlay_analysis
+            perform_overlay_analysis(str(task.id))
+
+            return Response({
+                'message': '分析已重新启动',
+                'task_id': task.id
+            })
+
+        except Exception as e:
+            logger.error(f"重新启动分析失败: {str(e)}")
+            return Response({
+                'error': f'重新启动失败: {str(e)}'
+            }, status=500)
+
+    @action(detail=False, methods=['get'])
+    def risk_statistics(self, request):
+        """获取风险统计信息"""
+        try:
+            # 统计各风险等级的任务数量
+            risk_stats = {}
+            for choice in OverlayAnalysisTask.RISK_LEVEL_CHOICES:
+                level = choice[0]
+                count = OverlayAnalysisTask.objects.filter(
+                    overall_risk_level=level,
+                    status='completed'
+                ).count()
+                risk_stats[level] = count
+
+            # 统计任务状态
+            status_stats = {}
+            for choice in OverlayAnalysisTask.STATUS_CHOICES:
+                status = choice[0]
+                count = OverlayAnalysisTask.objects.filter(status=status).count()
+                status_stats[status] = count
+
+            return Response({
+                'risk_distribution': risk_stats,
+                'status_distribution': status_stats,
+                'total_tasks': OverlayAnalysisTask.objects.count(),
+                'completed_tasks': OverlayAnalysisTask.objects.filter(status='completed').count()
+            })
+
+        except Exception as e:
+            logger.error(f"获取风险统计失败: {str(e)}")
+            return Response({
+                'error': f'获取统计信息失败: {str(e)}'
+            }, status=500)

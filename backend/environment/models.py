@@ -287,3 +287,127 @@ class ClimateAnalysisResult(models.Model):
     
     def __str__(self):
         return f"{self.data_file.name} - {self.analysis_type}"
+
+
+class EcologicalIndexFile(models.Model):
+    """生态指数文件模型"""
+    STATUS_CHOICES = [
+        ('uploaded', '已上传'),
+        ('processing', '处理中'),
+        ('completed', '完成'),
+        ('failed', '失败'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    filename = models.CharField(max_length=255, verbose_name='文件名')
+    file = models.FileField(upload_to='ecological_indices/', verbose_name='文件')
+    description = models.TextField(blank=True, null=True, verbose_name='描述')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='uploaded', verbose_name='状态')
+
+    # 生态指数数据（JSON格式存储）
+    indices_data = models.JSONField(default=dict, verbose_name='生态指数数据')
+
+    # 时间戳
+    timestamp = models.DateTimeField(null=True, blank=True, verbose_name='数据时间戳')
+
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='上传用户')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    processed_at = models.DateTimeField(null=True, blank=True, verbose_name='处理完成时间')
+    error_message = models.TextField(blank=True, null=True, verbose_name='错误信息')
+
+    class Meta:
+        verbose_name = '生态指数文件'
+        verbose_name_plural = '生态指数文件'
+        db_table = 'ecological_index_files'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.filename} ({self.get_status_display()})"
+
+
+class EcologicalProjectFile(models.Model):
+    """生态修复工程文件模型"""
+    STATUS_CHOICES = [
+        ('uploaded', '已上传'),
+        ('processing', '处理中'),
+        ('completed', '完成'),
+        ('failed', '失败'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    filename = models.CharField(max_length=255, verbose_name='文件名')
+    file = models.FileField(upload_to='ecological_projects/', verbose_name='文件')
+    description = models.TextField(blank=True, null=True, verbose_name='描述')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='uploaded', verbose_name='状态')
+
+    # GeoJSON数据
+    geojson_data = models.JSONField(default=dict, verbose_name='GeoJSON数据')
+
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='上传用户')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    processed_at = models.DateTimeField(null=True, blank=True, verbose_name='处理完成时间')
+    error_message = models.TextField(blank=True, null=True, verbose_name='错误信息')
+
+    class Meta:
+        verbose_name = '生态修复工程文件'
+        verbose_name_plural = '生态修复工程文件'
+        db_table = 'ecological_project_files'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.filename} ({self.get_status_display()})"
+
+
+class OverlayAnalysisTask(models.Model):
+    """叠加分析任务模型"""
+    STATUS_CHOICES = [
+        ('pending', '等待中'),
+        ('processing', '处理中'),
+        ('completed', '已完成'),
+        ('failed', '失败'),
+        ('cancelled', '已取消'),
+    ]
+
+    RISK_LEVEL_CHOICES = [
+        ('low', '低风险'),
+        ('medium', '中风险'),
+        ('high', '高风险'),
+        ('critical', '极高风险'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255, verbose_name='分析任务名称')
+    description = models.TextField(blank=True, null=True, verbose_name='任务描述')
+
+    # 关联的文件
+    ecological_index_file = models.ForeignKey(EcologicalIndexFile, on_delete=models.CASCADE, verbose_name='生态指数文件')
+    ecological_project_file = models.ForeignKey(EcologicalProjectFile, on_delete=models.CASCADE, verbose_name='生态修复工程文件')
+
+    # 任务状态
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name='任务状态')
+    progress = models.IntegerField(default=0, verbose_name='进度百分比')
+    current_step = models.CharField(max_length=100, blank=True, null=True, verbose_name='当前步骤')
+
+    # 分析结果
+    analysis_results = models.JSONField(default=dict, verbose_name='分析结果')
+    overall_risk_level = models.CharField(max_length=20, choices=RISK_LEVEL_CHOICES, null=True, blank=True, verbose_name='总体风险等级')
+
+    # 错误信息
+    error_message = models.TextField(blank=True, null=True, verbose_name='错误信息')
+
+    # 用户信息
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='创建用户')
+
+    # 时间信息
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    started_at = models.DateTimeField(blank=True, null=True, verbose_name='开始时间')
+    completed_at = models.DateTimeField(blank=True, null=True, verbose_name='完成时间')
+
+    class Meta:
+        verbose_name = '叠加分析任务'
+        verbose_name_plural = '叠加分析任务'
+        db_table = 'overlay_analysis_tasks'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.name} ({self.get_status_display()})"

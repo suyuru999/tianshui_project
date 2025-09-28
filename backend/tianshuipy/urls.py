@@ -26,9 +26,14 @@ def home_view(request):
     """首页视图 - 显示系统信息"""
     return render(request, 'index.html')
 
+def overlay_analysis_demo_view(request):
+    """叠加分析演示页面"""
+    return render(request, 'overlay_analysis_demo.html')
+
 urlpatterns = [
     path("", home_view, name="home"),  # 根路径显示首页
     path("admin/", admin.site.urls),
+    path("overlay-analysis-demo/", overlay_analysis_demo_view, name="overlay-analysis-demo"),  # 叠加分析演示页面
     path("api/v1/", include([
         path("users/", include('users.urls')),
         path("environment/", include('environment.urls')),

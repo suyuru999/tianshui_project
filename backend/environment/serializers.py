@@ -6,7 +6,10 @@ from .models import (
     ProcessingTask,
     CitizenFeedback,
     ClimateDataFile,
-    ClimateAnalysisResult
+    ClimateAnalysisResult,
+    EcologicalIndexFile,
+    EcologicalProjectFile,
+    OverlayAnalysisTask
 )
 from users.serializers import UserSerializer
 
@@ -255,3 +258,104 @@ class ClimateAnalysisRequestSerializer(serializers.Serializer):
         choices=[('comprehensive', '综合分析'), ('temperature', '温度分析'), ('precipitation', '降水分析')],
         default='comprehensive'
     )
+
+
+class EcologicalIndexFileSerializer(serializers.ModelSerializer):
+    """生态指数文件序列化器"""
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    uploaded_by_username = serializers.CharField(source='uploaded_by.username', read_only=True)
+
+    class Meta:
+        model = EcologicalIndexFile
+        fields = [
+            'id', 'filename', 'file', 'description', 'status', 'status_display',
+            'indices_data', 'timestamp', 'uploaded_by', 'uploaded_by_username',
+            'created_at', 'processed_at', 'error_message'
+        ]
+        read_only_fields = ['id', 'uploaded_by', 'created_at', 'processed_at']
+
+
+class EcologicalIndexFileUploadSerializer(serializers.ModelSerializer):
+    """生态指数文件上传序列化器"""
+
+    class Meta:
+        model = EcologicalIndexFile
+        fields = ['filename', 'file', 'description']
+
+    def validate_file(self, value):
+        """验证文件类型"""
+        if not value.name.lower().endswith('.json'):
+            raise serializers.ValidationError("只支持JSON文件格式")
+        return value
+
+
+class EcologicalProjectFileSerializer(serializers.ModelSerializer):
+    """生态修复工程文件序列化器"""
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    uploaded_by_username = serializers.CharField(source='uploaded_by.username', read_only=True)
+
+    class Meta:
+        model = EcologicalProjectFile
+        fields = [
+            'id', 'filename', 'file', 'description', 'status', 'status_display',
+            'geojson_data', 'uploaded_by', 'uploaded_by_username',
+            'created_at', 'processed_at', 'error_message'
+        ]
+        read_only_fields = ['id', 'uploaded_by', 'created_at', 'processed_at']
+
+
+class EcologicalProjectFileUploadSerializer(serializers.ModelSerializer):
+    """生态修复工程文件上传序列化器"""
+
+    class Meta:
+        model = EcologicalProjectFile
+        fields = ['filename', 'file', 'description']
+
+    def validate_file(self, value):
+        """验证文件类型"""
+        if not value.name.lower().endswith('.json'):
+            raise serializers.ValidationError("只支持JSON文件格式")
+        return value
+
+
+class OverlayAnalysisTaskSerializer(serializers.ModelSerializer):
+    """叠加分析任务序列化器"""
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    risk_level_display = serializers.CharField(source='get_overall_risk_level_display', read_only=True)
+    ecological_index_file_name = serializers.CharField(source='ecological_index_file.filename', read_only=True)
+    ecological_project_file_name = serializers.CharField(source='ecological_project_file.filename', read_only=True)
+    created_by_username = serializers.CharField(source='created_by.username', read_only=True)
+
+    class Meta:
+        model = OverlayAnalysisTask
+        fields = [
+            'id', 'name', 'description', 'ecological_index_file', 'ecological_project_file',
+            'ecological_index_file_name', 'ecological_project_file_name',
+            'status', 'status_display', 'progress', 'current_step',
+            'analysis_results', 'overall_risk_level', 'risk_level_display',
+            'error_message', 'created_by', 'created_by_username',
+            'created_at', 'started_at', 'completed_at'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at', 'started_at', 'completed_at']
+
+
+class OverlayAnalysisTaskCreateSerializer(serializers.ModelSerializer):
+    """叠加分析任务创建序列化器"""
+
+    class Meta:
+        model = OverlayAnalysisTask
+        fields = ['id', 'name', 'description', 'ecological_index_file', 'ecological_project_file', 'status', 'progress']
+        read_only_fields = ['id', 'status', 'progress']
+
+    def validate(self, data):
+        """验证关联文件状态"""
+        ecological_index_file = data.get('ecological_index_file')
+        ecological_project_file = data.get('ecological_project_file')
+
+        if ecological_index_file and ecological_index_file.status not in ['uploaded', 'completed']:
+            raise serializers.ValidationError("生态指数文件必须上传完成后才能进行叠加分析")
+
+        if ecological_project_file and ecological_project_file.status not in ['uploaded', 'completed']:
+            raise serializers.ValidationError("生态修复工程文件必须上传完成后才能进行叠加分析")
+
+        return data
