@@ -40,6 +40,7 @@ export const API_ENDPOINTS = {
     DELETE: (id) => `/environment/remote-sensing-images/${id}/`,
     UPDATE: (id) => `/environment/remote-sensing-images/${id}/`,
     CALCULATE_INDICES: (id) => `/environment/remote-sensing-images/${id}/calculate_indices/`,
+    GET_INDICES: (id) => `/environment/remote-sensing-images/${id}/indices/`,
   },
   
   // 生态指数计算

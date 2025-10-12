@@ -76,15 +76,25 @@ export const remoteSensingService = {
   calculateIndices(imageId, indices = ['ndvi', 'ndwi', 'ndbi']) {
     const url = buildApiUrl(API_ENDPOINTS.REMOTE_SENSING.CALCULATE_INDICES(imageId));
     const data = { indices: indices };
-    
+
     console.log('calculateIndices 调用详情:', {
       url: url,
       data: data,
       imageId: imageId,
       indices: indices
     });
-    
+
     return request.post(url, data)
+  },
+
+  // 获取影像的生态指数结果
+  getIndices(imageId) {
+    const url = buildApiUrl(API_ENDPOINTS.REMOTE_SENSING.GET_INDICES(imageId));
+    console.log('getIndices 调用详情:', {
+      url: url,
+      imageId: imageId
+    });
+    return request.get(url)
   }
 }
 

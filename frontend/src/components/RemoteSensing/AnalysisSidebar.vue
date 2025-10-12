@@ -29,11 +29,37 @@
     </el-button>
     <div class="group-title-apple">图层选择</div>
     <el-radio-group v-model="localIndex" @change="onIndexChange" class="radio-group-apple">
-      <el-radio class="apple-radio" value="ndvi">绿化指数 (NDVI)</el-radio>
-      <el-radio class="apple-radio" value="heat">热度指数 (LST)</el-radio>
-      <el-radio class="apple-radio" value="ndwi">湿度指数 (NDWI)</el-radio>
-      <el-radio class="apple-radio" value="dryness">干度指数 (NDBSI)</el-radio>
+      <el-radio class="apple-radio" value="ndvi">
+        绿化指数 (NDVI)
+        <el-tag v-if="hasCachedResult && localIndex === 'ndvi'" size="small" type="success" class="cache-tag">已缓存</el-tag>
+      </el-radio>
+      <el-radio class="apple-radio" value="heat">
+        热度指数 (LST)
+        <el-tag v-if="hasCachedResult && localIndex === 'heat'" size="small" type="success" class="cache-tag">已缓存</el-tag>
+      </el-radio>
+      <el-radio class="apple-radio" value="ndwi">
+        湿度指数 (NDWI)
+        <el-tag v-if="hasCachedResult && localIndex === 'ndwi'" size="small" type="success" class="cache-tag">已缓存</el-tag>
+      </el-radio>
+      <el-radio class="apple-radio" value="dryness">
+        干度指数 (NDBSI)
+        <el-tag v-if="hasCachedResult && localIndex === 'dryness'" size="small" type="success" class="cache-tag">已缓存</el-tag>
+      </el-radio>
     </el-radio-group>
+    
+    <!-- 缓存管理 -->
+    <div class="cache-management-apple">
+      <div class="group-title-apple">缓存管理</div>
+      <el-button 
+        class="cache-btn" 
+        size="small" 
+        type="warning" 
+        plain
+        @click="$emit('clear-cache')"
+      >
+        清空缓存
+      </el-button>
+    </div>
   
   </div>
 </template>
@@ -46,11 +72,12 @@ import { Upload } from '@element-plus/icons-vue';
 const props = defineProps({
   selectedIndex: String,
   fileName: String,
-  uploading: Boolean
+  uploading: Boolean,
+  hasCachedResult: Boolean
 });
-const emit = defineEmits(['file-change', 'start-analysis', 'index-change']);
+const emit = defineEmits(['file-change', 'start-analysis', 'index-change', 'clear-cache']);
 
-const localIndex = ref(props.selectedIndex || 'NDVI');
+const localIndex = ref(props.selectedIndex || 'ndvi');
 watch(() => props.selectedIndex, (val) => {
   localIndex.value = val;
 });
@@ -212,5 +239,21 @@ function onIndexChange(val) {
 .apple-radio.is-checked {
   background: linear-gradient(90deg, #5e9cff 0%, #aee2ff 100%);
   color: #fff;
+}
+
+.cache-tag {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.cache-management-apple {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid #e9eff5;
+}
+
+.cache-btn {
+  width: 100%;
+  margin-top: 8px;
 }
 </style> 

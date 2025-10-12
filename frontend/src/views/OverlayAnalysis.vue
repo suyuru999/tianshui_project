@@ -915,6 +915,9 @@ onMounted(() => {
   margin: 0;
   width: 14px;
   height: 14px;
+  opacity: 0;
+  position: absolute;
+  pointer-events: none;
 }
 
 .layer-name {
@@ -952,6 +955,8 @@ onMounted(() => {
   border-radius: 3px;
   position: relative;
   transition: all 0.2s;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .layer-checkbox input[type="checkbox"]:checked + .checkmark {

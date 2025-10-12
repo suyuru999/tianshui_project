@@ -60,13 +60,42 @@ def calculate_ecological_indices(self, image_id, indices_list):
         except RemoteSensingImage.DoesNotExist:
             raise ValueError(f"找不到ID为 {image_id} 的遥感影像")
         
-        # 创建处理任务记录
-        task = ProcessingTask.objects.create(
-            remote_sensing_image=image,
-            task_type='ecological_index_calculation',
-            status='processing'
-        )
-        logger.info(f"创建处理任务成功，任务ID: {task.id}")
+        # 查找现有的处理任务记录（由API创建）
+        try:
+            task = ProcessingTask.objects.filter(
+                remote_sensing_image=image,
+                task_type__contains='生态指数计算'
+            ).order_by('-created_at').first()
+            
+            # 如果没找到，尝试查找包含 'ecological_index_calculation' 的任务
+            if not task:
+                task = ProcessingTask.objects.filter(
+                    remote_sensing_image=image,
+                    task_type='ecological_index_calculation'
+                ).order_by('-created_at').first()
+            
+            if not task:
+                # 如果没有找到现有任务，创建一个新的
+                task = ProcessingTask.objects.create(
+                    remote_sensing_image=image,
+                    task_type='ecological_index_calculation',
+                    status='processing'
+                )
+                logger.info(f"创建新的处理任务成功，任务ID: {task.id}")
+            else:
+                # 更新现有任务状态
+                task.status = 'processing'
+                task.save()
+                logger.info(f"更新现有处理任务成功，任务ID: {task.id}")
+        except Exception as e:
+            logger.error(f"处理任务记录操作失败: {e}")
+            # 如果出错，创建一个新的任务记录
+            task = ProcessingTask.objects.create(
+                remote_sensing_image=image,
+                task_type='ecological_index_calculation',
+                status='processing'
+            )
+            logger.info(f"创建备用处理任务成功，任务ID: {task.id}")
         
         # 更新任务进度
         self.update_state(

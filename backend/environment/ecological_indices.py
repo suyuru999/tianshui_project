@@ -5,6 +5,13 @@ from rasterio.warp import calculate_default_transform, reproject, Resampling
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 from matplotlib.colors import LinearSegmentedColormap
+import matplotlib
+import matplotlib.font_manager as fm
+
+# 设置matplotlib后端和中文字体支持
+matplotlib.use('Agg')  # 使用非交互式后端
+plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial Unicode MS', 'sans-serif']
+plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 import os
 import tempfile
 from PIL import Image
@@ -827,9 +834,7 @@ class EcologicalIndexCalculator:
                 logger.warning("数据数组为空")
                 return False
             
-            # 设置matplotlib后端，避免GUI相关问题
-            import matplotlib
-            matplotlib.use('Agg')  # 使用非交互式后端
+            # matplotlib后端已在文件开头设置
             
             # 创建自定义颜色映射
             colors_list = ['#8B0000', '#FF0000', '#FFA500', '#FFFF00', '#00FF00', '#006400']

@@ -438,7 +438,6 @@ const toggleBusinessFunctions = () => {
 
 .layer-group-content {
   padding-left: 12px;
-  border-left: 2px solid #f0f0f0;
 }
 
 .layer-item {
@@ -528,7 +527,7 @@ input:checked + .slider:before {
 /* 上传按钮 */
 .upload-btn {
   width: 100%;
-  background: #52c41a;
+  background: #1890ff;
   color: white;
   border: none;
   padding: 12px;
@@ -539,10 +538,11 @@ input:checked + .slider:before {
   justify-content: center;
   gap: 8px;
   font-size: 13px;
+  transition: background 0.2s;
 }
 
 .upload-btn:hover {
-  background: #73d13d;
+  background: #40a9ff;
 }
 
 /* 工具箱 */
@@ -588,7 +588,7 @@ input:checked + .slider:before {
 
 .export-btn {
   width: 100%;
-  background: #722ed1;
+  background: #1890ff;
   color: white;
   border: none;
   padding: 12px;
@@ -600,10 +600,11 @@ input:checked + .slider:before {
   gap: 8px;
   font-size: 13px;
   margin-top: 12px;
+  transition: background 0.2s;
 }
 
 .export-btn:hover {
-  background: #9254de;
+  background: #40a9ff;
 }
 
 /* 业务功能 */

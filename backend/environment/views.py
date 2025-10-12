@@ -83,18 +83,18 @@ class RemoteSensingImageViewSet(viewsets.ModelViewSet):
             print(f"请求方法: {request.method}")
             print(f"请求内容类型: {request.content_type}")
             print(f"请求数据: {request.data}")
-            
+
             image = self.get_object()
             print(f"找到影像: {image.name}")
-            
+
             # 获取要计算的指数类型
             indices_list = request.data.get('indices', ['ndvi', 'ndwi', 'ndbi'])
             print(f"请求的指数类型: {indices_list}")
-            
+
             # 标准化指数类型名称（转换为小写）
             normalized_indices = [idx.lower() for idx in indices_list]
             print(f"标准化后的指数类型: {normalized_indices}")
-            
+
             # 验证指数类型
             valid_indices = ['ndvi', 'ndwi', 'ndbi', 'ndsi', 'wetness', 'dryness', 'heat', 'greenness']
             if not all(idx in valid_indices for idx in normalized_indices):
@@ -103,9 +103,9 @@ class RemoteSensingImageViewSet(viewsets.ModelViewSet):
                 return Response({
                     'error': error_msg
                 }, status=400)
-            
+
             print(f"指数类型验证通过，开始创建任务")
-            
+
             # 创建处理任务
             task = ProcessingTask.objects.create(
                 remote_sensing_image=image,
@@ -113,26 +113,26 @@ class RemoteSensingImageViewSet(viewsets.ModelViewSet):
                 status='pending',
                 created_by=request.user if request.user.is_authenticated else None
             )
-            
+
             print(f"任务创建成功，任务ID: {task.id}")
-            
+
             # 启动Celery任务进行异步计算
             from .tasks import calculate_ecological_indices
             celery_task = calculate_ecological_indices.delay(str(image.id), normalized_indices)
-            
+
             # 更新任务状态
             task.status = 'processing'
             task.save()
-            
+
             print(f"Celery任务启动成功，任务ID: {celery_task.id}")
-            
+
             return Response({
                 'message': '生态指数计算已启动',
                 'task_id': str(task.id),
                 'celery_task_id': str(celery_task.id),
                 'indices': indices_list
             })
-            
+
         except Exception as e:
             print(f"启动生态指数计算失败: {e}")
             import traceback
@@ -141,6 +141,71 @@ class RemoteSensingImageViewSet(viewsets.ModelViewSet):
             return Response({
                 'error': f'启动计算失败: {str(e)}'
             }, status=500)
+
+    @action(detail=True, methods=['get'])
+    def indices(self, request, pk=None):
+        """获取影像的生态指数列表及统计数据"""
+        try:
+            image = self.get_object()
+
+            # 获取该影像的所有生态指数
+            indices = EcologicalIndex.objects.filter(remote_sensing_image=image)
+
+            if not indices.exists():
+                response = Response({
+                    'message': '该影像暂无生态指数数据',
+                    'indices': []
+                })
+                response['Content-Type'] = 'application/json; charset=utf-8'
+                return response
+
+            # 序列化数据
+            serializer = EcologicalIndexSerializer(indices, many=True)
+
+            # 手动添加正确的中文显示文本
+            indices_data = serializer.data
+            for index_data in indices_data:
+                # 修复index_type_display
+                index_type = index_data.get('index_type', '')
+                index_type_display_map = {
+                    'ndvi': 'NDVI - 归一化植被指数',
+                    'ndwi': 'NDWI - 归一化水体指数',
+                    'ndbi': 'NDBI - 归一化建筑指数',
+                    'ndsi': 'NDSI - 归一化积雪指数',
+                    'rsei': 'RSEI - 遥感生态指数',
+                    'wetness': '湿度指数',
+                    'dryness': '干度指数',
+                    'heat': '热度指数',
+                    'greenness': '绿度指数',
+                }
+                index_data['index_type_display'] = index_type_display_map.get(index_type, index_type.upper())
+                
+                # 修复remote_sensing_image中的processing_status_display
+                if 'remote_sensing_image' in index_data:
+                    processing_status = index_data['remote_sensing_image'].get('processing_status', '')
+                    status_display_map = {
+                        'pending': '等待中',
+                        'processing': '处理中',
+                        'completed': '已完成',
+                        'failed': '失败',
+                    }
+                    index_data['remote_sensing_image']['processing_status_display'] = status_display_map.get(processing_status, processing_status)
+
+            response = Response({
+                'message': '获取生态指数成功',
+                'count': indices.count(),
+                'indices': indices_data
+            })
+            response['Content-Type'] = 'application/json; charset=utf-8'
+            return response
+
+        except Exception as e:
+            logger.error(f"获取生态指数失败: {e}")
+            response = Response({
+                'error': f'获取生态指数失败: {str(e)}'
+            }, status=500)
+            response['Content-Type'] = 'application/json; charset=utf-8'
+            return response
 
 # 暂时注释掉其他视图类，只保留遥感影像视图集
 # class EcologicalIndexViewSet(viewsets.ModelViewSet):

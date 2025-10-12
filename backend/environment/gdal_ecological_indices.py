@@ -5,9 +5,15 @@ GDAL (Geospatial Data Abstraction Library) 是处理地理空间数据的强大�
 
 import numpy as np
 from osgeo import gdal, osr
+import matplotlib
+matplotlib.use('Agg')  # 使用非交互式后端
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 from matplotlib.colors import LinearSegmentedColormap
+
+# 设置中文字体支持
+plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial Unicode MS', 'sans-serif']
+plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 import os
 import tempfile
 from PIL import Image

@@ -14,9 +14,11 @@
           :selected-index="selectedIndex"
           :file-name="fileName"
           :uploading="uploading"
+          :has-cached-result="!!getCachedResult(currentImageId, selectedIndex)"
           @file-change="handleFileChange"
           @start-analysis="handleStartAnalysis"
           @index-change="handleIndexChange"
+          @clear-cache="clearCache"
         />
       </div>
       
@@ -77,13 +79,21 @@ const loadingStore = useLoadingStore();
 const messageStore = useMessageStore();
 
 // 组件状态
-const selectedIndex = ref('NDVI');
+const selectedIndex = ref('ndvi');
 const fileName = ref('');
 const uploading = ref(false);
 const status = ref('waiting'); // waiting | analyzing | done | error
 const resultData = ref(null);
 const currentTaskId = ref(null);
 const currentFile = ref(null);
+const currentImageId = ref(null); // 存储当前影像ID
+
+// 结果缓存管理
+const analysisResultsCache = ref(new Map()); // 存储不同指数类型的分析结果
+const cacheKey = computed(() => {
+  if (!currentImageId.value || !selectedIndex.value) return null;
+  return `${currentImageId.value}_${selectedIndex.value.toLowerCase()}`;
+});
 
 // 分析进度相关
 const analysisProgress = ref(0);
@@ -99,6 +109,14 @@ const globalLoading = computed(() => loadingStore.globalLoading);
 // 组件挂载时检查用户登录状态
 onMounted(() => {
   checkAuthStatus();
+  loadCacheFromStorage();
+  
+  // 调试信息
+  console.log('组件挂载，当前状态:', {
+    selectedIndex: selectedIndex.value,
+    currentImageId: currentImageId.value,
+    hasFile: !!currentFile.value
+  });
 });
 
 // 检查认证状态
@@ -115,6 +133,489 @@ function checkAuthStatus() {
     // 在实际生产环境中应该跳转到登录页面
     // window.location.href = '/login';
   }
+}
+
+// 缓存管理函数
+function saveAnalysisResult(resultData, imageId, indexType) {
+  if (!resultData || !imageId || !indexType) {
+    console.warn('保存缓存失败：缺少必要参数', { resultData: !!resultData, imageId, indexType });
+    return;
+  }
+  
+  const key = `${imageId}_${indexType.toLowerCase()}`;
+  console.log(`保存缓存，键: ${key}, 影像ID: ${imageId}, 指数类型: ${indexType}`);
+  
+  // 检查是否已经有相同的缓存
+  const existingCache = analysisResultsCache.value.get(key);
+  if (existingCache && JSON.stringify(existingCache.resultData) === JSON.stringify(resultData)) {
+    console.log(`缓存已存在且内容相同，跳过保存: ${key}`);
+    return;
+  }
+  
+  const cacheData = {
+    resultData,
+    imageId,
+    indexType,
+    timestamp: Date.now(),
+    fileName: fileName.value
+  };
+  analysisResultsCache.value.set(key, cacheData);
+  
+  // 同时保存到localStorage作为持久化存储，使用单独的键以避免覆盖
+  try {
+    // 为每个指数类型使用单独的localStorage键
+    const storageKey = `analysis_result_${imageId}_${indexType.toLowerCase()}`;
+    
+    // 直接保存当前指数的结果，不影响其他指数的缓存
+    localStorage.setItem(storageKey, JSON.stringify(cacheData));
+    
+    console.log(`成功保存到localStorage，键: ${storageKey}`);
+    
+    // 同时维护一个索引，记录所有缓存的键
+    let cacheIndex = [];
+    try {
+      const existingIndex = localStorage.getItem('analysis_cache_index');
+      if (existingIndex) {
+        cacheIndex = JSON.parse(existingIndex);
+      }
+    } catch (e) {
+      console.warn('读取缓存索引失败，创建新索引');
+    }
+    
+    // 添加当前键到索引（如果不存在）
+    if (!cacheIndex.includes(storageKey)) {
+      cacheIndex.push(storageKey);
+      localStorage.setItem('analysis_cache_index', JSON.stringify(cacheIndex));
+    }
+    
+    console.log('当前缓存索引:', cacheIndex);
+  } catch (error) {
+    console.warn('保存缓存到localStorage失败:', error);
+  }
+  
+  console.log(`已保存${indexType}分析结果到缓存，键: ${key}`);
+  console.log('当前缓存内容:', Array.from(analysisResultsCache.value.keys()));
+  
+  // 验证保存的缓存数据
+  const savedCache = analysisResultsCache.value.get(key);
+  if (savedCache) {
+    console.log('验证保存的缓存数据:', {
+      key,
+      imageId: savedCache.imageId,
+      indexType: savedCache.indexType,
+      timestamp: new Date(savedCache.timestamp).toLocaleString(),
+      hasResultData: !!savedCache.resultData,
+      resultDataType: typeof savedCache.resultData,
+      resultDataKeys: savedCache.resultData ? Object.keys(savedCache.resultData) : []
+    });
+  }
+  
+  // 立即测试读取缓存
+  setTimeout(() => {
+    const testResult = getCachedResult(imageId, indexType);
+    console.log(`立即测试读取${indexType}缓存:`, testResult ? '成功' : '失败');
+    if (testResult) {
+      console.log('测试读取的缓存数据:', {
+        imageId: testResult.imageId,
+        indexType: testResult.indexType,
+        hasResultData: !!testResult.resultData
+      });
+    }
+  }, 100);
+}
+
+function getCachedResult(imageId, indexType) {
+  const key = `${imageId}_${indexType.toLowerCase()}`;
+  console.log(`查找缓存，键: ${key}, 影像ID: ${imageId}, 指数类型: ${indexType}`);
+  
+  // 记录当前所有缓存键
+  const allCacheKeys = Array.from(analysisResultsCache.value.keys());
+  console.log('当前内存缓存键列表:', allCacheKeys);
+  
+  // 尝试多种键格式
+  const possibleKeys = [
+    key,
+    `${imageId}_${indexType}`, // 原始大小写
+    `${imageId}_${indexType.toUpperCase()}`, // 大写
+    `${imageId}_${indexType.toLowerCase()}` // 小写
+  ];
+  
+  console.log('尝试的内存缓存键格式:', possibleKeys);
+  
+  let cached = null;
+  let matchedKey = null;
+  
+  // 1. 首先尝试从内存缓存中获取
+  for (const testKey of possibleKeys) {
+    cached = analysisResultsCache.value.get(testKey);
+    if (cached) {
+      console.log(`在内存缓存中找到结果，使用键: ${testKey}`);
+      matchedKey = testKey;
+      break;
+    }
+  }
+  
+  // 2. 如果内存中没有，尝试从localStorage直接获取
+  if (!cached) {
+    console.log('内存缓存中未找到，尝试从localStorage读取');
+    
+    const storageKeys = [
+      `analysis_result_${imageId}_${indexType.toLowerCase()}`,
+      `analysis_result_${imageId}_${indexType}`,
+      `analysis_result_${imageId}_${indexType.toUpperCase()}`
+    ];
+    
+    for (const storageKey of storageKeys) {
+      try {
+        const storedData = localStorage.getItem(storageKey);
+        if (storedData) {
+          console.log(`在localStorage中找到结果，使用键: ${storageKey}`);
+          const parsedData = JSON.parse(storedData);
+          
+          if (parsedData && parsedData.resultData) {
+            // 将结果保存到内存缓存中
+            const memKey = `${imageId}_${indexType.toLowerCase()}`;
+            analysisResultsCache.value.set(memKey, parsedData);
+            
+            cached = parsedData;
+            matchedKey = memKey;
+            console.log(`已将localStorage数据加载到内存缓存，键: ${memKey}`);
+            break;
+          }
+        }
+      } catch (e) {
+        console.warn(`读取localStorage键 ${storageKey} 失败:`, e);
+      }
+    }
+  }
+  
+  // 3. 处理找到的缓存
+  if (cached) {
+    // 检查缓存是否过期（24小时）
+    const isExpired = Date.now() - cached.timestamp > 24 * 60 * 60 * 1000;
+    if (isExpired) {
+      console.log(`缓存已过期，删除键: ${matchedKey}`);
+      analysisResultsCache.value.delete(matchedKey);
+      
+      // 同时从localStorage中删除
+      try {
+        const storageKey = `analysis_result_${imageId}_${indexType.toLowerCase()}`;
+        localStorage.removeItem(storageKey);
+        console.log(`已删除过期的localStorage缓存: ${storageKey}`);
+      } catch (e) {
+        console.warn('删除过期localStorage缓存失败:', e);
+      }
+      
+      return null;
+    }
+    
+    console.log(`找到${indexType}缓存结果，键: ${matchedKey}`);
+    console.log('缓存数据详情:', {
+      imageId: cached.imageId,
+      indexType: cached.indexType,
+      timestamp: new Date(cached.timestamp).toLocaleString(),
+      hasResultData: !!cached.resultData,
+      dataSize: cached.resultData ? JSON.stringify(cached.resultData).length : 0
+    });
+    
+    return cached;
+  }
+  
+  console.log(`未找到${indexType}缓存结果，需要重新计算`);
+  return null;
+}
+
+function clearCache() {
+  // 清空内存中的缓存
+  analysisResultsCache.value.clear();
+  
+  // 清空localStorage中的所有缓存
+  try {
+    // 先获取索引
+    const cacheIndex = localStorage.getItem('analysis_cache_index');
+    if (cacheIndex) {
+      const cacheKeys = JSON.parse(cacheIndex);
+      
+      // 删除每个缓存项
+      if (Array.isArray(cacheKeys)) {
+        console.log('正在清除缓存项:', cacheKeys);
+        cacheKeys.forEach(key => {
+          localStorage.removeItem(key);
+        });
+      }
+    }
+    
+    // 删除索引
+    localStorage.removeItem('analysis_cache_index');
+    
+    // 兼容旧版缓存
+    localStorage.removeItem('analysis_results_cache');
+    
+    console.log('所有缓存已清空');
+  } catch (error) {
+    console.warn('清除缓存失败:', error);
+  }
+  
+  messageStore.success('已清空所有缓存结果');
+}
+
+// 从localStorage加载缓存
+function loadCacheFromStorage() {
+  console.log('🔄 开始加载缓存...');
+  
+  try {
+    // 初始化缓存Map
+    analysisResultsCache.value = new Map();
+    
+    // 从索引中获取所有缓存键
+    const cacheIndex = localStorage.getItem('analysis_cache_index');
+    if (!cacheIndex) {
+      console.log('未找到缓存索引，没有可加载的缓存');
+      return;
+    }
+    
+    let cacheKeys = [];
+    try {
+      cacheKeys = JSON.parse(cacheIndex);
+      if (!Array.isArray(cacheKeys)) {
+        console.warn('缓存索引格式无效，应为数组');
+        return;
+      }
+    } catch (e) {
+      console.warn('解析缓存索引失败:', e);
+      return;
+    }
+    
+    console.log('找到缓存索引，包含以下键:', cacheKeys);
+    
+    // 记录加载统计
+    let loadedCount = 0;
+    let failedCount = 0;
+    
+    // 加载每个缓存项
+    for (const storageKey of cacheKeys) {
+      try {
+        const cachedData = localStorage.getItem(storageKey);
+        if (!cachedData) {
+          console.warn(`索引中的缓存键 ${storageKey} 不存在`);
+          failedCount++;
+          continue;
+        }
+        
+        const cacheData = JSON.parse(cachedData);
+        
+        // 验证缓存数据
+        if (!cacheData || !cacheData.imageId || !cacheData.indexType || !cacheData.resultData) {
+          console.warn(`缓存键 ${storageKey} 的数据无效:`, cacheData);
+          failedCount++;
+          continue;
+        }
+        
+        // 构建内存缓存键
+        const memKey = `${cacheData.imageId}_${cacheData.indexType.toLowerCase()}`;
+        
+        // 保存到内存缓存
+        analysisResultsCache.value.set(memKey, cacheData);
+        loadedCount++;
+        
+        console.log(`已加载缓存: ${storageKey} -> ${memKey}`, {
+          imageId: cacheData.imageId,
+          indexType: cacheData.indexType,
+          timestamp: new Date(cacheData.timestamp).toLocaleString()
+        });
+      } catch (e) {
+        console.warn(`加载缓存键 ${storageKey} 失败:`, e);
+        failedCount++;
+      }
+    }
+    
+    console.log(`🔄 缓存加载完成，成功: ${loadedCount}, 失败: ${failedCount}, 总缓存数: ${analysisResultsCache.value.size}`);
+    
+    // 打印加载的所有缓存键
+    if (analysisResultsCache.value.size > 0) {
+      console.log('当前内存缓存键:', Array.from(analysisResultsCache.value.keys()));
+      
+      // 调试：打印每个缓存条目的详细信息
+      analysisResultsCache.value.forEach((value, key) => {
+        console.log(`缓存条目 ${key}:`, {
+          imageId: value.imageId,
+          indexType: value.indexType,
+          timestamp: new Date(value.timestamp).toLocaleString(),
+          hasResultData: !!value.resultData
+        });
+      });
+    }
+    
+    // 尝试加载旧版缓存格式（兼容性）
+    try {
+      const oldCache = localStorage.getItem('analysis_results_cache');
+      if (oldCache) {
+        console.log('检测到旧版缓存格式，尝试加载...');
+        const oldCacheArray = JSON.parse(oldCache);
+        
+        if (Array.isArray(oldCacheArray)) {
+          let oldLoadedCount = 0;
+          
+          oldCacheArray.forEach(item => {
+            if (Array.isArray(item) && item.length === 2) {
+              const [key, value] = item;
+              if (key && value && value.imageId && value.indexType && value.resultData) {
+                // 检查是否已经加载过这个缓存
+                const memKey = `${value.imageId}_${value.indexType.toLowerCase()}`;
+                if (!analysisResultsCache.value.has(memKey)) {
+                  analysisResultsCache.value.set(memKey, value);
+                  oldLoadedCount++;
+                  
+                  // 同时迁移到新格式
+                  const newStorageKey = `analysis_result_${value.imageId}_${value.indexType.toLowerCase()}`;
+                  localStorage.setItem(newStorageKey, JSON.stringify(value));
+                  
+                  // 更新索引
+                  if (!cacheKeys.includes(newStorageKey)) {
+                    cacheKeys.push(newStorageKey);
+                    localStorage.setItem('analysis_cache_index', JSON.stringify(cacheKeys));
+                  }
+                }
+              }
+            }
+          });
+          
+          if (oldLoadedCount > 0) {
+            console.log(`从旧版缓存加载了${oldLoadedCount}个缓存项`);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('加载旧版缓存失败:', e);
+    }
+  } catch (error) {
+    console.warn('从localStorage加载缓存失败:', error);
+    // 如果加载失败，确保缓存Map被初始化为空
+    analysisResultsCache.value = new Map();
+  }
+}
+
+// 调试函数：打印当前缓存状态
+function debugCacheStatus() {
+  console.log('=== 缓存状态调试 ===');
+  console.log('当前影像ID:', currentImageId.value);
+  console.log('当前指数类型:', selectedIndex.value);
+  console.log('预期缓存键:', cacheKey.value);
+  
+  // 检查内存缓存
+  const memCacheEntries = Array.from(analysisResultsCache.value.entries());
+  console.log(`内存缓存条目数: ${memCacheEntries.length}`);
+  
+  if (memCacheEntries.length > 0) {
+    console.log('内存缓存键列表:', memCacheEntries.map(([key]) => key));
+    
+    // 显示每个缓存项的简要信息
+    memCacheEntries.forEach(([key, value]) => {
+      console.log(`内存缓存项 [${key}]:`, {
+        imageId: value.imageId,
+        indexType: value.indexType,
+        timestamp: new Date(value.timestamp).toLocaleString(),
+        hasResultData: !!value.resultData,
+        dataSize: value.resultData ? JSON.stringify(value.resultData).length : 0
+      });
+    });
+  }
+  
+  // 检查当前指数是否有缓存
+  if (currentImageId.value && selectedIndex.value) {
+    const key = `${currentImageId.value}_${selectedIndex.value.toLowerCase()}`;
+    const hasCache = analysisResultsCache.value.has(key);
+    console.log(`当前指数 ${selectedIndex.value} 是否有内存缓存:`, hasCache);
+    
+    if (hasCache) {
+      const cache = analysisResultsCache.value.get(key);
+      console.log('缓存数据详情:', {
+        imageId: cache.imageId,
+        indexType: cache.indexType,
+        timestamp: new Date(cache.timestamp).toLocaleString(),
+        hasResultData: !!cache.resultData,
+        resultDataKeys: cache.resultData ? Object.keys(cache.resultData) : []
+      });
+    }
+    
+    // 检查localStorage中是否有当前指数的缓存
+    try {
+      const storageKey = `analysis_result_${currentImageId.value}_${selectedIndex.value.toLowerCase()}`;
+      const storedData = localStorage.getItem(storageKey);
+      console.log(`当前指数 ${selectedIndex.value} 是否有localStorage缓存:`, !!storedData);
+      
+      if (storedData) {
+        console.log(`localStorage缓存大小: ${storedData.length} 字节`);
+        try {
+          const parsedData = JSON.parse(storedData);
+          console.log('localStorage缓存数据有效:', !!parsedData);
+        } catch (e) {
+          console.warn('localStorage缓存数据解析失败:', e);
+        }
+      }
+    } catch (e) {
+      console.warn('检查localStorage缓存失败:', e);
+    }
+  }
+  
+  // 检查localStorage中的缓存索引
+  try {
+    const cacheIndex = localStorage.getItem('analysis_cache_index');
+    if (cacheIndex) {
+      const keys = JSON.parse(cacheIndex);
+      console.log(`localStorage中的缓存索引包含 ${keys.length} 个键:`, keys);
+      
+      // 检查每个键的内容
+      if (Array.isArray(keys)) {
+        let validCount = 0;
+        let invalidCount = 0;
+        
+        keys.forEach(key => {
+          try {
+            const item = localStorage.getItem(key);
+            if (item) {
+              validCount++;
+              try {
+                const data = JSON.parse(item);
+                console.log(`localStorage缓存项 [${key}]:`, {
+                  imageId: data.imageId,
+                  indexType: data.indexType,
+                  hasData: !!data.resultData,
+                  timestamp: data.timestamp ? new Date(data.timestamp).toLocaleString() : 'unknown'
+                });
+              } catch (parseError) {
+                console.warn(`解析缓存项 ${key} 失败:`, parseError);
+              }
+            } else {
+              invalidCount++;
+              console.log(`localStorage缓存项 ${key}: 不存在`);
+            }
+          } catch (e) {
+            invalidCount++;
+            console.log(`读取localStorage缓存项 ${key} 失败:`, e);
+          }
+        });
+        
+        console.log(`缓存索引验证: 有效 ${validCount}, 无效 ${invalidCount}`);
+      }
+    } else {
+      console.log('localStorage中没有缓存索引');
+    }
+    
+    // 检查localStorage存储使用情况
+    let totalSize = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      const value = localStorage.getItem(key);
+      totalSize += (key.length + value.length) * 2; // 估算字节大小
+    }
+    
+    console.log(`localStorage使用情况: ${(totalSize / (1024 * 1024)).toFixed(2)} MB / 5 MB (估计)`);
+  } catch (error) {
+    console.log('读取localStorage缓存索引失败:', error);
+  }
+  
+  console.log('==================');
 }
 
 // 处理文件选择
@@ -155,6 +656,55 @@ async function handleStartAnalysis() {
   }
   
   try {
+    // 在开始新分析前，保存当前结果到缓存（如果有的话）
+    if (status.value === 'done' && resultData.value && currentImageId.value) {
+      console.log('开始新分析前保存当前结果到缓存');
+      
+      // 强制保存当前结果，确保不会丢失
+      const currentIndex = selectedIndex.value;
+      const currentData = { ...resultData.value };
+      const tempKey = `${currentImageId.value}_${currentIndex.toLowerCase()}`;
+      
+      // 直接构造缓存对象
+      const cacheObj = {
+        resultData: currentData,
+        imageId: currentImageId.value,
+        indexType: currentIndex,
+        timestamp: Date.now(),
+        fileName: fileName.value
+      };
+      
+      // 保存到内存缓存
+      analysisResultsCache.value.set(tempKey, cacheObj);
+      
+      // 保存到localStorage
+      try {
+        const storageKey = `analysis_result_${currentImageId.value}_${currentIndex.toLowerCase()}`;
+        localStorage.setItem(storageKey, JSON.stringify(cacheObj));
+        
+        // 更新索引
+        let cacheIndex = [];
+        const existingIndex = localStorage.getItem('analysis_cache_index');
+        if (existingIndex) {
+          try {
+            cacheIndex = JSON.parse(existingIndex);
+          } catch (e) {
+            console.warn('解析缓存索引失败，创建新索引');
+            cacheIndex = [];
+          }
+        }
+        
+        if (!cacheIndex.includes(storageKey)) {
+          cacheIndex.push(storageKey);
+          localStorage.setItem('analysis_cache_index', JSON.stringify(cacheIndex));
+        }
+        
+        console.log(`已强制保存${currentIndex}结果到缓存，键: ${storageKey}`);
+      } catch (error) {
+        console.error('保存缓存到localStorage失败:', error);
+      }
+    }
+    
     uploading.value = true;
     status.value = 'analyzing';
     analysisProgress.value = 0;
@@ -191,22 +741,20 @@ async function handleStartAnalysis() {
     
     const uploadResult = await remoteSensingService.upload(currentFile.value, uploadData);
     
-    // 添加调试信息
+    // 检查上传结果
     console.log('上传结果:', uploadResult);
-    console.log('上传结果类型:', typeof uploadResult);
-    console.log('上传结果ID:', uploadResult?.id);
-    console.log('上传结果键:', Object.keys(uploadResult || {}));
     
     if (uploadResult && uploadResult.id) {
       const imageId = uploadResult.id;
+      currentImageId.value = imageId; // 保存影像ID
       console.log('获取到影像ID:', imageId);
       analysisProgress.value = 20;
       messageStore.success('文件上传成功，开始分析...');
-      
+
       // 2. 启动生态指数计算
       currentStep.value = '启动生态指数计算';
       stepDetail.value = '正在启动生态指数计算任务...';
-      
+
       try {
         // 调用计算接口
         console.log('准备调用计算接口，参数:', {
@@ -214,38 +762,27 @@ async function handleStartAnalysis() {
           selectedIndex: selectedIndex.value,
           indices: [selectedIndex.value]
         });
-        
+
         const calculateResult = await remoteSensingService.calculateIndices(imageId, [selectedIndex.value]);
         console.log('计算接口调用成功，结果:', calculateResult);
-        
+        console.log('计算接口调用结果类型:', typeof calculateResult);
+        console.log('计算接口调用结果键:', Object.keys(calculateResult || {}));
+
         analysisProgress.value = 30;
         messageStore.success('生态指数计算已启动，正在处理中...');
-        
-        // 3. 创建分析任务记录
-        currentStep.value = '创建分析任务';
-        stepDetail.value = '正在创建分析任务记录...';
-        
-        const taskData = {
-          remote_sensing_image_id: imageId,
-          task_type: `生态指数计算 - ${selectedIndex.value}`,
-          status: 'processing'
-        };
-        
-        // 使用ProcessingTask服务创建任务
-        const taskResult = await processingTaskService.create(taskData);
-        
-        if (taskResult && taskResult.id) {
-          currentTaskId.value = taskResult.id;
+
+        // 3. 使用返回的任务ID
+        if (calculateResult && calculateResult.task_id) {
+          currentTaskId.value = calculateResult.task_id;
           analysisProgress.value = 40;
-          messageStore.success('分析任务创建成功，正在处理中...');
-          
-          // 4. 模拟分析进度
-          await simulateAnalysisProgress(analysisSteps);
-          
-          // 5. 轮询任务状态
-          await pollTaskStatus(currentTaskId.value);
+          console.log('获取到任务ID:', currentTaskId.value);
+
+          // 4. 启动真正的任务状态轮询
+          console.log('启动任务状态轮询，等待真正的计算完成');
+          pollTaskStatus(currentTaskId.value, imageId);
         } else {
-          throw new Error('创建分析任务失败');
+          console.error('未获取到任务ID，calculateResult:', calculateResult);
+          throw new Error('未获取到任务ID');
         }
       } catch (error) {
         console.error('启动生态指数计算失败:', error);
@@ -348,20 +885,57 @@ function waitForResume() {
 }
 
 // 轮询任务状态
-async function pollTaskStatus(taskId) {
+async function pollTaskStatus(taskId, imageId) {
   const maxAttempts = 60;
   let attempts = 0;
-  
+
   const poll = async () => {
     try {
+      console.log(`轮询任务状态，第${attempts + 1}次，任务ID: ${taskId}`);
       const statusResult = await processingTaskService.getStatus(taskId);
+      console.log('任务状态响应:', statusResult);
+      console.log('任务状态响应类型:', typeof statusResult);
+      console.log('任务状态响应键:', Object.keys(statusResult || {}));
       const taskStatus = statusResult.status;
-      
+      console.log('解析的任务状态:', taskStatus);
+
       if (taskStatus === 'completed') {
         // 任务完成，获取结果
+        console.log('🎉🎉🎉 分析任务完成！开始保存缓存 🎉🎉🎉');
         const taskDetail = await processingTaskService.getDetail(taskId);
+        console.log('任务完成，获取到的任务详情:', taskDetail);
+        
         status.value = 'done';
-        resultData.value = taskDetail;
+        // 确保resultData包含影像ID
+        resultData.value = {
+          ...taskDetail,
+          remote_sensing_image_id: imageId
+        };
+        
+        // 保存分析结果到缓存
+        console.log('准备保存缓存，参数:', {
+          resultData: resultData.value,
+          imageId: imageId,
+          selectedIndex: selectedIndex.value
+        });
+        
+        // 确保当前指数类型的结果被正确缓存
+        const currentIndex = selectedIndex.value;
+        if (currentIndex) {
+          saveAnalysisResult(resultData.value, imageId, currentIndex);
+          
+          // 验证缓存是否保存成功
+          setTimeout(() => {
+            const verifyCache = getCachedResult(imageId, currentIndex);
+            if (verifyCache) {
+              console.log(`✅ 验证成功：${currentIndex}分析结果已正确缓存`);
+            } else {
+              console.warn(`❌ 验证失败：${currentIndex}分析结果未能正确缓存`);
+            }
+          }, 200);
+        }
+        
+        console.log('设置resultData:', resultData.value);
         messageStore.success('分析完成！');
         return;
       } else if (taskStatus === 'failed') {
@@ -370,9 +944,10 @@ async function pollTaskStatus(taskId) {
         resultData.value = { error: '分析任务执行失败' };
         messageStore.error('分析任务执行失败');
         return;
-      } else if (taskStatus === 'processing') {
+      } else if (taskStatus === 'processing' || taskStatus === 'pending') {
         // 任务处理中，继续轮询
         attempts++;
+        console.log(`任务状态: ${taskStatus}, 继续轮询 (${attempts}/${maxAttempts})`);
         if (attempts < maxAttempts) {
           setTimeout(poll, 2000);
         } else {
@@ -381,11 +956,23 @@ async function pollTaskStatus(taskId) {
           resultData.value = { error: '分析超时，请检查任务状态' };
           messageStore.warning('分析超时，请检查任务状态');
         }
+      } else {
+        // 未知状态
+        console.log('未知任务状态:', taskStatus);
+        attempts++;
+        if (attempts < maxAttempts) {
+          setTimeout(poll, 2000);
+        } else {
+          status.value = 'error';
+          resultData.value = { error: '任务状态异常' };
+          messageStore.error('任务状态异常');
+        }
       }
     } catch (error) {
       console.error('查询任务状态失败:', error);
       attempts++;
       if (attempts < maxAttempts) {
+        console.log(`查询失败，重试 (${attempts}/${maxAttempts})`);
         setTimeout(poll, 2000);
       } else {
         status.value = 'error';
@@ -394,7 +981,7 @@ async function pollTaskStatus(taskId) {
       }
     }
   };
-  
+
   poll();
 }
 
@@ -441,11 +1028,166 @@ async function cancelAnalysis() {
 
 // 处理指数类型变化
 function handleIndexChange(index) {
+  const previousIndex = selectedIndex.value;
+  console.log(`指数切换: 从 ${previousIndex} 到 ${index}, 当前影像ID: ${currentImageId.value}`);
+  
+  // 最简单的解决方案：不使用缓存，直接提示用户重新分析
   selectedIndex.value = index;
-  // 如果已经上传了文件，可以提示用户重新分析
-  if (currentFile.value) {
-    messageStore.info(`已切换到${index}指数，点击"开始分析"重新计算`);
+  resultData.value = null;
+  status.value = 'waiting';
+  messageStore.info(`已切换到${index}指数，请点击"开始分析"进行计算`);
+  
+  // 下面是原始的缓存逻辑，但目前不使用
+  /*
+  // 先保存当前指数的状态（如果有结果）
+  if (status.value === 'done' && resultData.value && currentImageId.value) {
+    console.log(`保存当前${previousIndex}结果到缓存，防止切换后丢失`, resultData.value);
+    
+    try {
+      // 强制保存当前结果到内存和localStorage
+      const currentData = JSON.parse(JSON.stringify(resultData.value)); // 深拷贝确保不共享引用
+      const tempKey = `${currentImageId.value}_${previousIndex.toLowerCase()}`;
+      
+      console.log(`缓存键: ${tempKey}, 数据大小: ${JSON.stringify(currentData).length} 字节`);
+      
+      // 直接构造缓存对象
+      const cacheObj = {
+        resultData: currentData,
+        imageId: currentImageId.value,
+        indexType: previousIndex,
+        timestamp: Date.now(),
+        fileName: fileName.value
+      };
+      
+      // 保存到内存缓存
+      analysisResultsCache.value.set(tempKey, cacheObj);
+      console.log(`已保存${previousIndex}结果到内存缓存，键: ${tempKey}`);
+      
+      // 保存到localStorage
+      try {
+        const storageKey = `analysis_result_${currentImageId.value}_${previousIndex.toLowerCase()}`;
+        
+        // 检查数据大小，localStorage限制约为5MB
+        const dataStr = JSON.stringify(cacheObj);
+        console.log(`准备保存到localStorage，键: ${storageKey}, 数据大小: ${dataStr.length} 字节`);
+        
+        if (dataStr.length > 4 * 1024 * 1024) { // 4MB限制
+          console.warn(`缓存数据过大 (${dataStr.length} 字节)，可能无法保存到localStorage`);
+          // 尝试保存简化版本
+          const simplifiedData = {
+            ...cacheObj,
+            resultData: {
+              ...cacheObj.resultData,
+              // 删除可能的大型数据字段
+              raw_data: undefined,
+              large_arrays: undefined,
+              detailed_results: undefined
+            }
+          };
+          const simplifiedStr = JSON.stringify(simplifiedData);
+          console.log(`简化后数据大小: ${simplifiedStr.length} 字节`);
+          localStorage.setItem(storageKey, simplifiedStr);
+        } else {
+          localStorage.setItem(storageKey, dataStr);
+        }
+        
+        // 更新索引
+        let cacheIndex = [];
+        const existingIndex = localStorage.getItem('analysis_cache_index');
+        if (existingIndex) {
+          try {
+            cacheIndex = JSON.parse(existingIndex);
+          } catch (e) {
+            console.warn('解析缓存索引失败，创建新索引');
+            cacheIndex = [];
+          }
+        }
+        
+        if (!cacheIndex.includes(storageKey)) {
+          cacheIndex.push(storageKey);
+          localStorage.setItem('analysis_cache_index', JSON.stringify(cacheIndex));
+        }
+        
+        console.log(`已强制保存${previousIndex}结果到localStorage，键: ${storageKey}`);
+      } catch (error) {
+        console.error('保存缓存到localStorage失败:', error);
+      }
+    } catch (error) {
+      console.error('保存缓存时出错:', error);
+    }
   }
+  
+  // 更新当前选择的指数
+  selectedIndex.value = index;
+  
+  // 调试缓存状态
+  debugCacheStatus();
+  
+  // 如果已经上传了文件，检查是否有缓存结果
+  if (currentFile.value && currentImageId.value) {
+    console.log('检查缓存，参数:', {
+      currentImageId: currentImageId.value,
+      index: index,
+      previousIndex: previousIndex,
+      hasFile: !!currentFile.value
+    });
+    
+    // 尝试直接从localStorage读取
+    const storageKey = `analysis_result_${currentImageId.value}_${index.toLowerCase()}`;
+    console.log(`尝试从localStorage读取缓存，键: ${storageKey}`);
+    
+    try {
+      const storedData = localStorage.getItem(storageKey);
+      if (storedData) {
+        console.log(`找到缓存数据，大小: ${storedData.length} 字节`);
+        const cachedData = JSON.parse(storedData);
+        console.log(`从localStorage直接读取到${index}缓存:`, !!cachedData);
+        
+        if (cachedData && cachedData.resultData) {
+          console.log(`缓存数据有效，包含resultData字段`);
+          
+          // 更新内存缓存
+          const memKey = `${currentImageId.value}_${index.toLowerCase()}`;
+          analysisResultsCache.value.set(memKey, cachedData);
+          
+          // 显示缓存结果
+          resultData.value = cachedData.resultData;
+          status.value = 'done';
+          messageStore.success(`已加载${index}指数的缓存结果`);
+          return;
+        } else {
+          console.warn(`缓存数据无效或不完整:`, cachedData);
+        }
+      } else {
+        console.log(`localStorage中没有找到键 ${storageKey} 的缓存数据`);
+      }
+    } catch (error) {
+      console.warn(`直接读取${index}缓存失败:`, error);
+    }
+    
+    // 如果直接读取失败，尝试从内存缓存读取
+    console.log(`尝试从内存缓存读取 ${index} 结果`);
+    const cached = getCachedResult(currentImageId.value, index);
+    if (cached) {
+      // 有缓存结果，直接显示
+      console.log(`从内存缓存找到 ${index} 结果:`, cached);
+      resultData.value = cached.resultData;
+      status.value = 'done';
+      messageStore.success(`已加载${index}指数的缓存结果 (从内存)`);
+    } else {
+      // 没有缓存，提示用户重新分析
+      console.log(`未找到 ${index} 的缓存结果，需要重新分析`);
+      resultData.value = null;
+      status.value = 'waiting';
+      messageStore.info(`已切换到${index}指数，点击"开始分析"重新计算`);
+    }
+  } else {
+    console.log('无法检查缓存，缺少必要参数:', {
+      hasFile: !!currentFile.value,
+      currentImageId: currentImageId.value
+    });
+  }
+  */
 }
 </script>
 
