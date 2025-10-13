@@ -1,114 +1,114 @@
 <template>
-  <div class="page-wrapper" v-loading="globalLoading" 
+  <div class="ecological-analysis" v-loading="globalLoading" 
        element-loading-text="正在分析数据，请稍候..."
        element-loading-background="rgba(255, 255, 255, 0.8)">
     <div class="ecological-container">
       <!-- 左侧控制面板 -->
       <div class="left-panel">
-        <!-- 主标题 -->
-        <div class="main-title">生态环境评估</div>
-        
-        <!-- 描述文字 -->
-        <div class="description">
-          上传土地利用数据，系统将自动计算多种生态指数并进行可视化。
+        <!-- 标题栏 -->
+        <div class="panel-header">
+          <h1>生态环境评估</h1>
+          <p>上传土地利用数据，系统将自动计算多种生态指数并进行可视化。</p>
         </div>
         
-        <!-- 文件上传区域 -->
-        <div class="upload-section">
-          <!-- 主要上传按钮 -->
-          <el-button 
-            class="upload-btn" 
-            @click="triggerFileUpload"
-            type="primary"
-            size="large"
-            :loading="uploadLoading"
-          >
-            <el-icon v-if="!uploadLoading"><Upload /></el-icon>
-            {{ uploadLoading ? '正在处理...' : '上传影像数据' }}
-          </el-button>
-          
-          <!-- 调试按钮 -->
-          <!-- <el-button 
-            class="test-btn" 
-            @click="testButtonClick"
-            size="small"
-            type="warning"
-          >
-            测试按钮
-          </el-button> -->
-          
-          <!-- 调试信息 -->
-          <!-- <div class="debug-info">
-            <small>globalLoading: {{ globalLoading }}</small>
-          </div> -->
-          
-          <!-- 备用上传方式 -->
-          <!-- 移除不必要的el-upload组件，使用自定义上传逻辑 -->
-          
-          <div class="file-status">
-            {{ fileList.length === 0 ? '未选择文件' : `已选择: ${fileList[0].name}` }}
+        <!-- 数据文件管理 -->
+        <div class="section">
+          <div class="section-header">
+            <i class="section-icon">📁</i>
+            <span>数据文件管理</span>
           </div>
-          <!-- 如果已选择文件，显示重新选择按钮 -->
-          <el-button 
-            v-if="fileList.length > 0"
-            class="re-upload-btn" 
-            @click="clearFile"
-            size="small"
-            type="info"
-          >
-            重新选择
-          </el-button>
-        </div>
-        
-        <!-- 开始分析按钮 -->
-        <el-button 
-          class="start-analysis-btn" 
-          @click="startAnalysis"
-          :disabled="fileList.length === 0"
-          :loading="globalLoading"
-        >
-          开始分析
-        </el-button>
-        
-        <!-- 指数选择区域 -->
-        <div class="index-selection">
-          <div class="section-title">指数选择</div>
-          
-          <!-- 生态环境结构指数 -->
-          <div class="index-group">
-            <div class="group-title">生态环境结构指数</div>
-            <div class="index-buttons">
+          <div class="section-content">
+            <div class="file-upload-area">
+              <div class="upload-zone" @click="triggerFileUpload">
+                <div class="upload-icon">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M14 2H6C4.9 2 4 2.9 4 4V20C4 21.1 4.89 22 5.99 22H18C19.1 22 20 21.1 20 20V8L14 2Z" stroke="#1890ff" stroke-width="2" fill="none"/>
+                    <path d="M14 2V8H20" stroke="#1890ff" stroke-width="2" fill="none"/>
+                    <path d="M12 18V12" stroke="#1890ff" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M9 15L12 12L15 15" stroke="#1890ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </div>
+                <div class="upload-text">上传土地利用数据文件</div>
+                <div class="upload-hint">拖放文件到此处或点击选择文件</div>
+                <div class="upload-types">支持的文件类型: .tif, .tiff, .zip</div>
+              </div>
+              <div class="file-status">
+                {{ fileList.length === 0 ? '未选择文件' : `已选择: ${fileList[0].name}` }}
+              </div>
               <el-button 
-                v-for="index in structureIndices" 
-                :key="index.key"
-                :type="index.calculated ? 'success' : 'default'"
-                :loading="index.loading"
-                @click="calculateIndex(index.key)"
-                class="index-btn"
-                :disabled="fileList.length === 0"
+                v-if="fileList.length > 0"
+                class="re-upload-btn" 
+                @click="clearFile"
+                size="small"
+                type="info"
               >
-                {{ index.name }}
-                <el-tag v-if="index.calculated" size="small" type="success">已计算</el-tag>
+                重新选择
               </el-button>
             </div>
           </div>
-          
-          <!-- 生态环境胁迫指数 -->
-          <div class="index-group">
-            <div class="group-title">生态环境胁迫指数</div>
-            <div class="index-buttons">
-              <el-button 
-                v-for="index in stressIndices" 
-                :key="index.key"
-                :type="index.calculated ? 'success' : 'default'"
-                :loading="index.loading"
-                @click="calculateIndex(index.key)"
-                class="index-btn"
-                :disabled="fileList.length === 0"
-              >
-                {{ index.name }}
-                <el-tag v-if="index.calculated" size="small" type="success">已计算</el-tag>
-              </el-button>
+        </div>
+
+        <!-- 分析控制 -->
+        <div class="section">
+          <div class="section-header">
+            <i class="section-icon">🔍</i>
+            <span>数据分析控制</span>
+          </div>
+          <div class="section-content">
+            <el-button 
+              class="start-analysis-btn" 
+              @click="startAnalysis"
+              :disabled="fileList.length === 0"
+              :loading="globalLoading"
+            >
+              开始分析
+            </el-button>
+          </div>
+        </div>
+        
+        <!-- 指数选择区域 -->
+        <div class="section">
+          <div class="section-header">
+            <i class="section-icon">📊</i>
+            <span>指数选择</span>
+          </div>
+          <div class="section-content">
+            <!-- 生态环境结构指数 -->
+            <div class="index-group">
+              <div class="group-title">生态环境结构指数</div>
+              <div class="index-buttons">
+                <el-button 
+                  v-for="index in structureIndices" 
+                  :key="index.key"
+                  :type="index.calculated ? 'success' : 'default'"
+                  :loading="index.loading"
+                  @click="calculateIndex(index.key)"
+                  class="index-btn"
+                  :disabled="fileList.length === 0"
+                >
+                  {{ index.name }}
+                  <el-tag v-if="index.calculated" size="small" type="success">已计算</el-tag>
+                </el-button>
+              </div>
+            </div>
+            
+            <!-- 生态环境胁迫指数 -->
+            <div class="index-group">
+              <div class="group-title">生态环境胁迫指数</div>
+              <div class="index-buttons">
+                <el-button 
+                  v-for="index in stressIndices" 
+                  :key="index.key"
+                  :type="index.calculated ? 'success' : 'default'"
+                  :loading="index.loading"
+                  @click="calculateIndex(index.key)"
+                  class="index-btn"
+                  :disabled="fileList.length === 0"
+                >
+                  {{ index.name }}
+                  <el-tag v-if="index.calculated" size="small" type="success">已计算</el-tag>
+                </el-button>
+              </div>
             </div>
           </div>
         </div>
@@ -794,34 +794,27 @@ export default {
 </script>
 
 <style scoped>
-.page-wrapper {
-  width: 100%;
-  min-height: 100vh;
-  background: #f8fafc;
-  padding: 20px;
+.ecological-analysis {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .ecological-container {
-  max-width: 1400px;
-  margin: 0 auto;
-  display: grid;
-  grid-template-columns: 350px 1fr;
-  gap: 24px;
-  height: calc(100vh - 40px);
-  overflow: hidden;
+  display: flex;
+  width: 100%;
+  height: 100%;
 }
 
 /* 左侧控制面板 */
 .left-panel {
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 24px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  width: 350px;
+  background: #fafafa;
+  border-right: 1px solid #e8e8e8;
   display: flex;
   flex-direction: column;
-  gap: 24px;
   overflow-y: auto;
-  max-height: 100%;
 }
 
 /* 自定义滚动条样式 */
@@ -844,38 +837,159 @@ export default {
   background: #94a3b8;
 }
 
-.main-title {
-  font-size: 1.8rem;
-  font-weight: 600;
-  color: #1f2937;
+.panel-header {
+  background: linear-gradient(135deg, #1890ff 0%, #40a9ff 100%);
+  color: white;
+  padding: 20px 16px;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(24, 144, 255, 0.2);
+}
+
+.panel-header h1 {
   margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
 }
 
-.description {
-  color: #6b7280;
-  line-height: 1.6;
-  font-size: 0.95rem;
+.panel-header p {
+  margin: 8px 0 0 0;
+  font-size: 12px;
+  opacity: 0.9;
+  line-height: 1.4;
 }
 
-.upload-section {
+/* 功能区块 */
+.section {
+  padding: 20px 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.section:last-child {
+  border-bottom: none;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  color: #333;
+  font-size: 15px;
+}
+
+.section-icon {
+  font-size: 16px;
+}
+
+.section-content {
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 自定义滚动条样式 */
+.left-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.left-panel::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 3px;
+}
+
+.left-panel::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+.left-panel::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* 文件上传区域 */
+.file-upload-area {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
+.upload-zone {
+  width: 100%;
+  background: #f8f9fa;
+  border: 2px dashed #d9d9d9;
+  border-radius: 8px;
+  padding: 24px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.upload-zone:hover {
+  border-color: #1890ff;
+  background: #f0f8ff;
+}
+
+.upload-icon {
+  font-size: 24px;
+  color: #1890ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.upload-icon svg {
+  width: 48px;
+  height: 48px;
+}
+
+.upload-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+}
+
+.upload-hint {
+  font-size: 12px;
+  color: #666;
+}
+
+.upload-types {
+  font-size: 11px;
+  color: #999;
+}
+
 .re-upload-btn {
   width: 100%;
   height: 32px;
-  background: #6b7280;
-  border: none;
-  color: white;
+  background: #f5f5f5;
+  border: 1px solid #d9d9d9;
+  color: #666;
   font-weight: 500;
   border-radius: 6px;
   transition: all 0.2s ease;
 }
 
 .re-upload-btn:hover {
-  background: #4b5563;
+  background: #e6f7ff;
+  border-color: #1890ff;
+  color: #1890ff;
   transform: translateY(-1px);
 }
 
@@ -933,88 +1047,158 @@ export default {
 }
 
 .file-status {
-  font-size: 0.9rem;
-  color: #6b7280;
+  font-size: 12px;
+  color: #666;
   text-align: center;
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-radius: 4px;
+  border-left: 3px solid #1890ff;
 }
 
 .start-analysis-btn {
   width: 100%;
-  height: 52px;
-  background: #10b981;
-  border: none;
+  background: #1890ff;
   color: white;
-  font-size: 1.1rem;
-  font-weight: 600;
+  border: none;
+  padding: 14px 16px;
   border-radius: 8px;
-  transition: all 0.2s ease;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 4px rgba(24, 144, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
-.start-analysis-btn:hover {
-  background: #059669;
-  transform: translateY(-1px);
+.start-analysis-btn:hover:not(:disabled) {
+  background: #40a9ff;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(24, 144, 255, 0.3);
 }
 
 .start-analysis-btn:disabled {
-  background: #9ca3af;
-  cursor: not-allowed;
+  background: #f5f5f5;
+  color: #999;
+  opacity: 0.6;
   transform: none;
+  box-shadow: none;
+  cursor: not-allowed;
 }
 
 /* 指数选择区域 */
-.index-selection {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.section-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #374151;
-  margin: 0;
-}
-
 .index-group {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  margin-bottom: 20px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.index-group:last-child {
+  margin-bottom: 0;
 }
 
 .group-title {
-  font-size: 0.95rem;
+  font-size: 14px;
   font-weight: 500;
-  color: #6b7280;
-  margin: 0;
+  color: #555;
+  margin: 0 0 8px 0;
 }
 
 .index-buttons {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 .index-btn {
-  width: 100%;
-  height: 40px;
-  text-align: left;
-  padding: 0 16px;
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+  height: 40px !important;
+  text-align: center !important;
+  padding: 0 16px !important;
   border-radius: 6px;
   transition: all 0.2s ease;
+  background: #f8f9fa !important;
+  border: 1px solid #e9ecef !important;
+  color: #333 !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
 
-.index-btn:hover {
+.index-btn:hover:not(:disabled) {
   transform: translateX(4px);
+  background: #e6f7ff !important;
+  border-color: #1890ff !important;
+  color: #1890ff !important;
+}
+
+.index-btn:disabled {
+  background: #f5f5f5 !important;
+  color: #999 !important;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* 确保所有按钮完全对齐 */
+.index-buttons .el-button {
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  padding: 0 16px !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
 
 /* 右侧结果展示区域 */
 .right-panel {
-  background: #ffffff;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  overflow: hidden;
+  flex: 1;
+  position: relative;
+  background: #f5f5f5;
+  min-height: 500px;
+  height: 100vh;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+/* 右侧结果区域滚动条样式 */
+.right-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.right-panel::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 3px;
+}
+
+.right-panel::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+.right-panel::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 .results-area {
@@ -1027,6 +1211,9 @@ export default {
   flex: 1;
   padding: 24px;
   overflow-y: auto;
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
 /* 右侧结果区域滚动条样式 */
@@ -1064,6 +1251,7 @@ export default {
 /* 结果展示样式 */
 .index-values {
   margin-bottom: 32px;
+  width: 100%;
 }
 
 .values-title {
@@ -1075,44 +1263,55 @@ export default {
 
 .values-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
 }
 
 .value-item {
   background: #f9fafb;
-  padding: 16px;
+  padding: 20px;
   border-radius: 8px;
   border: 1px solid #e5e7eb;
   text-align: center;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 .value-name {
-  font-size: 0.9rem;
+  font-size: 1rem;
   color: #6b7280;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
+  font-weight: 500;
+  line-height: 1.3;
 }
 
 .value-number {
-  font-size: 1.8rem;
+  font-size: 2.2rem;
   font-weight: 700;
   color: #1f2937;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
+  line-height: 1.2;
 }
 
 .value-status {
-  padding: 4px 12px;
+  padding: 6px 12px;
   border-radius: 20px;
-  font-size: 0.8rem;
-  font-weight: 500;
+  font-size: 0.9rem;
+  font-weight: 600;
   display: inline-block;
   margin-bottom: 8px;
+  min-width: 50px;
 }
 
 .value-unit {
-  font-size: 0.75rem;
+  font-size: 0.85rem;
   color: #9ca3af;
-  font-style: italic;
+  font-weight: 500;
 }
 
 .status-excellent {
@@ -1199,50 +1398,60 @@ export default {
 }
 
 /* 响应式设计 */
-@media (max-width: 1200px) {
-  .ecological-container {
-    grid-template-columns: 320px 1fr;
-    gap: 20px;
-  }
-  
-  .charts-section {
-    grid-template-columns: 1fr;
-    gap: 20px;
-  }
-}
-
 @media (max-width: 1000px) {
-  .ecological-container {
-    grid-template-columns: 1fr;
-    gap: 20px;
-    height: auto;
-    overflow: visible;
+  .ecological-analysis {
+    flex-direction: column;
   }
   
   .left-panel {
+    width: 100%;
+    height: auto;
+    max-height: 50vh;
     order: 2;
-    max-height: none;
-    overflow-y: visible;
   }
   
   .right-panel {
     order: 1;
-    min-height: 500px;
-    overflow: visible;
+    height: 50vh;
+    min-height: 50vh;
+  }
+  
+  .values-grid {
+    grid-template-columns: repeat(3, 1fr);
+    max-width: 100%;
+    gap: 16px;
+  }
+}
+
+@media (max-width: 1200px) {
+  .values-grid {
+    grid-template-columns: repeat(2, 1fr);
+    max-width: 100%;
+    gap: 18px;
+  }
+}
+
+@media (max-width: 900px) {
+  .values-grid {
+    grid-template-columns: 1fr;
+    max-width: 100%;
+    gap: 16px;
   }
 }
 
 @media (max-width: 768px) {
-  .page-wrapper {
-    padding: 16px;
+  .left-panel {
+    max-height: 40vh;
   }
   
-  .left-panel {
-    padding: 20px;
+  .right-panel {
+    height: 60vh;
+    min-height: 60vh;
   }
   
   .values-grid {
     grid-template-columns: 1fr;
+    max-width: 100%;
   }
   
   .chart {

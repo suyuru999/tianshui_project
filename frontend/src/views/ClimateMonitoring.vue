@@ -3,33 +3,63 @@
     <div class="main-container">
       <!-- 左侧控制面板 -->
       <div class="left-panel">
-        <h1>气候环境监测</h1>
-        <p>上传CSV或Excel格式的气候监测数据，系统将自动生成统计图表。</p>
-        
-        <div class="upload-section">
-          <input
-            ref="fileInput"
-            type="file"
-            accept=".csv,.xlsx,.xls"
-            @change="handleFileSelect"
-            style="display: none"
-          />
-          <button @click="fileInput?.click()" class="upload-btn">
-            <span class="upload-icon">↑</span>
-            上传气候数据
-          </button>
-          <div class="file-status">
-            {{ selectedFile ? selectedFile.name : '未选择文件' }}
-          </div>
+        <!-- 标题栏 -->
+        <div class="panel-header">
+          <h1>气候环境监测</h1>
+          <p>上传CSV或Excel格式的气候监测数据，系统将自动生成统计图表。</p>
         </div>
         
-        <button
-          @click="startAnalysis"
-          class="analysis-btn"
-          :class="{ 'disabled': !selectedFile || isAnalyzing }"
-        >
-          {{ isAnalyzing ? '分析中...' : '开始分析' }}
-        </button>
+        <!-- 数据文件管理 -->
+        <div class="section">
+          <div class="section-header">
+            <i class="section-icon">📁</i>
+            <span>数据文件管理</span>
+          </div>
+          <div class="section-content">
+            <div class="file-upload-area">
+              <input
+                ref="fileInput"
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                @change="handleFileSelect"
+                style="display: none"
+              />
+              <div class="upload-zone" @click="fileInput?.click()">
+                <div class="upload-icon">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M14 2H6C4.9 2 4 2.9 4 4V20C4 21.1 4.89 22 5.99 22H18C19.1 22 20 21.1 20 20V8L14 2Z" stroke="#1890ff" stroke-width="2" fill="none"/>
+                    <path d="M14 2V8H20" stroke="#1890ff" stroke-width="2" fill="none"/>
+                    <path d="M12 18V12" stroke="#1890ff" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M9 15L12 12L15 15" stroke="#1890ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </div>
+                <div class="upload-text">上传气候数据文件</div>
+                <div class="upload-hint">拖放文件到此处或点击选择文件</div>
+                <div class="upload-types">支持的文件类型: .csv, .xlsx, .xls</div>
+              </div>
+              <div class="file-status">
+                {{ selectedFile ? selectedFile.name : '未选择文件' }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 分析控制 -->
+        <div class="section">
+          <div class="section-header">
+            <i class="section-icon">🔍</i>
+            <span>数据分析控制</span>
+          </div>
+          <div class="section-content">
+            <button
+              @click="startAnalysis"
+              class="analysis-btn"
+              :class="{ 'disabled': !selectedFile || isAnalyzing }"
+            >
+              {{ isAnalyzing ? '分析中...' : '开始分析' }}
+            </button>
+          </div>
+        </div>
 
         <!-- 进度指示器 -->
         <div v-if="isAnalyzing" class="progress-section">
@@ -131,21 +161,12 @@
       </div>
     </div>
 
-    <!-- 返回按钮 -->
-    <div class="back-button">
-      <button @click="goBack" class="back-btn">
-        ← 返回主页
-      </button>
-    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { climateMonitoringService } from '../services/api.js'
-
-const router = useRouter()
 
 // 响应式数据
 const fileInput = ref(null)
@@ -295,13 +316,23 @@ const startAnalysis = async () => {
     try {
       // 1. 上传文件
       console.log('开始上传文件:', selectedFile.value.name)
+      
+      // 模拟上传进度
+      const uploadProgressInterval = setInterval(() => {
+        if (uploadProgress.value < 90) {
+          uploadProgress.value += Math.random() * 10
+        }
+      }, 200)
+      
       const uploadResponse = await climateMonitoringService.uploadClimateData(selectedFile.value, {
         name: selectedFile.value.name,
         description: '气候监测数据分析'
       })
       
-      console.log('上传响应:', uploadResponse)
+      clearInterval(uploadProgressInterval)
       uploadProgress.value = 100
+      
+      console.log('上传响应:', uploadResponse)
       
       // 验证上传响应
       if (!uploadResponse) {
@@ -321,7 +352,17 @@ const startAnalysis = async () => {
         
         // 2. 开始分析
         console.log('开始分析，文件ID:', fileId)
+        
+        // 模拟分析进度
+        const analysisProgressInterval = setInterval(() => {
+          if (uploadProgress.value < 95) {
+            uploadProgress.value += Math.random() * 5
+          }
+        }, 300)
+        
         const analysisResponse = await climateMonitoringService.analyzeClimateData(fileId, 'comprehensive')
+        
+        clearInterval(analysisProgressInterval)
         
         console.log('分析响应:', analysisResponse)
         
@@ -459,10 +500,19 @@ const startStatusPolling = () => {
       } else if (statusResponse.status === 'processing') {
         // 更新进度
         const progress = Number(statusResponse.progress) || 0
-        uploadProgress.value = Math.max(0, Math.min(100, progress)) // 确保进度在0-100之间
+        if (progress > 0) {
+          uploadProgress.value = Math.max(0, Math.min(100, progress)) // 确保进度在0-100之间
+        } else {
+          // 如果后端没有返回进度，使用模拟进度
+          if (uploadProgress.value < 95) {
+            uploadProgress.value += Math.random() * 3
+          }
+        }
       } else if (statusResponse.status === 'pending') {
-        // 任务等待中
-        uploadProgress.value = 0
+        // 任务等待中，缓慢增加进度
+        if (uploadProgress.value < 20) {
+          uploadProgress.value += Math.random() * 2
+        }
       }
       
     } catch (error) {
@@ -616,10 +666,6 @@ const generateCharts = () => {
   drawWindSpeedChart()
 }
 
-// 返回主页
-const goBack = () => {
-  router.push('/')
-}
 
 // 清理函数
 const cleanup = () => {
@@ -1158,22 +1204,23 @@ const drawWindSpeedChart = () => {
 
 /* 自定义滚动条样式 */
 .climate-monitoring::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 .climate-monitoring::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 4px;
+  background: #f1f5f9;
+  border-radius: 3px;
 }
 
 .climate-monitoring::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 4px;
+  background: #cbd5e1;
+  border-radius: 3px;
+  transition: background 0.2s ease;
 }
 
 .climate-monitoring::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
+  background: #94a3b8;
 }
 
 .main-container {
@@ -1183,134 +1230,263 @@ const drawWindSpeedChart = () => {
 }
 
 .left-panel {
-  width: 400px;
+  width: 350px;
   background: white;
-  padding: 40px 30px;
-  border-right: 1px solid #e0e0e0;
+  border-right: 1px solid #e8e8e8;
   display: flex;
   flex-direction: column;
-  gap: 30px;
+  box-shadow: 2px 0 12px rgba(0,0,0,0.08);
+  overflow-y: auto;
 }
 
-.left-panel h1 {
-  font-size: 24px;
-  font-weight: bold;
-  color: #333;
-  margin: 0;
-  line-height: 1.2;
+/* 左侧面板滚动条样式 */
+.left-panel::-webkit-scrollbar {
+  width: 6px;
 }
 
-.left-panel p {
-  font-size: 14px;
-  color: #666;
+.left-panel::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 3px;
+}
+
+.left-panel::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+.left-panel::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.panel-header {
+  background: linear-gradient(135deg, #1890ff 0%, #40a9ff 100%);
+  color: white;
+  padding: 20px 16px;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(24, 144, 255, 0.2);
+}
+
+.panel-header h1 {
   margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.panel-header p {
+  margin: 8px 0 0 0;
+  font-size: 12px;
+  opacity: 0.9;
   line-height: 1.4;
 }
 
-.upload-section {
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
+/* 功能区块 */
+.section {
+  padding: 20px 16px;
+  border-bottom: 1px solid #f0f0f0;
 }
 
-.upload-btn {
-  width: 100%;
-  background: #007bff;
-  color: white;
-  border: none;
-  padding: 12px 20px;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 0.2s;
+.section:last-child {
+  border-bottom: none;
+}
+
+.section-header {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  height: 40px;
+  gap: 10px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  color: #333;
+  font-size: 15px;
 }
 
-.upload-btn:hover {
-  background: #0056b3;
+.section-icon {
+  font-size: 16px;
+}
+
+.section-content {
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 文件上传区域 */
+.file-upload-area {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.upload-zone {
+  width: 100%;
+  background: #f8f9fa;
+  border: 2px dashed #d9d9d9;
+  border-radius: 8px;
+  padding: 24px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.upload-zone:hover {
+  border-color: #1890ff;
+  background: #f0f8ff;
 }
 
 .upload-icon {
-  font-size: 16px;
-  font-weight: bold;
+  font-size: 24px;
+  color: #1890ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.upload-icon svg {
+  width: 48px;
+  height: 48px;
+}
+
+.upload-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+}
+
+.upload-hint {
+  font-size: 12px;
+  color: #666;
+}
+
+.upload-types {
+  font-size: 11px;
+  color: #999;
 }
 
 .file-status {
   font-size: 12px;
-  color: #999;
+  color: #666;
   text-align: center;
-  margin: 0;
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-radius: 4px;
+  border-left: 3px solid #1890ff;
 }
 
 .analysis-btn {
   width: 100%;
-  background: #f8f9fa;
-  color: #6c757d;
-  border: 1px solid #dee2e6;
-  padding: 10px 20px;
-  border-radius: 6px;
+  background: #1890ff;
+  color: white;
+  border: none;
+  padding: 14px 16px;
+  border-radius: 8px;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
-  height: 40px;
+  box-shadow: 0 2px 4px rgba(24, 144, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .analysis-btn:hover:not(.disabled) {
-  background: #e9ecef;
-  border-color: #adb5bd;
+  background: #40a9ff;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(24, 144, 255, 0.3);
 }
 
 .analysis-btn.disabled {
   cursor: not-allowed;
-  background: #f8f9fa;
-  color: #6c757d;
+  background: #f5f5f5;
+  color: #999;
   opacity: 0.6;
+  transform: none;
+  box-shadow: none;
 }
 
 /* 进度指示器样式 */
 .progress-section {
-  margin-top: 15px;
+  margin-top: 16px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border-left: 3px solid #1890ff;
 }
 
 .progress-bar {
   width: 100%;
-  height: 6px;
+  height: 8px;
   background: #e9ecef;
-  border-radius: 3px;
+  border-radius: 4px;
   overflow: hidden;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
 .progress-fill {
   height: 100%;
-  background: #007bff;
-  transition: width 0.3s ease;
+  background: linear-gradient(90deg, #1890ff 0%, #40a9ff 100%);
+  transition: width 0.5s ease-in-out;
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%);
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
 }
 
 .progress-text {
-  font-size: 12px;
-  color: #6c757d;
+  font-size: 13px;
+  color: #666;
   text-align: center;
+  font-weight: 500;
 }
 
 .error-message {
-  background: #f8d7da;
-  color: #721c24;
-  padding: 15px;
+  background: #fff2f0;
+  color: #ff4d4f;
+  padding: 16px;
   border-radius: 8px;
-  margin-top: 15px;
-  border: 1px solid #f5c6cb;
+  margin-top: 16px;
+  border: 1px solid #ffccc7;
   font-size: 14px;
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 8px rgba(255, 77, 79, 0.1);
+  border-left: 4px solid #ff4d4f;
 }
 
 .error-icon {
@@ -1340,45 +1516,52 @@ const drawWindSpeedChart = () => {
 }
 
 .retry-btn, .dismiss-btn {
-  padding: 6px 12px;
+  padding: 8px 16px;
   border: none;
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: 6px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .retry-btn {
-  background: #007bff;
+  background: #1890ff;
   color: white;
+  box-shadow: 0 2px 4px rgba(24, 144, 255, 0.2);
 }
 
 .retry-btn:hover {
-  background: #0056b3;
+  background: #40a9ff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(24, 144, 255, 0.3);
 }
 
 .dismiss-btn {
-  background: #6c757d;
-  color: white;
+  background: #f5f5f5;
+  color: #666;
+  border: 1px solid #d9d9d9;
 }
 
 .dismiss-btn:hover {
-  background: #545b62;
+  background: #e6f7ff;
+  border-color: #1890ff;
+  color: #1890ff;
 }
 
 .success-message {
-  background: #d4edda;
-  color: #155724;
-  padding: 15px;
+  background: #f6ffed;
+  color: #52c41a;
+  padding: 16px;
   border-radius: 8px;
-  margin-top: 15px;
-  border: 1px solid #c3e6cb;
+  margin-top: 16px;
+  border: 1px solid #b7eb8f;
   font-size: 14px;
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 8px rgba(82, 196, 26, 0.1);
+  border-left: 4px solid #52c41a;
 }
 
 .success-icon {
@@ -1416,6 +1599,26 @@ const drawWindSpeedChart = () => {
   overflow-y: auto;
   overflow-x: auto;
   max-height: 100vh;
+}
+
+/* 右侧面板滚动条样式 */
+.right-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.right-panel::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 3px;
+}
+
+.right-panel::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+.right-panel::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 .placeholder {
@@ -1549,31 +1752,6 @@ const drawWindSpeedChart = () => {
   display: block;
 }
 
-.back-button {
-  position: fixed;
-  top: 20px;
-  left: 20px;
-  z-index: 1000;
-}
-
-.back-btn {
-  background: rgba(255, 255, 255, 0.9);
-  color: #333;
-  border: 1px solid #dee2e6;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.back-btn:hover {
-  background: white;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-}
 
 /* 响应式设计 */
 @media (max-width: 1200px) {

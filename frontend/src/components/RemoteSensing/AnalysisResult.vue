@@ -65,10 +65,38 @@
             <div ref="pieChartRef" class="chart-canvas"></div>
           </div>
 
-          <!-- 指数对比柱状图 -->
+          <!-- 统计值数值解读 -->
           <div class="chart-container">
-            <h3 class="chart-title">各指数平均值对比</h3>
-            <div ref="barChartRef" class="chart-canvas"></div>
+            <h3 class="chart-title">统计值数值解读</h3>
+            <div class="interpretation-content">
+              <div v-if="indicesData.length > 0" class="interpretation-text">
+                <div v-for="index in indicesData" :key="index.id" class="index-interpretation">
+                  <h4 class="index-name">{{ getIndexDisplayName(index.index_type) }}</h4>
+                  <div class="interpretation-items">
+                    <div class="interpretation-item">
+                      <span class="item-label">平均值解读：</span>
+                      <span class="item-content">{{ getMeanInterpretation(index) }}</span>
+                    </div>
+                    <div class="interpretation-item">
+                      <span class="item-label">数值范围：</span>
+                      <span class="item-content">{{ getRangeInterpretation(index) }}</span>
+                    </div>
+                    <div class="interpretation-item">
+                      <span class="item-label">变化程度：</span>
+                      <span class="item-content">{{ getVariationInterpretation(index) }}</span>
+                    </div>
+                    <div class="interpretation-item">
+                      <span class="item-label">生态意义：</span>
+                      <span class="item-content">{{ getEcologicalMeaning(index) }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="no-data-text">
+                <p>暂无分析结果数据</p>
+                <p class="hint-text">请等待计算完成或重新开始分析</p>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -99,9 +127,7 @@ const props = defineProps({
 const loading = ref(false);
 const indicesData = ref([]);
 const pieChartRef = ref(null);
-const barChartRef = ref(null);
 let pieChart = null;
-let barChart = null;
 
 const indexLabelMap = computed(() => ({
   ndvi: '绿化指数 (NDVI)',
@@ -188,14 +214,6 @@ function initCharts() {
     console.log('饼图DOM元素不存在');
   }
 
-  // 初始化柱状图
-  if (barChartRef.value) {
-    console.log('初始化柱状图，DOM元素:', barChartRef.value);
-    barChart = echarts.init(barChartRef.value);
-    updateBarChart();
-  } else {
-    console.log('柱状图DOM元素不存在');
-  }
 }
 
 // 更新饼图
@@ -320,132 +338,114 @@ function updatePieChart() {
   }, 100);
 }
 
-// 更新柱状图
-function updateBarChart() {
-  if (!barChart) return;
-  
-  if (indicesData.value.length === 0) {
-    const option = {
-      title: {
-        text: '暂无数据',
-        left: 'center',
-        top: 'center',
-        textStyle: {
-          color: '#999',
-          fontSize: 16
-        }
-      },
-      series: []
-    };
-    barChart.setOption(option);
-    return;
-  }
-
-  console.log('柱状图数据 - 所有指数:', indicesData.value);
-  
-  const categories = indicesData.value.map(item => getIndexDisplayName(item.index_type));
-  const values = indicesData.value.map(item => item.mean_value || 0);
-  
-  console.log('柱状图分类:', categories);
-  console.log('柱状图数值:', values);
-
-  // 如果没有数据，显示提示信息
-  if (values.every(v => v === 0)) {
-    const option = {
-      title: {
-        text: '暂无指数对比数据',
-        left: 'center',
-        top: 'center',
-        textStyle: {
-          color: '#999',
-          fontSize: 16
-        }
-      },
-      series: []
-    };
-    barChart.setOption(option);
-    return;
-  }
-
-  const option = {
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: {
-        type: 'shadow'
-      },
-      formatter: function(params) {
-        const data = params[0];
-        return `${data.name}<br/>平均值: ${data.value.toFixed(4)}`;
-      }
-    },
-    grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '3%',
-      top: '10%',
-      containLabel: true
-    },
-    xAxis: {
-      type: 'category',
-      data: categories,
-      axisLabel: {
-        rotate: 30,
-        fontSize: 12
-      }
-    },
-    yAxis: {
-      type: 'value',
-      name: '指数值',
-      axisLabel: {
-        formatter: '{value}'
-      }
-    },
-    series: [
-      {
-        name: '平均值',
-        type: 'bar',
-        data: values.map((value) => ({
-          value: value,
-          itemStyle: {
-            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: '#5e9cff' },
-              { offset: 1, color: '#aee2ff' }
-            ])
-          }
-        })),
-        barWidth: '60%',
-        label: {
-          show: true,
-          position: 'top',
-          formatter: '{c}',
-          fontSize: 11
-        }
-      }
-    ]
-  };
-
-  barChart.setOption(option);
-  console.log('柱状图配置已设置，数据项数:', values.length);
-  
-  // 检查图表是否正确渲染
-  setTimeout(() => {
-    if (barChart && !barChart.isDisposed()) {
-      console.log('柱状图渲染状态检查:', {
-        isDisposed: barChart.isDisposed(),
-        width: barChart.getWidth(),
-        height: barChart.getHeight(),
-        containerVisible: barChartRef.value?.offsetWidth > 0 && barChartRef.value?.offsetHeight > 0
-      });
-      
-      // 强制重新渲染
-      barChart.resize();
-    }
-  }, 100);
-}
 
 // 获取指数显示名称
 function getIndexDisplayName(indexType) {
   return indexLabelMap.value[indexType] || indexType.toUpperCase();
+}
+
+// 获取平均值解读
+function getMeanInterpretation(index) {
+  const mean = index.mean_value || 0;
+  const indexType = index.index_type;
+  
+  switch (indexType) {
+    case 'dryness':
+      if (mean < -5000) return '区域整体偏向湿润，植被覆盖良好，生态质量较高';
+      else if (mean < 0) return '区域整体湿润，植被覆盖较好，生态质量中等偏上';
+      else if (mean < 2000) return '区域干湿适中，植被与建筑用地并存';
+      else return '区域整体偏向干燥，建筑用地较多，生态质量需要改善';
+    
+    case 'heat':
+      if (mean < -5000) return '区域温度较低，植被覆盖良好，热岛效应不明显';
+      else if (mean < 0) return '区域温度适中，植被覆盖较好，热环境良好';
+      else if (mean < 2000) return '区域温度偏高，存在一定热岛效应';
+      else return '区域温度较高，热岛效应明显，需要增加绿化';
+    
+    case 'ndvi':
+      if (mean > 0.6) return '区域植被覆盖极好，生态质量优秀';
+      else if (mean > 0.3) return '区域植被覆盖良好，生态质量较好';
+      else if (mean > 0.1) return '区域植被覆盖一般，生态质量中等';
+      else return '区域植被覆盖较差，生态质量需要改善';
+    
+    case 'ndwi':
+      if (mean > 0.3) return '区域水体丰富，湿度较高，生态环境良好';
+      else if (mean > 0.1) return '区域湿度适中，水体分布合理';
+      else if (mean > -0.1) return '区域湿度一般，水体分布较少';
+      else return '区域湿度较低，水体缺乏，需要增加水体';
+    
+    case 'wetness':
+      if (mean > 1000) return '区域湿度很高，植被和水体丰富，生态质量优秀';
+      else if (mean > 0) return '区域湿度较高，植被覆盖良好，生态质量较好';
+      else if (mean > -1000) return '区域湿度适中，生态质量中等';
+      else return '区域湿度较低，生态质量需要改善';
+    
+    default:
+      return '数值分析需要结合具体指数类型进行解读';
+  }
+}
+
+// 获取数值范围解读
+function getRangeInterpretation(index) {
+  const min = index.min_value || 0;
+  const max = index.max_value || 0;
+  const range = max - min;
+  
+  if (range > 30000) return '数值变化极大，区域内部差异显著，空间异质性很强';
+  else if (range > 10000) return '数值变化较大，区域内部存在明显差异，空间异质性较强';
+  else if (range > 5000) return '数值变化适中，区域内部有一定差异，空间异质性中等';
+  else return '数值变化较小，区域内部相对均匀，空间异质性较弱';
+}
+
+// 获取变化程度解读
+function getVariationInterpretation(index) {
+  const std = index.std_value || 0;
+  const min = index.min_value || 0;
+  const max = index.max_value || 0;
+  const range = max - min;
+  
+  // 基于标准差和数值范围的变化程度评估
+  if (std > 10000) return '标准差极大，数据变化剧烈，空间分布极不均匀，存在显著的空间差异';
+  else if (std > 5000) return '标准差较大，数据变化明显，空间分布不均匀，存在较大的空间差异';
+  else if (std > 2000) return '标准差中等，数据变化适中，空间分布相对均匀，存在一定的空间差异';
+  else if (std > 500) return '标准差较小，数据变化平缓，空间分布较为均匀，空间差异较小';
+  else return '标准差很小，数据变化微弱，空间分布非常均匀，空间差异很小';
+}
+
+// 获取生态意义解读
+function getEcologicalMeaning(index) {
+  const indexType = index.index_type;
+  const mean = index.mean_value || 0;
+  
+  switch (indexType) {
+    case 'dryness':
+      if (mean < -5000) return '建议加强植被保护，维持现有生态优势，可适当发展生态旅游';
+      else if (mean < 0) return '建议适度增加绿化，平衡发展与生态保护，提升生态质量';
+      else return '建议大力增加绿化覆盖，减少建筑密度，改善生态环境';
+    
+    case 'heat':
+      if (mean < -5000) return '建议保持现有植被覆盖，避免过度开发，维持良好的热环境';
+      else if (mean < 0) return '建议适度增加绿化，减少热岛效应，改善城市热环境';
+      else return '建议增加绿化面积，建设生态廊道，缓解热岛效应';
+    
+    case 'ndvi':
+      if (mean > 0.6) return '建议保护现有植被，建立生态保护区，维持生态优势';
+      else if (mean > 0.3) return '建议适度增加植被覆盖，提升生态质量，建设生态城市';
+      else return '建议大力植树造林，增加绿化面积，改善生态环境';
+    
+    case 'ndwi':
+      if (mean > 0.3) return '建议保护现有水体，维持湿地生态，发展生态旅游';
+      else if (mean > 0.1) return '建议适度增加水体面积，提升生态多样性';
+      else return '建议建设人工水体，增加湿地面积，改善生态环境';
+    
+    case 'wetness':
+      if (mean > 1000) return '建议保护现有湿地和植被，维持生态优势，发展生态产业';
+      else if (mean > 0) return '建议适度增加湿地面积，提升生态质量';
+      else return '建议增加水体面积，改善土壤湿度，提升生态质量';
+    
+    default:
+      return '建议根据具体指数类型制定相应的生态保护和管理策略';
+  }
 }
 
 // 获取指数等级
@@ -712,6 +712,77 @@ onMounted(() => {
 .hint-text {
   font-size: 0.95rem;
   color: #b0b8c9;
+}
+
+/* 数值解读样式 */
+.interpretation-content {
+  padding: 20px;
+  background: #fafafa;
+  border-radius: 8px;
+  border: 1px solid #e8e8e8;
+}
+
+.interpretation-text {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.index-interpretation {
+  margin-bottom: 24px;
+  padding: 16px;
+  background: white;
+  border-radius: 8px;
+  border-left: 4px solid #1890ff;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.index-interpretation:last-child {
+  margin-bottom: 0;
+}
+
+.index-name {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1890ff;
+  border-bottom: 1px solid #f0f0f0;
+  padding-bottom: 8px;
+}
+
+.interpretation-items {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.interpretation-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.6;
+}
+
+.item-label {
+  font-weight: 600;
+  color: #333;
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
+.item-content {
+  color: #666;
+  flex: 1;
+  text-align: justify;
+}
+
+.no-data-text {
+  text-align: center;
+  padding: 40px 20px;
+  color: #999;
+}
+
+.no-data-text p {
+  margin: 8px 0;
 }
 
 /* 响应式设计 */

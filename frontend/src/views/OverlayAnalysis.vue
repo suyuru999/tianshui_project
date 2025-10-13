@@ -810,21 +810,43 @@ onMounted(() => {
   overflow-y: auto;
 }
 
+/* 自定义滚动条样式 */
+.control-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.control-panel::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 3px;
+}
+
+.control-panel::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+.control-panel::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
 .panel-header {
-  background: #1890ff;
+  background: linear-gradient(135deg, #1890ff 0%, #40a9ff 100%);
   color: white;
-  padding: 20px;
+  padding: 20px 16px;
   text-align: center;
+  box-shadow: 0 2px 8px rgba(24, 144, 255, 0.2);
 }
 
 .panel-header h1 {
-  margin: 0 0 8px 0;
-  font-size: 18px;
+  margin: 0;
+  font-size: 16px;
   font-weight: 600;
+  letter-spacing: 0.5px;
 }
 
 .panel-subtitle {
-  margin: 0;
+  margin: 8px 0 0 0;
   font-size: 12px;
   opacity: 0.9;
   line-height: 1.4;
@@ -1406,5 +1428,26 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   min-width: 0; /* 确保flex子元素可以收缩 */
+  overflow-y: auto;
+}
+
+/* 右侧地图区域滚动条样式 */
+.map-area::-webkit-scrollbar {
+  width: 6px;
+}
+
+.map-area::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 3px;
+}
+
+.map-area::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+.map-area::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 </style>

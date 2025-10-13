@@ -1,6 +1,6 @@
 <template>
   <ErrorBoundary>
-    <div class="remote-sensing-analysis-apple">
+    <div class="remote-sensing-analysis">
       <!-- 全局加载遮罩 -->
       <LoadingSpinner 
         v-if="globalLoading" 
@@ -9,7 +9,8 @@
         text="系统处理中，请稍候..."
       />
       
-      <div class="sidebar-apple">
+      <!-- 左侧控制面板 -->
+      <div class="control-panel">
         <AnalysisSidebar
           :selected-index="selectedIndex"
           :file-name="fileName"
@@ -22,7 +23,8 @@
         />
       </div>
       
-      <div class="result-area-apple">
+      <!-- 右侧结果区域 -->
+      <div class="result-area">
         <!-- 分析进度 -->
         <div v-if="status === 'analyzing'" class="analysis-progress">
           <h3 class="progress-title">正在分析遥感影像...</h3>
@@ -31,7 +33,7 @@
             title="分析进度"
             type="primary"
             :show-info="true"
-            :current="`${analysisProgress}%`"
+            :current="`${Math.round(analysisProgress)}%`"
             :total="100"
             :speed="analysisSpeed"
             :eta="analysisEta"
@@ -63,7 +65,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import AnalysisSidebar from '../components/RemoteSensing/AnalysisSidebar.vue';
 import AnalysisResult from '../components/RemoteSensing/AnalysisResult.vue';
@@ -779,6 +781,10 @@ async function handleStartAnalysis() {
 
           // 4. 启动真正的任务状态轮询
           console.log('启动任务状态轮询，等待真正的计算完成');
+          
+          // 启动进度模拟器
+          startProgressSimulator();
+          
           pollTaskStatus(currentTaskId.value, imageId);
         } else {
           console.error('未获取到任务ID，calculateResult:', calculateResult);
@@ -884,6 +890,45 @@ function waitForResume() {
   });
 }
 
+// 进度模拟器
+let progressInterval = null;
+
+function startProgressSimulator() {
+  // 清除之前的定时器
+  if (progressInterval) {
+    clearInterval(progressInterval);
+  }
+  
+  // 每3秒更新一次进度
+  progressInterval = setInterval(() => {
+    if (status.value === 'analyzing' && analysisProgress.value < 95) {
+      const increment = Math.random() * 2 + 0.5; // 每次增加0.5-2.5%
+      analysisProgress.value = Math.min(95, analysisProgress.value + increment);
+      
+      // 更新步骤信息
+      if (analysisProgress.value < 60) {
+        currentStep.value = '数据预处理';
+        stepDetail.value = '正在处理遥感影像数据...';
+      } else if (analysisProgress.value < 80) {
+        currentStep.value = '计算生态指数';
+        stepDetail.value = '正在计算生态指数...';
+      } else {
+        currentStep.value = '结果生成';
+        stepDetail.value = '正在生成分析结果...';
+      }
+      
+      console.log(`进度模拟器更新: ${analysisProgress.value.toFixed(1)}%`);
+    }
+  }, 3000);
+}
+
+function stopProgressSimulator() {
+  if (progressInterval) {
+    clearInterval(progressInterval);
+    progressInterval = null;
+  }
+}
+
 // 轮询任务状态
 async function pollTaskStatus(taskId, imageId) {
   const maxAttempts = 60;
@@ -902,10 +947,19 @@ async function pollTaskStatus(taskId, imageId) {
       if (taskStatus === 'completed') {
         // 任务完成，获取结果
         console.log('🎉🎉🎉 分析任务完成！开始保存缓存 🎉🎉🎉');
+        
+        // 确保进度条达到100%
+        analysisProgress.value = 100;
+        currentStep.value = '分析完成';
+        stepDetail.value = '所有计算已完成，正在生成结果...';
+        
         const taskDetail = await processingTaskService.getDetail(taskId);
         console.log('任务完成，获取到的任务详情:', taskDetail);
         
         status.value = 'done';
+        // 停止进度模拟器
+        stopProgressSimulator();
+        
         // 确保resultData包含影像ID
         resultData.value = {
           ...taskDetail,
@@ -942,18 +996,36 @@ async function pollTaskStatus(taskId, imageId) {
         // 任务失败
         status.value = 'error';
         resultData.value = { error: '分析任务执行失败' };
+        // 停止进度模拟器
+        stopProgressSimulator();
         messageStore.error('分析任务执行失败');
         return;
       } else if (taskStatus === 'processing' || taskStatus === 'pending') {
         // 任务处理中，继续轮询
         attempts++;
-        console.log(`任务状态: ${taskStatus}, 继续轮询 (${attempts}/${maxAttempts})`);
+        
+        // 动态更新进度
+        const progressIncrement = Math.min(5, Math.random() * 3 + 1); // 每次增加1-4%
+        analysisProgress.value = Math.min(95, analysisProgress.value + progressIncrement);
+        
+        // 更新步骤信息
+        if (taskStatus === 'processing') {
+          currentStep.value = '计算生态指数';
+          stepDetail.value = '正在计算生态指数，请稍候...';
+        } else {
+          currentStep.value = '等待处理';
+          stepDetail.value = '任务已提交，等待系统处理...';
+        }
+        
+        console.log(`任务状态: ${taskStatus}, 进度: ${analysisProgress.value.toFixed(1)}%, 继续轮询 (${attempts}/${maxAttempts})`);
         if (attempts < maxAttempts) {
           setTimeout(poll, 2000);
         } else {
           // 超时
           status.value = 'error';
           resultData.value = { error: '分析超时，请检查任务状态' };
+          // 停止进度模拟器
+          stopProgressSimulator();
           messageStore.warning('分析超时，请检查任务状态');
         }
       } else {
@@ -965,6 +1037,8 @@ async function pollTaskStatus(taskId, imageId) {
         } else {
           status.value = 'error';
           resultData.value = { error: '任务状态异常' };
+          // 停止进度模拟器
+          stopProgressSimulator();
           messageStore.error('任务状态异常');
         }
       }
@@ -977,6 +1051,8 @@ async function pollTaskStatus(taskId, imageId) {
       } else {
         status.value = 'error';
         resultData.value = { error: '查询任务状态失败' };
+        // 停止进度模拟器
+        stopProgressSimulator();
         messageStore.error('查询任务状态失败');
       }
     }
@@ -1014,6 +1090,8 @@ async function cancelAnalysis() {
       status.value = 'waiting';
       analysisProgress.value = 0;
       isPaused.value = false;
+      // 停止进度模拟器
+      stopProgressSimulator();
       messageStore.info('分析任务已取消');
       
       // 这里可以调用后端API取消任务
@@ -1189,87 +1267,86 @@ function handleIndexChange(index) {
   }
   */
 }
+
+// 组件卸载时清理
+onUnmounted(() => {
+  // 清理定时器等资源
+  stopProgressSimulator();
+});
 </script>
 
 <style scoped>
-.remote-sensing-analysis-apple {
+.remote-sensing-analysis {
   display: flex;
-  gap: 32px;
-  padding: 48px 5vw;
-  min-height: 100vh;
-  max-height: 100vh;
-  background: linear-gradient(135deg, #f8fafc 0%, #e9eff5 100%);
+  width: 100vw;
+  height: 100vh;
   overflow: hidden;
 }
 
-.sidebar-apple {
-  width: 360px;
-  min-width: 320px;
-  background: rgba(255,255,255,0.85);
-  border-radius: 28px;
-  box-shadow: 0 8px 32px 0 rgba(60,60,60,0.08), 0 1.5px 4px 0 rgba(60,60,60,0.04);
-  padding: 36px 32px 24px 32px;
+/* 左侧控制面板 */
+.control-panel {
+  width: 350px;
+  background: #fafafa;
+  border-right: 1px solid #e8e8e8;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  transition: box-shadow 0.2s;
   overflow-y: auto;
-  max-height: 100%;
 }
 
-/* 侧边栏滚动条样式 */
-.sidebar-apple::-webkit-scrollbar {
+/* 自定义滚动条样式 */
+.control-panel::-webkit-scrollbar {
   width: 6px;
 }
 
-.sidebar-apple::-webkit-scrollbar-track {
-  background: rgba(241, 245, 249, 0.5);
+.control-panel::-webkit-scrollbar-track {
+  background: #f1f5f9;
   border-radius: 3px;
 }
 
-.sidebar-apple::-webkit-scrollbar-thumb {
-  background: rgba(203, 213, 225, 0.8);
+.control-panel::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
   border-radius: 3px;
   transition: background 0.2s ease;
 }
 
-.sidebar-apple::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.9);
+.control-panel::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
-.result-area-apple {
+/* 右侧结果区域 */
+.result-area {
   flex: 1;
-  background: rgba(255,255,255,0.92);
-  border-radius: 32px;
-  box-shadow: 0 8px 32px 0 rgba(60,60,60,0.08), 0 1.5px 4px 0 rgba(60,60,60,0.04);
-  padding: 48px 40px;
-  min-height: 600px;
+  position: relative;
+  background: #f5f5f5;
+  min-height: 500px;
+  height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  transition: box-shadow 0.2s;
+  min-width: 0;
   overflow-y: auto;
-  max-height: 100%;
+  padding: 20px;
 }
 
-/* 结果区域滚动条样式 */
-.result-area-apple::-webkit-scrollbar {
+/* 右侧结果区域滚动条样式 */
+.result-area::-webkit-scrollbar {
   width: 6px;
 }
 
-.result-area-apple::-webkit-scrollbar-track {
-  background: rgba(241, 245, 249, 0.5);
+.result-area::-webkit-scrollbar-track {
+  background: #f1f5f9;
   border-radius: 3px;
 }
 
-.result-area-apple::-webkit-scrollbar-thumb {
-  background: rgba(203, 213, 225, 0.8);
+.result-area::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
   border-radius: 3px;
   transition: background 0.2s ease;
 }
 
-.result-area-apple::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.9);
+.result-area::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 /* 分析进度样式 */
@@ -1277,6 +1354,12 @@ function handleIndexChange(index) {
   width: 100%;
   max-width: 600px;
   text-align: center;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
 }
 
 .progress-title {

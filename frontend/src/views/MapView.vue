@@ -10,7 +10,12 @@
       <!-- 用户信息 -->
       <div class="user-section">
         <div class="user-info">
-          <i class="user-icon">👤</i>
+          <div class="user-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M20 21V19C20 17.9391 19.5786 16.9217 18.8284 16.1716C18.0783 15.4214 17.0609 15 16 15H8C6.93913 15 5.92172 15.4214 5.17157 16.1716C4.42143 16.9217 4 17.9391 4 19V21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
           <span>未登录</span>
         </div>
         <button class="login-btn">登录</button>
@@ -60,7 +65,7 @@
             </div>
             <div class="layer-group-content" v-show="tempLayersExpanded">
               <button class="upload-btn" @click="triggerFileUpload">
-                <i>📤</i>
+                <i></i>
                 上传本地文件 (KML/SHP.zip)
               </button>
               <input 
@@ -98,7 +103,7 @@
 
           <!-- 导出地图 -->
           <button class="export-btn" @click="exportMap">
-            <i>📷</i>
+           
             导出地图为图片
           </button>
         </div>
@@ -298,7 +303,7 @@ const toggleBusinessFunctions = () => {
 
 /* 左侧边栏 */
 .sidebar {
-  width: 320px;
+  width: 350px;
   background: white;
   border-right: 1px solid #e8e8e8;
   display: flex;
@@ -337,7 +342,17 @@ const toggleBusinessFunctions = () => {
 }
 
 .user-icon {
-  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: #666;
+}
+
+.user-icon svg {
+  width: 20px;
+  height: 20px;
 }
 
 .login-btn {
@@ -391,6 +406,7 @@ const toggleBusinessFunctions = () => {
 
 .section-content {
   animation: slideDown 0.3s ease-out;
+  padding: 0 12px;
 }
 
 @keyframes slideDown {
@@ -437,7 +453,7 @@ const toggleBusinessFunctions = () => {
 }
 
 .layer-group-content {
-  padding-left: 12px;
+  padding: 0 12px;
 }
 
 .layer-item {
@@ -538,11 +554,16 @@ input:checked + .slider:before {
   justify-content: center;
   gap: 8px;
   font-size: 13px;
-  transition: background 0.2s;
+  font-weight: 500;
+  transition: all 0.2s;
+  box-sizing: border-box;
+  height: 43.2px;
 }
 
 .upload-btn:hover {
   background: #40a9ff;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(24, 144, 255, 0.3);
 }
 
 /* 工具箱 */
@@ -599,12 +620,17 @@ input:checked + .slider:before {
   justify-content: center;
   gap: 8px;
   font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
+  box-sizing: border-box;
+  height: 43.2px;
   margin-top: 12px;
-  transition: background 0.2s;
 }
 
 .export-btn:hover {
   background: #40a9ff;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(24, 144, 255, 0.3);
 }
 
 /* 业务功能 */
