@@ -392,6 +392,13 @@ class OverlayAnalysisTask(models.Model):
     analysis_results = models.JSONField(default=dict, verbose_name='分析结果')
     overall_risk_level = models.CharField(max_length=20, choices=RISK_LEVEL_CHOICES, null=True, blank=True, verbose_name='总体风险等级')
 
+    # 栅格图层文件（用于空间展示）
+    risk_raster_file = models.FileField(upload_to='overlay_analysis/rasters/', null=True, blank=True, verbose_name='风险等级栅格文件')
+    impact_raster_file = models.FileField(upload_to='overlay_analysis/rasters/', null=True, blank=True, verbose_name='影响强度栅格文件')
+    
+    # 栅格图层元数据（WMS URL等）
+    raster_layers_metadata = models.JSONField(default=dict, verbose_name='栅格图层元数据')
+
     # 错误信息
     error_message = models.TextField(blank=True, null=True, verbose_name='错误信息')
 

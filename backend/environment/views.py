@@ -11,6 +11,8 @@ from django.utils import timezone
 import os
 import json
 import logging
+import requests
+import time
 
 # 取消注释必要的导入
 from .models import (
@@ -1121,10 +1123,15 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
             from .overlay_analysis import perform_overlay_analysis
             perform_overlay_analysis(str(instance.id))
         except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
             logger.error(f"启动叠加分析失败: {str(e)}")
+            logger.error(f"错误堆栈:\n{error_trace}")
             instance.status = 'failed'
             instance.error_message = str(e)
             instance.save()
+            # 不要重新抛出异常，让DRF正常返回创建成功的响应
+            # 前端可以通过轮询任务状态来获取失败信息
 
     @action(detail=True, methods=['post'])
     def restart_analysis(self, request, pk=None):
@@ -1195,4 +1202,364 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
             logger.error(f"获取风险统计失败: {str(e)}")
             return Response({
                 'error': f'获取统计信息失败: {str(e)}'
+            }, status=500)
+
+    @action(detail=True, methods=['post'])
+    def republish_raster_layers(self, request, pk=None):
+        """重新发布栅格图层到GeoServer"""
+        task = self.get_object()
+        
+        try:
+            from .geoserver_config import get_geoserver_manager
+            
+            geoserver = get_geoserver_manager()
+            
+            # 确保工作空间存在
+            geoserver.create_workspace()
+            
+            # 清理旧的CoverageStore（如果需要）
+            coverage_store_name = f"overlay_{task.id}"
+            geoserver.delete_coveragestore(coverage_store_name, recurse=True)
+            
+            # 获取栅格文件
+            published_layers = {}
+            raster_metadata = task.raster_layers_metadata.copy() if task.raster_layers_metadata else {}
+            error_messages = []  # 收集错误信息
+            
+            # 发布风险栅格
+            if task.risk_raster_file:
+                risk_file_path = task.risk_raster_file.path
+                if os.path.exists(risk_file_path):
+                    layer_name = f"risk_layer_{task.id}"
+                    logger.info(f"开始重新发布风险栅格图层: {layer_name}")
+                    logger.info(f"栅格文件路径: {risk_file_path}")
+                    
+                    # 先删除可能存在的旧图层（如果名称不同）
+                    try:
+                        full_layer_name = f"{geoserver.workspace}:{layer_name}"
+                        old_layer_check = geoserver.get_layer_info(full_layer_name)
+                        if old_layer_check:
+                            logger.info(f"发现旧图层 {layer_name}，尝试删除")
+                            # 尝试通过GeoServer REST API删除图层
+                            try:
+                                delete_url = f"{geoserver.base_url}/rest/layers/{full_layer_name}.json"
+                                import requests
+                                response = requests.delete(delete_url, auth=geoserver.auth, timeout=30)
+                                if response.status_code in [200, 204]:
+                                    logger.info(f"旧图层 {layer_name} 删除成功")
+                                else:
+                                    logger.warning(f"删除旧图层返回状态码: {response.status_code}")
+                            except Exception as del_error:
+                                logger.warning(f"删除旧图层时出错: {del_error}")
+                            time.sleep(1)
+                    except Exception as e:
+                        logger.warning(f"检查旧图层时出错（可能不存在）: {e}")
+                    
+                    publish_result = geoserver.publish_raster(coverage_store_name, layer_name, risk_file_path)
+                    logger.info(f"publish_raster 返回结果: {publish_result}")
+                    
+                    if publish_result:
+                        # 等待一下让GeoServer处理
+                        time.sleep(3)  # 增加等待时间，确保重命名完成
+                        
+                        # 验证图层是否存在（先尝试期望的名称）
+                        full_layer_name = f"{geoserver.workspace}:{layer_name}"
+                        layer_check = geoserver.get_layer_info(full_layer_name)
+                        logger.info(f"图层验证结果（期望名称 {layer_name}）: {layer_check is not None}")
+                        
+                        # 如果期望名称的图层不存在，尝试查找实际创建的图层名称（可能是CoverageStore名称）
+                        actual_layer_name = layer_name
+                        if not layer_check:
+                            logger.info(f"⚠️ 期望图层名称 {layer_name} 不存在，尝试查找实际创建的图层...")
+                            # 检查CoverageStore中的Coverage名称
+                            try:
+                                coverage_list = geoserver._make_request('GET', f'workspaces/{geoserver.workspace}/coveragestores/{coverage_store_name}/coverages.json')
+                                if coverage_list and 'coverages' in coverage_list:
+                                    coverages = coverage_list['coverages'].get('coverage', [])
+                                    if isinstance(coverages, list) and len(coverages) > 0:
+                                        coverage_obj = coverages[0]
+                                        if isinstance(coverage_obj, dict):
+                                            actual_layer_name = coverage_obj.get('name', layer_name)
+                                        else:
+                                            actual_layer_name = coverage_store_name  # 使用CoverageStore名称
+                                    elif isinstance(coverages, dict):
+                                        actual_layer_name = coverages.get('name', layer_name)
+                                    else:
+                                        actual_layer_name = coverage_store_name  # 使用CoverageStore名称
+                                    
+                                    logger.info(f"找到实际图层名称: {actual_layer_name}")
+                                    # 验证实际图层是否存在
+                                    full_actual_name = f"{geoserver.workspace}:{actual_layer_name}"
+                                    layer_check = geoserver.get_layer_info(full_actual_name)
+                                    if layer_check:
+                                        logger.info(f"✅ 找到实际创建的图层: {actual_layer_name}")
+                                        layer_name = actual_layer_name  # 使用实际图层名称
+                                    else:
+                                        logger.warning(f"⚠️ 实际图层名称 {actual_layer_name} 也不存在，可能GeoServer尚未完全处理")
+                            except Exception as e:
+                                logger.warning(f"⚠️ 查找实际图层名称时出错: {e}")
+                        
+                        if layer_check:
+                            # 为图层创建并应用默认样式
+                            style_name = f"{layer_name}_style"
+                            logger.info(f"为图层 {layer_name} 创建样式: {style_name}")
+                            
+                            # 从栅格文件读取统计信息，以创建合适的样式
+                            # 快速模式：使用默认值域，避免长时间读取栅格数据
+                            logger.info(f"快速模式：使用默认值域创建样式（避免长时间读取栅格数据）")
+                            min_val, max_val = (0.0, 5.0)
+                            
+                            # 可选：尝试快速读取统计信息（不阻塞）
+                            try:
+                                import threading
+                                result = [None]
+                                def quick_get_stats():
+                                    try:
+                                        result[0] = geoserver._get_raster_statistics(risk_file_path)
+                                    except:
+                                        pass
+                                
+                                thread = threading.Thread(target=quick_get_stats)
+                                thread.daemon = True
+                                thread.start()
+                                thread.join(timeout=3)  # 3秒超时
+                                
+                                if result[0] and not thread.is_alive():
+                                    min_val, max_val = result[0]
+                                    logger.info(f"✅ 快速获取到统计信息，更新值域: {min_val} - {max_val}")
+                            except:
+                                pass
+                            
+                            logger.info(f"使用栅格值域创建样式: {min_val} - {max_val}")
+                            
+                            sld_content = geoserver._create_default_raster_sld(min_val, max_val)
+                            if geoserver.create_style(style_name, sld_content):
+                                logger.info(f"样式 {style_name} 创建成功，开始应用到图层")
+                                if geoserver.apply_style_to_layer(layer_name, style_name):
+                                    logger.info(f"✅ 样式已成功应用到图层 {layer_name}")
+                                else:
+                                    logger.warning(f"⚠️ 样式应用到图层失败，但图层已发布")
+                            else:
+                                logger.warning(f"⚠️ 样式创建失败，但图层已发布")
+                            
+                            wms_url = f"{geoserver.base_url}/ows?service=WMS&version=1.3.0&request=GetMap&layers={geoserver.workspace}:{layer_name}&format=image/png&transparent=true"
+                            
+                            if 'risk_layer' not in raster_metadata:
+                                raster_metadata['risk_layer'] = {}
+                            
+                            raster_metadata['risk_layer'].update({
+                                'wms_url': wms_url,
+                                'published': True
+                            })
+                            
+                            published_layers['risk_layer'] = {
+                                'layer_name': layer_name,
+                                'wms_url': wms_url
+                            }
+                            logger.info(f"✅ 风险栅格图层重新发布成功: {layer_name}")
+                        else:
+                            error_msg = f"图层 {layer_name} 发布后验证失败（图层在GeoServer中不存在，实际图层名称: {actual_layer_name}）"
+                            logger.error(f"❌ {error_msg}")
+                            error_messages.append(error_msg)
+                    else:
+                        error_msg = f"风险栅格图层发布失败: {layer_name}（publish_raster返回False）"
+                        logger.error(f"❌ {error_msg}")
+                        error_messages.append(error_msg)
+                else:
+                    error_msg = f"风险栅格文件不存在: {risk_file_path}"
+                    logger.error(f"❌ {error_msg}")
+                    error_messages.append(error_msg)
+            else:
+                error_msg = "任务没有关联的风险栅格文件"
+                logger.warning(f"⚠️ {error_msg}")
+                error_messages.append(error_msg)
+            
+            # 发布影响栅格
+            if task.impact_raster_file:
+                impact_file_path = task.impact_raster_file.path
+                if os.path.exists(impact_file_path):
+                    layer_name = f"impact_layer_{task.id}"
+                    logger.info(f"开始重新发布影响栅格图层: {layer_name}")
+                    logger.info(f"栅格文件路径: {impact_file_path}")
+                    
+                    # 先删除可能存在的旧图层（如果名称不同）
+                    try:
+                        full_layer_name = f"{geoserver.workspace}:{layer_name}"
+                        old_layer_check = geoserver.get_layer_info(full_layer_name)
+                        if old_layer_check:
+                            logger.info(f"发现旧图层 {layer_name}，尝试删除")
+                            # 尝试通过GeoServer REST API删除图层
+                            try:
+                                delete_url = f"{geoserver.base_url}/rest/layers/{full_layer_name}.json"
+                                import requests
+                                response = requests.delete(delete_url, auth=geoserver.auth, timeout=30)
+                                if response.status_code in [200, 204]:
+                                    logger.info(f"旧图层 {layer_name} 删除成功")
+                                else:
+                                    logger.warning(f"删除旧图层返回状态码: {response.status_code}")
+                            except Exception as del_error:
+                                logger.warning(f"删除旧图层时出错: {del_error}")
+                            time.sleep(1)
+                    except Exception as e:
+                        logger.warning(f"检查旧图层时出错（可能不存在）: {e}")
+                    
+                    publish_result = geoserver.publish_raster(coverage_store_name, layer_name, impact_file_path)
+                    logger.info(f"publish_raster 返回结果: {publish_result}")
+                    
+                    if publish_result:
+                        # 等待一下让GeoServer处理
+                        time.sleep(3)  # 增加等待时间，确保重命名完成
+                        
+                        # 验证图层是否存在（先尝试期望的名称）
+                        full_layer_name = f"{geoserver.workspace}:{layer_name}"
+                        layer_check = geoserver.get_layer_info(full_layer_name)
+                        logger.info(f"图层验证结果（期望名称 {layer_name}）: {layer_check is not None}")
+                        
+                        # 如果期望名称的图层不存在，尝试查找实际创建的图层名称（可能是CoverageStore名称）
+                        actual_layer_name = layer_name
+                        if not layer_check:
+                            logger.info(f"⚠️ 期望图层名称 {layer_name} 不存在，尝试查找实际创建的图层...")
+                            # 检查CoverageStore中的Coverage名称
+                            try:
+                                coverage_list = geoserver._make_request('GET', f'workspaces/{geoserver.workspace}/coveragestores/{coverage_store_name}/coverages.json')
+                                if coverage_list and 'coverages' in coverage_list:
+                                    coverages = coverage_list['coverages'].get('coverage', [])
+                                    if isinstance(coverages, list) and len(coverages) > 0:
+                                        coverage_obj = coverages[0]
+                                        if isinstance(coverage_obj, dict):
+                                            actual_layer_name = coverage_obj.get('name', layer_name)
+                                        else:
+                                            actual_layer_name = coverage_store_name  # 使用CoverageStore名称
+                                    elif isinstance(coverages, dict):
+                                        actual_layer_name = coverages.get('name', layer_name)
+                                    else:
+                                        actual_layer_name = coverage_store_name  # 使用CoverageStore名称
+                                    
+                                    logger.info(f"找到实际图层名称: {actual_layer_name}")
+                                    # 验证实际图层是否存在
+                                    full_actual_name = f"{geoserver.workspace}:{actual_layer_name}"
+                                    layer_check = geoserver.get_layer_info(full_actual_name)
+                                    if layer_check:
+                                        logger.info(f"✅ 找到实际创建的图层: {actual_layer_name}")
+                                        layer_name = actual_layer_name  # 使用实际图层名称
+                                    else:
+                                        logger.warning(f"⚠️ 实际图层名称 {actual_layer_name} 也不存在，可能GeoServer尚未完全处理")
+                            except Exception as e:
+                                logger.warning(f"⚠️ 查找实际图层名称时出错: {e}")
+                        
+                        if layer_check:
+                            # 为图层创建并应用默认样式
+                            style_name = f"{layer_name}_style"
+                            logger.info(f"为图层 {layer_name} 创建样式: {style_name}")
+                            
+                            # 从栅格文件读取统计信息，以创建合适的样式
+                            # 快速模式：使用默认值域，避免长时间读取栅格数据
+                            logger.info(f"快速模式：使用默认值域创建样式（避免长时间读取栅格数据）")
+                            min_val, max_val = (0.0, 5.0)
+                            
+                            # 可选：尝试快速读取统计信息（不阻塞）
+                            try:
+                                import threading
+                                result = [None]
+                                def quick_get_stats():
+                                    try:
+                                        result[0] = geoserver._get_raster_statistics(impact_file_path)
+                                    except:
+                                        pass
+                                
+                                thread = threading.Thread(target=quick_get_stats)
+                                thread.daemon = True
+                                thread.start()
+                                thread.join(timeout=3)  # 3秒超时
+                                
+                                if result[0] and not thread.is_alive():
+                                    min_val, max_val = result[0]
+                                    logger.info(f"✅ 快速获取到统计信息，更新值域: {min_val} - {max_val}")
+                            except:
+                                pass
+                            
+                            logger.info(f"使用栅格值域创建样式: {min_val} - {max_val}")
+                            
+                            sld_content = geoserver._create_default_raster_sld(min_val, max_val)
+                            if geoserver.create_style(style_name, sld_content):
+                                logger.info(f"样式 {style_name} 创建成功，开始应用到图层")
+                                if geoserver.apply_style_to_layer(layer_name, style_name):
+                                    logger.info(f"✅ 样式已成功应用到图层 {layer_name}")
+                                else:
+                                    logger.warning(f"⚠️ 样式应用到图层失败，但图层已发布")
+                            else:
+                                logger.warning(f"⚠️ 样式创建失败，但图层已发布")
+                            
+                            wms_url = f"{geoserver.base_url}/ows?service=WMS&version=1.3.0&request=GetMap&layers={geoserver.workspace}:{layer_name}&format=image/png&transparent=true"
+                            
+                            if 'impact_layer' not in raster_metadata:
+                                raster_metadata['impact_layer'] = {}
+                            
+                            raster_metadata['impact_layer'].update({
+                                'wms_url': wms_url,
+                                'published': True
+                            })
+                            
+                            published_layers['impact_layer'] = {
+                                'layer_name': layer_name,
+                                'wms_url': wms_url
+                            }
+                            logger.info(f"✅ 影响栅格图层重新发布成功: {layer_name}")
+                        else:
+                            error_msg = f"图层 {layer_name} 发布后验证失败（图层在GeoServer中不存在，实际图层名称: {actual_layer_name}）"
+                            logger.error(f"❌ {error_msg}")
+                            error_messages.append(error_msg)
+                    else:
+                        error_msg = f"影响栅格图层发布失败: {layer_name}（publish_raster返回False）"
+                        logger.error(f"❌ {error_msg}")
+                        error_messages.append(error_msg)
+                else:
+                    error_msg = f"影响栅格文件不存在: {impact_file_path}"
+                    logger.error(f"❌ {error_msg}")
+                    error_messages.append(error_msg)
+            else:
+                error_msg = "任务没有关联的影响栅格文件"
+                logger.warning(f"⚠️ {error_msg}")
+                error_messages.append(error_msg)
+            
+            # 检查是否有成功发布的图层
+            if not published_layers or len(published_layers) == 0:
+                error_detail = '没有图层成功发布。'
+                if error_messages:
+                    error_detail += ' 失败原因: ' + '; '.join(error_messages)
+                else:
+                    error_detail += ' 请检查后端日志和GeoServer状态'
+                
+                logger.error(f"❌ {error_detail}")
+                return Response({
+                    'error': error_detail,
+                    'error_details': error_messages,
+                    'published_layers': {},
+                    'updated_metadata': raster_metadata
+                }, status=500)
+            
+            # 更新任务的栅格图层元数据
+            task.raster_layers_metadata = raster_metadata
+            task.save()
+            
+            # 更新分析结果中的栅格图层信息
+            if task.analysis_results and 'raster_layers' in task.analysis_results:
+                for key in published_layers:
+                    if key in task.analysis_results['raster_layers']:
+                        task.analysis_results['raster_layers'][key].update(published_layers[key])
+                task.save()
+            
+            logger.info(f"✅ 重新发布完成，成功发布 {len(published_layers)} 个图层: {list(published_layers.keys())}")
+            return Response({
+                'message': f'栅格图层重新发布成功，共发布 {len(published_layers)} 个图层',
+                'published_layers': published_layers,
+                'updated_metadata': raster_metadata
+            })
+            
+        except Exception as e:
+            logger.error(f"重新发布栅格图层失败: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return Response({
+                'error': f'重新发布失败: {str(e)}'
             }, status=500)

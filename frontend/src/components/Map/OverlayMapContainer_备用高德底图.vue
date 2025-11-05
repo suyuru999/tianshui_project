@@ -29,13 +29,18 @@
           <input type="checkbox" v-model="layerVisibility.economy" @change="toggleLayer('economy')" />
           <span>经济数据矢量</span>
         </label>
-    </div>
+      </div>
       <div class="layer-item">
         <label>
           <input type="checkbox" v-model="layerVisibility.engineering" @change="toggleLayer('engineering')" />
           <span>工程项目矢量</span>
         </label>
       </div>
+    </div>
+
+    <!-- 底图说明 -->
+    <div class="map-info">
+      <small>底图：高德地图（备用方案）</small>
     </div>
 
     <!-- 叠加分析信息弹窗 -->
@@ -58,13 +63,13 @@ import View from 'ol/View'
 import { defaults as defaultControls } from 'ol/control'
 import TileLayer from 'ol/layer/Tile'
 import XYZ from 'ol/source/XYZ'
+import OSM from 'ol/source/OSM'
 import TileWMS from 'ol/source/TileWMS'
-// 不再需要坐标转换，直接使用 EPSG:4326
+import { fromLonLat, toLonLat } from 'ol/proj'
 import { MapUtils } from '../../utils/mapUtils'
 import OverlayAnalysisPopup from './OverlayAnalysisPopup.vue'
 
 // 地图配置
-const TDT_TOKEN = '69874af7f35c741d7132c50f80acad29'
 const GEOSERVER_URL = 'http://localhost:8080/geoserver'
 const GEOSERVER_WORKSPACE = 'tianshuipy'
 const TIANSHUI_CENTER = [105.7, 34.6] // 天水市中心坐标
@@ -94,41 +99,43 @@ const popup = reactive({
   engineeringData: []
 })
 
-// 创建高德底图（稳定可靠）
+// 创建底图 - 使用高德地图（国内访问更稳定）
 const createBaseMap = () => {
+  console.log('📍 使用高德地图作为底图（备用方案）')
   return new TileLayer({
     source: new XYZ({
       url: 'https://webrd0{1-4}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
-          crossOrigin: 'anonymous'
+      crossOrigin: 'anonymous'
     }),
     visible: true,
     zIndex: 0
   })
+  
+  // 备选方案：使用OSM
+  // return new TileLayer({
+  //   source: new OSM(),
+  //   visible: true,
+  //   zIndex: 0
+  // })
 }
 
 // 创建三个WMS图层
 const createWMSLayers = () => {
   const wmsBaseUrl = `${GEOSERVER_URL}/${GEOSERVER_WORKSPACE}/wms`
   
-  // WMS 通用参数（使用 1.1.0 版本，更兼容）
-  const wmsCommonParams = {
-    'VERSION': '1.1.0',
-    'TILED': true,
-    'TRANSPARENT': true,
-    'FORMAT': 'image/png',
-    'SRS': 'EPSG:4326'  // 使用 SRS 对应 WMS 1.1.0，与 View 投影一致
-  }
-  
   // 1. 生态栅格图层
   ecologyRasterLayer = new TileLayer({
     source: new TileWMS({
-    url: wmsBaseUrl,
-    params: {
-        ...wmsCommonParams,
-        'LAYERS': `${GEOSERVER_WORKSPACE}:ecology_raster`
-    },
-    serverType: 'geoserver',
-    crossOrigin: 'anonymous'
+      url: wmsBaseUrl,
+      params: {
+        'LAYERS': `${GEOSERVER_WORKSPACE}:ecology_raster`,
+        'TILED': true,
+        'VERSION': '1.3.0',
+        'FORMAT': 'image/png',
+        'TRANSPARENT': true
+      },
+      serverType: 'geoserver',
+      crossOrigin: 'anonymous'
     }),
     visible: true,
     opacity: 0.7,
@@ -138,13 +145,16 @@ const createWMSLayers = () => {
   // 2. 经济矢量图层
   economyVectorLayer = new TileLayer({
     source: new TileWMS({
-    url: wmsBaseUrl,
-    params: {
-        ...wmsCommonParams,
-        'LAYERS': `${GEOSERVER_WORKSPACE}:economy_vector`
-    },
-    serverType: 'geoserver',
-    crossOrigin: 'anonymous'
+      url: wmsBaseUrl,
+      params: {
+        'LAYERS': `${GEOSERVER_WORKSPACE}:economy_vector`,
+        'TILED': true,
+        'VERSION': '1.3.0',
+        'FORMAT': 'image/png',
+        'TRANSPARENT': true
+      },
+      serverType: 'geoserver',
+      crossOrigin: 'anonymous'
     }),
     visible: true,
     opacity: 0.6,
@@ -154,13 +164,16 @@ const createWMSLayers = () => {
   // 3. 工程矢量图层
   engineeringVectorLayer = new TileLayer({
     source: new TileWMS({
-    url: wmsBaseUrl,
-    params: {
-        ...wmsCommonParams,
-        'LAYERS': `${GEOSERVER_WORKSPACE}:engineering_vector`
-    },
-    serverType: 'geoserver',
-    crossOrigin: 'anonymous'
+      url: wmsBaseUrl,
+      params: {
+        'LAYERS': `${GEOSERVER_WORKSPACE}:engineering_vector`,
+        'TILED': true,
+        'VERSION': '1.3.0',
+        'FORMAT': 'image/png',
+        'TRANSPARENT': true
+      },
+      serverType: 'geoserver',
+      crossOrigin: 'anonymous'
     }),
     visible: true,
     opacity: 0.8,
@@ -173,52 +186,56 @@ const createWMSLayers = () => {
 // 初始化地图
 const initMap = () => {
   try {
-    console.log('🗺️ 初始化重大工程叠加分析地图...')
+    console.log('🗺️ 初始化重大工程叠加分析地图（高德底图版本）...')
     
-    const mapElement = document.getElementById('overlay-map')
-    if (!mapElement) {
-      console.error('❌ 地图容器未找到')
-      return
-    }
+    // 创建底图
+    const baseLayer = createBaseMap()
     
-    console.log('📦 地图容器尺寸:', {
-      width: mapElement.offsetWidth,
-      height: mapElement.offsetHeight
+    // 监听底图加载
+    baseLayer.getSource().on('tileloaderror', (event) => {
+      console.error('❌ 高德地图底图加载失败:', event.tile?.src_)
     })
     
-    // 创建高德底图
-    const gaodeLayer = createBaseMap()
+    baseLayer.getSource().on('tileloadend', () => {
+      console.log('✅ 高德地图底图瓦片加载成功')
+    })
     
     // 创建三个WMS图层
     const wmsLayers = createWMSLayers()
     
-    // 创建地图（直接使用经纬度坐标，不需要转换）
+    // 转换中心点坐标
+    const center = fromLonLat(TIANSHUI_CENTER)
+    console.log('🌍 天水市坐标:', TIANSHUI_CENTER)
+    console.log('🗺️ Web Mercator坐标:', center)
+    
+    // 创建地图
     map = new OLMap({
       target: 'overlay-map',
-      layers: [gaodeLayer, ...wmsLayers],
+      layers: [baseLayer, ...wmsLayers],
       view: new View({
-        projection: 'EPSG:4326',  // ✅ 关键：使用 EPSG:4326 投影
-        center: [105.7, 34.6],     // ✅ 直接使用经纬度坐标
-        zoom: 10
+        center: center,
+        zoom: 10,
+        projection: 'EPSG:3857'
       }),
       controls: defaultControls({ zoom: false })
     })
     
-    console.log('✅ 地图对象创建完成')
-    console.log('📍 地图中心点:', map.getView().getCenter())
+    console.log('✅ 地图创建成功')
     console.log('📦 已加载图层数:', map.getLayers().getLength())
-    console.log('🔍 地图尺寸:', map.getSize())
     
     // 设置地图点击事件
     map.on('click', handleMapClick)
     
-    // 设置鼠标移动事件（更新坐标显示）
+    // 设置鼠标移动事件
     map.on('pointermove', (event) => {
-      // 坐标已经是 EPSG:4326 (经纬度)，无需转换
-      const coord = event.coordinate
-      if (coord && !isNaN(coord[0]) && !isNaN(coord[1])) {
-        coordinates.lng = coord[0].toFixed(4)
-        coordinates.lat = coord[1].toFixed(4)
+      try {
+        const lonLat = toLonLat(event.coordinate)
+        if (lonLat && !isNaN(lonLat[0]) && !isNaN(lonLat[1])) {
+          coordinates.lng = lonLat[0].toFixed(4)
+          coordinates.lat = lonLat[1].toFixed(4)
+        }
+      } catch (error) {
+        // 忽略坐标转换错误
       }
     })
     
@@ -226,184 +243,136 @@ const initMap = () => {
     setTimeout(() => {
       if (map) {
         map.updateSize()
-        const newSize = map.getSize()
-        console.log('🔄 地图尺寸更新:', newSize)
-      map.render()
+        map.render()
         console.log('✅ 地图渲染完成')
-    }
-  }, 200)
-  
-    // 再次刷新（确保底图显示）
-  setTimeout(() => {
-      if (map) {
-    map.updateSize()
-    map.render()
-        console.log('🔄 地图二次刷新完成')
       }
-  }, 500)
-  
-    } catch (error) {
+    }, 100)
+    
+  } catch (error) {
     console.error('❌ 地图初始化失败:', error)
-    console.error('错误堆栈:', error.stack)
   }
 }
 
 // 处理地图点击事件
 const handleMapClick = async (event) => {
   try {
-    console.log('🖱️ 地图点击事件触发')
+    console.log('🖱️ 地图点击')
     
-    // 坐标已经是 EPSG:4326 (经纬度)，无需转换
-    const coord = event.coordinate
+    const coordinate = event.coordinate
+    const lonLat = toLonLat(coordinate)
     
-    console.log('📍 点击坐标 (经纬度):', coord)
-    
-    // 重置弹窗数据
     popup.visible = false
-    popup.coordinate = { lng: coord[0], lat: coord[1] }
+    popup.coordinate = { lng: lonLat[0], lat: lonLat[1] }
     popup.ecologyData = null
     popup.economyData = null
     popup.engineeringData = []
-        
-        // 准备图层源映射
+    
     const layerSources = {
       ecology: ecologyRasterLayer?.getSource(),
       economy: economyVectorLayer?.getSource(),
       engineering: engineeringVectorLayer?.getSource()
     }
     
-    console.log('🔍 开始获取图层信息...')
-        
-        // 批量获取GetFeatureInfo
-        const results = await MapUtils.getMultipleFeatureInfo(layerSources, coord, map)
+    const results = await MapUtils.getMultipleFeatureInfo(layerSources, coordinate, map)
     
-    console.log('📊 GetFeatureInfo结果:', results)
-        
-        // 解析生态栅格数据
-        if (results.ecology) {
+    if (results.ecology) {
       popup.ecologyData = parseEcologyData(results.ecology)
-      console.log('🌿 生态数据:', popup.ecologyData)
-        }
-        
-        // 解析经济矢量数据
-        if (results.economy) {
+    }
+    
+    if (results.economy) {
       popup.economyData = parseEconomyData(results.economy)
-      console.log('💰 经济数据:', popup.economyData)
-        }
-        
-        // 解析工程矢量数据
-        if (results.engineering) {
+    }
+    
+    if (results.engineering) {
       popup.engineeringData = parseEngineeringData(results.engineering)
-      console.log('🏗️ 工程数据:', popup.engineeringData)
-        }
-        
-        // 显示弹窗
+    }
+    
     popup.visible = true
-    console.log('✅ 弹窗已打开')
-        
-      } catch (error) {
-    console.error('❌ 处理地图点击失败:', error)
+    
+  } catch (error) {
+    console.error('❌ 处理点击失败:', error)
   }
 }
 
-// 解析生态栅格数据
+// 解析生态数据
 const parseEcologyData = (data) => {
   try {
-    if (!data.features || data.features.length === 0) {
-      return null
-    }
+    if (!data.features || data.features.length === 0) return null
     
-      const feature = data.features[0]
-      const properties = feature.properties || {}
-      
-      // 查找栅格值（可能在不同字段中）
-      let value = null
+    const feature = data.features[0]
+    const properties = feature.properties || {}
+    
+    let value = null
     const possibleFields = ['GRAY_INDEX', 'Band1', 'value', 'pixel_value']
     
     for (const field of possibleFields) {
       if (properties[field] !== undefined && properties[field] !== null) {
         value = parseFloat(properties[field])
-            break
-          }
-        }
-    
-    if (value === null) {
-      return null
+        break
       }
-      
-    // 判断等级（假设栅格值范围是0-1，或者50-1000）
-        let normalizedValue = value
-        if (value >= 50 && value <= 1000) {
-      normalizedValue = (value - 50) / 950 // 归一化到0-1
-        }
-        
+    }
+    
+    if (value === null) return null
+    
+    let normalizedValue = value
+    if (value >= 50 && value <= 1000) {
+      normalizedValue = (value - 50) / 950
+    }
+    
     let level = '较差'
-        if (normalizedValue >= 0.6) level = '优秀'
-        else if (normalizedValue >= 0.4) level = '良好'
-        else if (normalizedValue >= 0.2) level = '中等'
-        
-        return {
-          value: value,
-          normalizedValue: normalizedValue,
-          level: level
-        }
+    if (normalizedValue >= 0.6) level = '优秀'
+    else if (normalizedValue >= 0.4) level = '良好'
+    else if (normalizedValue >= 0.2) level = '中等'
+    
+    return { value, normalizedValue, level }
   } catch (error) {
-    console.error('解析生态数据失败:', error)
     return null
   }
 }
 
-// 解析经济矢量数据
+// 解析经济数据
 const parseEconomyData = (data) => {
   try {
-    if (!data.features || data.features.length === 0) {
-      return null
-    }
+    if (!data.features || data.features.length === 0) return null
     
-      const feature = data.features[0]
-      const properties = feature.properties || {}
-      
-      return {
-        admin_name: properties.admin_name || properties.ADMIN_NAME || '未知',
-        GDP: parseFloat(properties.GDP || properties.gdp || 0),
-        POP: parseInt(properties.POP || properties.pop || 0),
+    const feature = data.features[0]
+    const properties = feature.properties || {}
+    
+    return {
+      admin_name: properties.admin_name || properties.ADMIN_NAME || '未知',
+      GDP: parseFloat(properties.GDP || properties.gdp || 0),
+      POP: parseInt(properties.POP || properties.pop || 0),
       area_km2: parseFloat(properties.area_km2 || properties.AREA_KM2 || 0)
-      }
+    }
   } catch (error) {
-    console.error('解析经济数据失败:', error)
     return null
   }
 }
 
-// 解析工程矢量数据
+// 解析工程数据
 const parseEngineeringData = (data) => {
   try {
-    if (!data.features || data.features.length === 0) {
-      return []
-    }
+    if (!data.features || data.features.length === 0) return []
     
-      return data.features.map(feature => {
-        const properties = feature.properties || {}
-        return {
-          proj_name: properties.proj_name || properties.PROJ_NAME || '未知工程',
-          proj_type: properties.proj_type || properties.PROJ_TYPE || '未知',
-          status: properties.status || properties.STATUS || '未知',
-          start_date: properties.start_date || properties.START_DATE || '',
-          end_date: properties.end_date || properties.END_DATE || '',
+    return data.features.map(feature => {
+      const properties = feature.properties || {}
+      return {
+        proj_name: properties.proj_name || properties.PROJ_NAME || '未知工程',
+        proj_type: properties.proj_type || properties.PROJ_TYPE || '未知',
+        status: properties.status || properties.STATUS || '未知',
+        start_date: properties.start_date || properties.START_DATE || '',
+        end_date: properties.end_date || properties.END_DATE || '',
         area_km2: parseFloat(properties.area_km2 || properties.AREA_KM2 || 0)
-        }
-      })
+      }
+    })
   } catch (error) {
-    console.error('解析工程数据失败:', error)
     return []
   }
 }
 
-// 切换图层可见性
+// 切换图层
 const toggleLayer = (layerType) => {
   try {
-    console.log(`🔄 切换图层可见性: ${layerType} -> ${layerVisibility[layerType]}`)
-    
     if (layerType === 'ecology' && ecologyRasterLayer) {
       ecologyRasterLayer.setVisible(layerVisibility.ecology)
     } else if (layerType === 'economy' && economyVectorLayer) {
@@ -411,7 +380,6 @@ const toggleLayer = (layerType) => {
     } else if (layerType === 'engineering' && engineeringVectorLayer) {
       engineeringVectorLayer.setVisible(layerVisibility.engineering)
     }
-    
     map?.render()
   } catch (error) {
     console.error('切换图层失败:', error)
@@ -427,46 +395,23 @@ const closePopup = () => {
 const zoomIn = () => {
   const view = map?.getView()
   if (view) {
-    const zoom = view.getZoom()
-    view.animate({ zoom: zoom + 1, duration: 250 })
+    view.animate({ zoom: view.getZoom() + 1, duration: 250 })
   }
 }
 
 const zoomOut = () => {
   const view = map?.getView()
   if (view) {
-    const zoom = view.getZoom()
-    view.animate({ zoom: zoom - 1, duration: 250 })
+    view.animate({ zoom: view.getZoom() - 1, duration: 250 })
   }
 }
 
 // 生命周期
 onMounted(() => {
-  console.log('🚀 OverlayMapContainer 组件已挂载')
-  
-  // 等待DOM完全渲染
-        setTimeout(() => {
-    const mapElement = document.getElementById('overlay-map')
-    if (mapElement) {
-      console.log('✅ 地图容器已找到')
-      console.log('📏 容器尺寸:', {
-        offsetWidth: mapElement.offsetWidth,
-        offsetHeight: mapElement.offsetHeight
-      })
-      
-      // 如果容器尺寸为0，等待更长时间
-      if (mapElement.offsetWidth === 0 || mapElement.offsetHeight === 0) {
-        console.warn('⚠️ 容器尺寸为0，延迟初始化...')
-      setTimeout(() => {
-          initMap()
-        }, 500)
-        } else {
-        initMap()
-        }
-    } else {
-      console.error('❌ 地图容器未找到')
-      }
-    }, 100)
+  console.log('🚀 OverlayMapContainer（高德底图版本）已挂载')
+  setTimeout(() => {
+    initMap()
+  }, 100)
 })
 
 onUnmounted(() => {
@@ -483,7 +428,7 @@ onUnmounted(() => {
   height: 100%;
   position: relative;
   overflow: hidden;
-  background: #e5e5e5;
+  background: #f0f0f0;
 }
 
 #overlay-map {
@@ -493,16 +438,6 @@ onUnmounted(() => {
   position: absolute;
   top: 0;
   left: 0;
-  background: #e5e5e5;
-}
-
-/* 确保OpenLayers容器正确渲染 */
-#overlay-map .ol-viewport {
-  position: relative !important;
-}
-
-#overlay-map canvas {
-  position: absolute;
 }
 
 /* 缩放控制 */
@@ -604,4 +539,20 @@ onUnmounted(() => {
   width: 16px;
   height: 16px;
 }
+
+/* 底图说明 */
+.map-info {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #666;
+  z-index: 1000;
+}
 </style>
+
+
+

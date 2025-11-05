@@ -111,7 +111,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { ElIcon, ElButton, ElTag, ElMessage } from 'element-plus';
 import { Loading, Download } from '@element-plus/icons-vue';
 import * as echarts from 'echarts';
@@ -128,6 +128,7 @@ const loading = ref(false);
 const indicesData = ref([]);
 const pieChartRef = ref(null);
 let pieChart = null;
+let removeResizeListener = null;
 
 const indexLabelMap = computed(() => ({
   ndvi: '绿化指数 (NDVI)',
@@ -210,6 +211,24 @@ function initCharts() {
     console.log('初始化饼图，DOM元素:', pieChartRef.value);
     pieChart = echarts.init(pieChartRef.value);
     updatePieChart();
+
+    // 监听窗口尺寸变化，带防抖，动态调整图例布局，避免与右侧面板遮挡
+    const debounce = (fn, delay = 200) => {
+      let timer = null;
+      return (...args) => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), delay);
+      };
+    };
+
+    const onResize = debounce(() => {
+      if (!pieChart || pieChart.isDisposed()) return;
+      pieChart.resize();
+      updatePieChart();
+    }, 150);
+
+    window.addEventListener('resize', onResize);
+    removeResizeListener = () => window.removeEventListener('resize', onResize);
   } else {
     console.log('饼图DOM元素不存在');
   }
@@ -277,25 +296,35 @@ function updatePieChart() {
     return;
   }
 
+  const chartWidth = pieChart.getWidth();
+  const isWide = chartWidth >= 900; // 宽屏时图例在右侧，窄屏时放到底部
+
   const option = {
     tooltip: {
       trigger: 'item',
       formatter: '{b}: {c} km² ({d}%)'
     },
-    legend: {
-      orient: 'vertical',
-      right: '10%',
-      top: 'center',
-      textStyle: {
-        fontSize: 14
-      }
-    },
+    legend: isWide
+      ? {
+          orient: 'vertical',
+          right: '6%',
+          top: 'middle',
+          textStyle: { fontSize: 14 }
+        }
+      : {
+          type: 'scroll',
+          orient: 'horizontal',
+          bottom: 0,
+          left: 'center',
+          textStyle: { fontSize: 12 },
+          pageIconColor: '#409EFF'
+        },
     series: [
       {
         name: '面积分布',
         type: 'pie',
         radius: ['40%', '70%'],
-        center: ['40%', '50%'],
+        center: isWide ? ['40%', '50%'] : ['50%', '45%'],
         avoidLabelOverlap: true,
         itemStyle: {
           borderRadius: 10,
@@ -512,6 +541,14 @@ function downloadResults() {
 onMounted(() => {
   if (props.status === 'done' && props.resultData) {
     loadIndicesData();
+  }
+});
+
+// 卸载时清理监听
+onUnmounted(() => {
+  if (removeResizeListener) removeResizeListener();
+  if (pieChart && !pieChart.isDisposed()) {
+    pieChart.dispose();
   }
 });
 </script>

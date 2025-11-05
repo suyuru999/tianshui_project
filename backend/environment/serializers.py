@@ -209,7 +209,11 @@ class CitizenFeedbackSerializer(serializers.ModelSerializer):
 class ClimateDataFileSerializer(serializers.ModelSerializer):
     """气候数据文件序列化器"""
     status_display = serializers.CharField(source='get_status_display', read_only=True)
-    uploaded_by_username = serializers.CharField(source='uploaded_by.username', read_only=True)
+    uploaded_by_username = serializers.SerializerMethodField()
+    
+    def get_uploaded_by_username(self, obj):
+        """安全获取上传用户名"""
+        return obj.uploaded_by.username if obj.uploaded_by else None
     
     class Meta:
         model = ClimateDataFile
@@ -263,7 +267,11 @@ class ClimateAnalysisRequestSerializer(serializers.Serializer):
 class EcologicalIndexFileSerializer(serializers.ModelSerializer):
     """生态指数文件序列化器"""
     status_display = serializers.CharField(source='get_status_display', read_only=True)
-    uploaded_by_username = serializers.CharField(source='uploaded_by.username', read_only=True)
+    uploaded_by_username = serializers.SerializerMethodField()
+    
+    def get_uploaded_by_username(self, obj):
+        """安全获取上传用户名"""
+        return obj.uploaded_by.username if obj.uploaded_by else None
 
     class Meta:
         model = EcologicalIndexFile
@@ -292,7 +300,11 @@ class EcologicalIndexFileUploadSerializer(serializers.ModelSerializer):
 class EcologicalProjectFileSerializer(serializers.ModelSerializer):
     """生态修复工程文件序列化器"""
     status_display = serializers.CharField(source='get_status_display', read_only=True)
-    uploaded_by_username = serializers.CharField(source='uploaded_by.username', read_only=True)
+    uploaded_by_username = serializers.SerializerMethodField()
+    
+    def get_uploaded_by_username(self, obj):
+        """安全获取上传用户名"""
+        return obj.uploaded_by.username if obj.uploaded_by else None
 
     class Meta:
         model = EcologicalProjectFile

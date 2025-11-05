@@ -10,3 +10,18 @@ http://127.0.0.1:8000/admin/
 Redis启动
  1.切换到redis安装目录 cmd
  2.redis-server.exe redis.windows.conf
+
+GeoServer配置（可选）
+1. 默认配置已设置（无需修改）：
+   URL: http://localhost:8080/geoserver
+   用户名: admin
+   密码: geoserver
+   
+2. 测试GeoServer连接：
+   python manage.py test_geoserver
+   
+3. 查看配置状态API：
+   http://localhost:8000/api/v1/environment/spatial/geoserver/status/
+   
+4. 详细配置指南：
+   参考 backend/GEOSERVER_CONFIG.md

@@ -231,26 +231,61 @@ def geoserver_status(request):
         # 测试连接
         capabilities = geoserver.get_wms_capabilities()
         
+        # 尝试创建工作空间验证权限
+        workspace_ok = False
+        try:
+            workspace_ok = geoserver.create_workspace()
+        except:
+            pass
+        
         status_info = {
             'connected': capabilities is not None,
             'base_url': geoserver.base_url,
             'workspace': geoserver.workspace,
-            'wms_enabled': True,
+            'workspace_ready': workspace_ok,
+            'wms_enabled': capabilities is not None,
             'wfs_enabled': True,
-            'wcs_enabled': True
+            'wcs_enabled': True,
+            'configured': True
         }
         
         return Response({
             'message': '获取GeoServer状态成功',
-            'status': status_info
+            'status': status_info,
+            'tips': {
+                'connected': 'GeoServer连接正常' if capabilities else 'GeoServer未连接，请检查配置和运行状态',
+                'workspace': f'工作空间 "{geoserver.workspace}" {"已就绪" if workspace_ok else "需要创建"}',
+                'next_steps': [] if capabilities else [
+                    '1. 确认GeoServer已启动（访问 http://localhost:8080/geoserver）',
+                    '2. 检查配置的URL、用户名、密码是否正确',
+                    '3. 运行命令测试：python manage.py test_geoserver'
+                ]
+            }
         })
         
     except Exception as e:
         logger.error(f"获取GeoServer状态失败: {e}")
-        return Response(
-            {'error': f'获取GeoServer状态失败: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        status_info = {
+            'connected': False,
+            'base_url': getattr(get_geoserver_manager(), 'base_url', '未配置'),
+            'workspace': getattr(get_geoserver_manager(), 'workspace', '未配置'),
+            'error': str(e)
+        }
+        
+        return Response({
+            'message': '获取GeoServer状态失败',
+            'status': status_info,
+            'error': str(e),
+            'tips': {
+                'error': '无法连接到GeoServer',
+                'checklist': [
+                    '确认GeoServer是否已安装并启动',
+                    '检查URL是否正确（默认：http://localhost:8080/geoserver）',
+                    '验证用户名和密码是否正确',
+                    '查看后端日志了解更多信息'
+                ]
+            }
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 

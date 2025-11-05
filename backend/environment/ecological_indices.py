@@ -467,7 +467,7 @@ class EcologicalIndexCalculator:
         """计算干度指数（基于Tasseled Cap变换）"""
         try:
             # 检查是否有足够的波段
-            if not hasattr(self, 'bands') or self.bands is None:
+            if not hasattr(self, 'bands'    ) or self.bands is None:
                 logger.error("没有加载影像数据")
                 return None
             
