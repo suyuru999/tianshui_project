@@ -1108,6 +1108,7 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
     queryset = OverlayAnalysisTask.objects.all()
     serializer_class = OverlayAnalysisTaskSerializer
     permission_classes = [AllowAny]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]  # 支持文件上传
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -1562,4 +1563,419 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
             logger.error(traceback.format_exc())
             return Response({
                 'error': f'重新发布失败: {str(e)}'
+            }, status=500)
+    
+    @action(detail=False, methods=['post'], url_path='upload-ecology-raster', parser_classes=[MultiPartParser, FormParser])
+    def upload_ecology_raster(self, request):
+        """上传生态指数栅格数据"""
+        # 最简化测试版本
+        logger.info("=== 收到上传请求 ===")
+        
+        try:
+            logger.info(f"请求方法: {request.method}")
+            logger.info(f"Content-Type: {request.content_type}")
+            logger.info(f"FILES: {list(request.FILES.keys())}")
+            
+            if 'file' not in request.FILES:
+                logger.warning("未找到上传文件")
+                return Response({
+                    'success': False,
+                    'message': '未找到上传文件'
+                }, status=400)
+            
+            uploaded_file = request.FILES['file']
+            file_name = uploaded_file.name
+            logger.info(f"接收到文件: {file_name}, 大小: {uploaded_file.size} bytes")
+            
+            # 验证文件类型
+            if not file_name.lower().endswith(('.tif', '.tiff')):
+                return Response({
+                    'success': False,
+                    'message': '仅支持GeoTIFF格式 (.tif, .tiff)'
+                }, status=400)
+            
+            # 验证文件大小（最大100MB）
+            if uploaded_file.size > 100 * 1024 * 1024:
+                return Response({
+                    'success': False,
+                    'message': '文件大小超过100MB限制'
+                }, status=400)
+            
+            # 保存文件
+            import os
+            from django.conf import settings
+            
+            upload_dir = os.path.join(settings.MEDIA_ROOT, 'ecological_projects')
+            os.makedirs(upload_dir, exist_ok=True)
+            logger.info(f"上传目录: {upload_dir}")
+            
+            # 使用固定文件名以便覆盖旧数据
+            save_path = os.path.join(upload_dir, 'ecology_raster.tif')
+            
+            # 保存上传的文件
+            logger.info(f"开始保存文件到: {save_path}")
+            with open(save_path, 'wb+') as destination:
+                for chunk in uploaded_file.chunks():
+                    destination.write(chunk)
+            
+            logger.info(f"✅ 生态栅格文件已保存: {save_path}")
+            
+            # 发布到GeoServer
+            logger.info("🚀 开始发布到GeoServer...")
+            try:
+                from .geoserver_config import geoserver_manager
+                
+                logger.info(f"调用publish_raster: coverage_store=ecology_raster, layer=ecology_raster, file={save_path}")
+                success = geoserver_manager.publish_raster(
+                    coverage_store_name='ecology_raster',
+                    layer_name='ecology_raster',
+                    file_path=save_path
+                )
+                logger.info(f"publish_raster返回值: {success}")
+                
+                if success:
+                    logger.info("✅ GeoServer发布成功")
+                    return Response({
+                        'success': True,
+                        'message': '生态指数栅格上传成功并已发布到GeoServer',
+                        'file_name': file_name,
+                        'layer_name': 'ecology_raster'
+                    })
+                else:
+                    logger.warning("⚠️ GeoServer发布失败")
+                    return Response({
+                        'success': True,
+                        'message': '文件上传成功，但GeoServer发布失败。请手动在GeoServer中发布或检查GeoServer连接',
+                        'file_name': file_name,
+                        'save_path': save_path
+                    })
+            except Exception as geo_error:
+                logger.error(f"GeoServer发布异常: {str(geo_error)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                return Response({
+                    'success': True,
+                    'message': f'文件上传成功，但GeoServer发布失败: {str(geo_error)}。文件已保存，可稍后手动发布',
+                    'file_name': file_name,
+                    'save_path': save_path
+                })
+                
+        except Exception as e:
+            logger.error(f"❌ 上传生态栅格失败: {str(e)}")
+            import traceback
+            error_trace = traceback.format_exc()
+            logger.error(f"错误堆栈:\n{error_trace}")
+            
+            # 返回更详细的错误信息
+            error_message = str(e)
+            if hasattr(e, '__cause__') and e.__cause__:
+                error_message = f"{error_message} (原因: {str(e.__cause__)})"
+            
+            return Response({
+                'success': False,
+                'message': f'上传失败: {error_message}',
+                'error_detail': error_trace[:500] if len(error_trace) > 500 else error_trace  # 限制长度
+            }, status=500)
+    
+    @action(detail=False, methods=['post'], url_path='upload-economy-vector', parser_classes=[MultiPartParser, FormParser])
+    def upload_economy_vector(self, request):
+        """上传经济数据矢量"""
+        try:
+            if 'file' not in request.FILES:
+                return Response({
+                    'success': False,
+                    'message': '未找到上传文件'
+                }, status=400)
+            
+            uploaded_file = request.FILES['file']
+            file_name = uploaded_file.name
+            
+            # 验证文件类型
+            if not file_name.lower().endswith('.zip'):
+                return Response({
+                    'success': False,
+                    'message': '仅支持Shapefile压缩包 (.zip)'
+                }, status=400)
+            
+            # 验证文件大小
+            if uploaded_file.size > 100 * 1024 * 1024:
+                return Response({
+                    'success': False,
+                    'message': '文件大小超过100MB限制'
+                }, status=400)
+            
+            # 保存文件
+            import os
+            import zipfile
+            from django.conf import settings
+            
+            upload_dir = os.path.join(settings.MEDIA_ROOT, 'ecological_projects', 'economy_vector')
+            os.makedirs(upload_dir, exist_ok=True)
+            
+            zip_path = os.path.join(upload_dir, 'economy_vector.zip')
+            
+            # 保存ZIP文件
+            with open(zip_path, 'wb+') as destination:
+                for chunk in uploaded_file.chunks():
+                    destination.write(chunk)
+            
+            logger.info(f"经济矢量ZIP文件已保存: {zip_path}")
+            
+            # 解压文件
+            try:
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(upload_dir)
+                logger.info(f"文件已解压到: {upload_dir}")
+            except Exception as e:
+                return Response({
+                    'success': False,
+                    'message': f'解压文件失败: {str(e)}'
+                }, status=400)
+            
+            # 查找.shp文件
+            shp_files = [f for f in os.listdir(upload_dir) if f.endswith('.shp')]
+            if not shp_files:
+                return Response({
+                    'success': False,
+                    'message': 'ZIP文件中未找到.shp文件'
+                }, status=400)
+            
+            original_shp_name = shp_files[0]
+            original_base_name = os.path.splitext(original_shp_name)[0]
+            
+            # 固定文件名
+            fixed_name = 'economy_vector'
+            fixed_shp_path = os.path.join(upload_dir, f'{fixed_name}.shp')
+            
+            # 如果文件名不是固定名称，重命名所有相关文件
+            if original_base_name != fixed_name:
+                logger.info(f"检测到文件名不匹配: {original_base_name} -> {fixed_name}，开始重命名...")
+                
+                # Shapefile需要重命名的文件扩展名
+                shapefile_extensions = ['.shp', '.shx', '.dbf', '.prj', '.cpg']
+                
+                for ext in shapefile_extensions:
+                    old_file = os.path.join(upload_dir, f'{original_base_name}{ext}')
+                    new_file = os.path.join(upload_dir, f'{fixed_name}{ext}')
+                    
+                    if os.path.exists(old_file):
+                        # 如果目标文件已存在，先删除
+                        if os.path.exists(new_file):
+                            os.remove(new_file)
+                            logger.info(f"  删除旧文件: {new_file}")
+                        
+                        # 重命名文件
+                        os.rename(old_file, new_file)
+                        logger.info(f"  重命名: {original_base_name}{ext} -> {fixed_name}{ext}")
+                
+                logger.info(f"✅ 文件重命名完成: {original_base_name} -> {fixed_name}")
+            
+            shp_path = fixed_shp_path
+            
+            # 确保 .cpg 文件存在（UTF-8编码）
+            cpg_path = os.path.join(upload_dir, f'{fixed_name}.cpg')
+            with open(cpg_path, 'w') as f:
+                f.write('UTF-8')
+            
+            logger.info(f"✅ 经济矢量数据已准备就绪: {shp_path}")
+            
+            # 尝试为矢量数据生成动态样式
+            try:
+                from .geoserver_config import geoserver_manager
+                
+                # 读取矢量数据统计信息
+                min_val, max_val, mean_val = geoserver_manager._get_vector_statistics(shp_path, 'GDP')
+                
+                if min_val is not None and max_val is not None:
+                    logger.info(f"GDP统计信息: min={min_val}, max={max_val}, mean={mean_val}")
+                    
+                    # 根据数据分布生成样式
+                    style_name = 'economy_vector'
+                    sld_content = geoserver_manager._create_vector_sld_by_attribute(
+                        field_name='GDP',
+                        min_val=min_val,
+                        max_val=max_val,
+                        color_scheme='default'  # 黄-橙-红配色
+                    )
+                    
+                    # 删除旧样式（如果存在）
+                    try:
+                        geoserver_manager.delete_style(style_name)
+                    except:
+                        pass
+                    
+                    # 创建并应用新样式
+                    if geoserver_manager.create_style(style_name, sld_content):
+                        geoserver_manager.apply_style_to_layer('economy_vector', style_name)
+                        logger.info(f"✅ 经济矢量样式已自动生成并应用")
+                else:
+                    logger.warning("无法读取GDP统计信息，使用默认样式")
+            except Exception as e:
+                logger.warning(f"生成矢量样式失败: {e}，使用默认样式")
+            
+            return Response({
+                'success': True,
+                'message': '经济数据矢量上传成功。请在GeoServer中配置数据源以完成发布',
+                'file_name': file_name,
+                'shp_path': shp_path
+            })
+                
+        except Exception as e:
+            logger.error(f"上传经济矢量失败: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return Response({
+                'success': False,
+                'message': f'上传失败: {str(e)}'
+            }, status=500)
+    
+    @action(detail=False, methods=['post'], url_path='upload-engineering-vector', parser_classes=[MultiPartParser, FormParser])
+    def upload_engineering_vector(self, request):
+        """上传工程项目矢量"""
+        try:
+            if 'file' not in request.FILES:
+                return Response({
+                    'success': False,
+                    'message': '未找到上传文件'
+                }, status=400)
+            
+            uploaded_file = request.FILES['file']
+            file_name = uploaded_file.name
+            
+            # 验证文件类型
+            if not file_name.lower().endswith('.zip'):
+                return Response({
+                    'success': False,
+                    'message': '仅支持Shapefile压缩包 (.zip)'
+                }, status=400)
+            
+            # 验证文件大小
+            if uploaded_file.size > 100 * 1024 * 1024:
+                return Response({
+                    'success': False,
+                    'message': '文件大小超过100MB限制'
+                }, status=400)
+            
+            # 保存文件
+            import os
+            import zipfile
+            from django.conf import settings
+            
+            upload_dir = os.path.join(settings.MEDIA_ROOT, 'ecological_projects', 'engineering_vector')
+            os.makedirs(upload_dir, exist_ok=True)
+            
+            zip_path = os.path.join(upload_dir, 'engineering_vector.zip')
+            
+            # 保存ZIP文件
+            with open(zip_path, 'wb+') as destination:
+                for chunk in uploaded_file.chunks():
+                    destination.write(chunk)
+            
+            logger.info(f"工程矢量ZIP文件已保存: {zip_path}")
+            
+            # 解压文件
+            try:
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(upload_dir)
+                logger.info(f"文件已解压到: {upload_dir}")
+            except Exception as e:
+                return Response({
+                    'success': False,
+                    'message': f'解压文件失败: {str(e)}'
+                }, status=400)
+            
+            # 查找.shp文件
+            shp_files = [f for f in os.listdir(upload_dir) if f.endswith('.shp')]
+            if not shp_files:
+                return Response({
+                    'success': False,
+                    'message': 'ZIP文件中未找到.shp文件'
+                }, status=400)
+            
+            original_shp_name = shp_files[0]
+            original_base_name = os.path.splitext(original_shp_name)[0]
+            
+            # 固定文件名
+            fixed_name = 'engineering_vector'
+            fixed_shp_path = os.path.join(upload_dir, f'{fixed_name}.shp')
+            
+            # 如果文件名不是固定名称，重命名所有相关文件
+            if original_base_name != fixed_name:
+                logger.info(f"检测到文件名不匹配: {original_base_name} -> {fixed_name}，开始重命名...")
+                
+                # Shapefile需要重命名的文件扩展名
+                shapefile_extensions = ['.shp', '.shx', '.dbf', '.prj', '.cpg']
+                
+                for ext in shapefile_extensions:
+                    old_file = os.path.join(upload_dir, f'{original_base_name}{ext}')
+                    new_file = os.path.join(upload_dir, f'{fixed_name}{ext}')
+                    
+                    if os.path.exists(old_file):
+                        # 如果目标文件已存在，先删除
+                        if os.path.exists(new_file):
+                            os.remove(new_file)
+                            logger.info(f"  删除旧文件: {new_file}")
+                        
+                        # 重命名文件
+                        os.rename(old_file, new_file)
+                        logger.info(f"  重命名: {original_base_name}{ext} -> {fixed_name}{ext}")
+                
+                logger.info(f"✅ 文件重命名完成: {original_base_name} -> {fixed_name}")
+            
+            shp_path = fixed_shp_path
+            
+            # 确保 .cpg 文件存在（UTF-8编码）
+            cpg_path = os.path.join(upload_dir, f'{fixed_name}.cpg')
+            with open(cpg_path, 'w') as f:
+                f.write('UTF-8')
+            
+            logger.info(f"✅ 工程矢量数据已准备就绪: {shp_path}")
+            
+            # 为工程矢量生成动态样式（使用蓝色系统一样式）
+            try:
+                from .geoserver_config import geoserver_manager
+                import random
+                
+                # 为每次上传生成稍有不同的蓝色调
+                blue_shades = [
+                    ('#0000FF', 0.3),  # 纯蓝
+                    ('#0066FF', 0.35), # 亮蓝
+                    ('#0099FF', 0.3),  # 天蓝
+                    ('#3366FF', 0.35), # 中蓝
+                ]
+                color, opacity = random.choice(blue_shades)
+                
+                style_name = 'engineering_vector'
+                sld_content = geoserver_manager._create_vector_sld_simple(
+                    color=color,
+                    opacity=opacity
+                )
+                
+                # 删除旧样式（如果存在）
+                try:
+                    geoserver_manager.delete_style(style_name)
+                except:
+                    pass
+                
+                # 创建并应用新样式
+                if geoserver_manager.create_style(style_name, sld_content):
+                    geoserver_manager.apply_style_to_layer('engineering_vector', style_name)
+                    logger.info(f"✅ 工程矢量样式已生成（{color}）")
+            except Exception as e:
+                logger.warning(f"生成工程矢量样式失败: {e}，使用默认样式")
+            
+            return Response({
+                'success': True,
+                'message': '工程项目矢量上传成功。请在GeoServer中配置数据源以完成发布',
+                'file_name': file_name,
+                'shp_path': shp_path
+            })
+                
+        except Exception as e:
+            logger.error(f"上传工程矢量失败: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return Response({
+                'success': False,
+                'message': f'上传失败: {str(e)}'
             }, status=500)

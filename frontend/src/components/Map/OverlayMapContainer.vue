@@ -15,29 +15,6 @@
       <div>纬度: {{ coordinates.lat }}</div>
     </div>
 
-    <!-- 图层控制面板 -->
-    <div class="layer-control-panel">
-      <div class="panel-title">图层控制</div>
-      <div class="layer-item">
-        <label>
-          <input type="checkbox" v-model="layerVisibility.ecology" @change="toggleLayer('ecology')" />
-          <span>生态指数栅格</span>
-        </label>
-      </div>
-      <div class="layer-item">
-        <label>
-          <input type="checkbox" v-model="layerVisibility.economy" @change="toggleLayer('economy')" />
-          <span>经济数据矢量</span>
-        </label>
-    </div>
-      <div class="layer-item">
-        <label>
-          <input type="checkbox" v-model="layerVisibility.engineering" @change="toggleLayer('engineering')" />
-          <span>工程项目矢量</span>
-        </label>
-      </div>
-    </div>
-
     <!-- 叠加分析信息弹窗 -->
     <OverlayAnalysisPopup
       :visible="popup.visible"
@@ -51,7 +28,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch } from 'vue'
 import 'ol/ol.css'
 import { Map as OLMap } from 'ol'
 import View from 'ol/View'
@@ -62,6 +39,18 @@ import TileWMS from 'ol/source/TileWMS'
 // 不再需要坐标转换，直接使用 EPSG:4326
 import { MapUtils } from '../../utils/mapUtils'
 import OverlayAnalysisPopup from './OverlayAnalysisPopup.vue'
+
+// Props
+const props = defineProps({
+  layerVisibility: {
+    type: Object,
+    default: () => ({
+      ecology: true,
+      economy: true,
+      engineering: true
+    })
+  }
+})
 
 // 地图配置
 const TDT_TOKEN = '69874af7f35c741d7132c50f80acad29'
@@ -78,13 +67,6 @@ let engineeringVectorLayer = null
 // 坐标显示
 const coordinates = reactive({ lng: '105.7000', lat: '34.6000' })
 
-// 图层可见性控制
-const layerVisibility = reactive({
-  ecology: true,
-  economy: true,
-  engineering: true
-})
-
 // 弹窗数据
 const popup = reactive({
   visible: false,
@@ -93,6 +75,19 @@ const popup = reactive({
   economyData: null,
   engineeringData: []
 })
+
+// 监听图层可见性变化
+watch(() => props.layerVisibility, (newVal) => {
+  if (ecologyRasterLayer) {
+    ecologyRasterLayer.setVisible(newVal.ecology)
+  }
+  if (economyVectorLayer) {
+    economyVectorLayer.setVisible(newVal.economy)
+  }
+  if (engineeringVectorLayer) {
+    engineeringVectorLayer.setVisible(newVal.engineering)
+  }
+}, { deep: true })
 
 // 创建高德底图（稳定可靠）
 const createBaseMap = () => {
@@ -130,7 +125,7 @@ const createWMSLayers = () => {
     serverType: 'geoserver',
     crossOrigin: 'anonymous'
     }),
-    visible: true,
+    visible: props.layerVisibility.ecology,
     opacity: 0.7,
     zIndex: 2
   })
@@ -146,7 +141,7 @@ const createWMSLayers = () => {
     serverType: 'geoserver',
     crossOrigin: 'anonymous'
     }),
-    visible: true,
+    visible: props.layerVisibility.economy,
     opacity: 0.6,
     zIndex: 3
   })
@@ -162,7 +157,7 @@ const createWMSLayers = () => {
     serverType: 'geoserver',
     crossOrigin: 'anonymous'
     }),
-    visible: true,
+    visible: props.layerVisibility.engineering,
     opacity: 0.8,
     zIndex: 4
   })
@@ -360,15 +355,44 @@ const parseEconomyData = (data) => {
       return null
     }
     
-      const feature = data.features[0]
-      const properties = feature.properties || {}
+    const feature = data.features[0]
+    const properties = feature.properties || {}
+    
+    // 调试：打印所有属性
+    console.log('💰 经济数据原始属性:', properties)
+    console.log('💰 所有属性键:', Object.keys(properties))
+    
+    // 辅助函数：安全获取字符串值（处理空字符串、null、undefined、占位符）
+    const getStringValue = (...keys) => {
+      // 无效值列表（包括常见的占位符）
+      const invalidValues = ['', 'null', 'undefined', 'N/A', 'NA', '-', 'none', 'None', 'NONE']
       
-      return {
-        admin_name: properties.admin_name || properties.ADMIN_NAME || '未知',
-        GDP: parseFloat(properties.GDP || properties.gdp || 0),
-        POP: parseInt(properties.POP || properties.pop || 0),
-      area_km2: parseFloat(properties.area_km2 || properties.AREA_KM2 || 0)
+      for (const key of keys) {
+        const value = properties[key]
+        if (value !== null && value !== undefined) {
+          const strValue = String(value).trim()
+          // 检查是否为有效值
+          if (strValue !== '') {
+            // 检查是否只包含问号（任意数量）
+            if (/^\?+$/.test(strValue)) {
+              continue // 跳过，尝试下一个字段
+            }
+            // 检查是否在无效值列表中
+            if (!invalidValues.includes(strValue)) {
+              return strValue
+            }
+          }
+        }
       }
+      return null // 返回null，让前端组件处理
+    }
+    
+    return {
+      admin_name: getStringValue('admin_name', 'ADMIN_NAME', 'name', 'NAME', 'region_name', 'REGION_NAME'),
+      GDP: parseFloat(properties.GDP || properties.gdp || properties.Gdp || 0),
+      POP: parseInt(properties.POP || properties.pop || properties.Pop || 0),
+      area_km2: parseFloat(properties.area_km2 || properties.AREA_KM2 || properties.area || properties.AREA || 0)
+    }
   } catch (error) {
     console.error('解析经济数据失败:', error)
     return null
@@ -382,17 +406,49 @@ const parseEngineeringData = (data) => {
       return []
     }
     
-      return data.features.map(feature => {
-        const properties = feature.properties || {}
-        return {
-          proj_name: properties.proj_name || properties.PROJ_NAME || '未知工程',
-          proj_type: properties.proj_type || properties.PROJ_TYPE || '未知',
-          status: properties.status || properties.STATUS || '未知',
-          start_date: properties.start_date || properties.START_DATE || '',
-          end_date: properties.end_date || properties.END_DATE || '',
-        area_km2: parseFloat(properties.area_km2 || properties.AREA_KM2 || 0)
+    // 辅助函数：安全获取字符串值（处理空字符串、null、undefined、占位符）
+    const getStringValue = (properties, ...keys) => {
+      // 无效值列表（包括常见的占位符）
+      const invalidValues = ['', 'null', 'undefined', 'N/A', 'NA', '-', 'none', 'None', 'NONE']
+      
+      for (const key of keys) {
+        const value = properties[key]
+        if (value !== null && value !== undefined) {
+          const strValue = String(value).trim()
+          // 检查是否为有效值
+          if (strValue !== '') {
+            // 检查是否只包含问号（任意数量）
+            if (/^\?+$/.test(strValue)) {
+              continue // 跳过，尝试下一个字段
+            }
+            // 检查是否在无效值列表中
+            if (!invalidValues.includes(strValue)) {
+              return strValue
+            }
+          }
         }
-      })
+      }
+      return null // 返回null，让前端组件处理
+    }
+    
+    return data.features.map((feature, index) => {
+      const properties = feature.properties || {}
+      
+      // 调试：打印第一个要素的属性
+      if (index === 0) {
+        console.log('🏗️ 工程数据原始属性:', properties)
+        console.log('🏗️ 所有属性键:', Object.keys(properties))
+      }
+      
+      return {
+        proj_name: getStringValue(properties, 'proj_name', 'PROJ_NAME', 'name', 'NAME', 'project_name', 'PROJECT_NAME'),
+        proj_type: getStringValue(properties, 'proj_type', 'PROJ_TYPE', 'type', 'TYPE', 'project_type', 'PROJECT_TYPE'),
+        status: getStringValue(properties, 'status', 'STATUS', 'state', 'STATE'),
+        start_date: getStringValue(properties, 'start_date', 'START_DATE', 'start_time', 'START_TIME', 'begin_date', 'BEGIN_DATE') || '',
+        end_date: getStringValue(properties, 'end_date', 'END_DATE', 'end_time', 'END_TIME', 'finish_date', 'FINISH_DATE') || '',
+        area_km2: parseFloat(properties.area_km2 || properties.AREA_KM2 || properties.area || properties.AREA || 0)
+      }
+    })
   } catch (error) {
     console.error('解析工程数据失败:', error)
     return []
@@ -402,14 +458,12 @@ const parseEngineeringData = (data) => {
 // 切换图层可见性
 const toggleLayer = (layerType) => {
   try {
-    console.log(`🔄 切换图层可见性: ${layerType} -> ${layerVisibility[layerType]}`)
-    
     if (layerType === 'ecology' && ecologyRasterLayer) {
-      ecologyRasterLayer.setVisible(layerVisibility.ecology)
+      ecologyRasterLayer.setVisible(props.layerVisibility.ecology)
     } else if (layerType === 'economy' && economyVectorLayer) {
-      economyVectorLayer.setVisible(layerVisibility.economy)
+      economyVectorLayer.setVisible(props.layerVisibility.economy)
     } else if (layerType === 'engineering' && engineeringVectorLayer) {
-      engineeringVectorLayer.setVisible(layerVisibility.engineering)
+      engineeringVectorLayer.setVisible(props.layerVisibility.engineering)
     }
     
     map?.render()
@@ -418,9 +472,51 @@ const toggleLayer = (layerType) => {
   }
 }
 
+// 刷新地图
+const refreshMap = () => {
+  handleRefreshMap()
+}
+
+// 暴露方法给父组件
+defineExpose({
+  toggleLayer,
+  refreshMap
+})
+
 // 关闭弹窗
 const closePopup = () => {
   popup.visible = false
+}
+
+// 处理地图刷新（上传完成后）
+const handleRefreshMap = () => {
+  console.log('🔄 数据上传完成，刷新地图图层...')
+  
+  // 刷新所有WMS图层
+  if (ecologyRasterLayer) {
+    const source = ecologyRasterLayer.getSource()
+    source.updateParams({ 'timestamp': Date.now() })
+    source.refresh()
+  }
+  
+  if (economyVectorLayer) {
+    const source = economyVectorLayer.getSource()
+    source.updateParams({ 'timestamp': Date.now() })
+    source.refresh()
+  }
+  
+  if (engineeringVectorLayer) {
+    const source = engineeringVectorLayer.getSource()
+    source.updateParams({ 'timestamp': Date.now() })
+    source.refresh()
+  }
+  
+  // 强制地图重新渲染
+  if (map) {
+    map.render()
+  }
+  
+  console.log('✅ 地图图层已刷新')
 }
 
 // 缩放控制
@@ -445,7 +541,7 @@ onMounted(() => {
   console.log('🚀 OverlayMapContainer 组件已挂载')
   
   // 等待DOM完全渲染
-        setTimeout(() => {
+      setTimeout(() => {
     const mapElement = document.getElementById('overlay-map')
     if (mapElement) {
       console.log('✅ 地图容器已找到')
@@ -457,13 +553,13 @@ onMounted(() => {
       // 如果容器尺寸为0，等待更长时间
       if (mapElement.offsetWidth === 0 || mapElement.offsetHeight === 0) {
         console.warn('⚠️ 容器尺寸为0，延迟初始化...')
-      setTimeout(() => {
+    setTimeout(() => {
           initMap()
         }, 500)
-        } else {
+  } else {
         initMap()
         }
-    } else {
+      } else {
       console.error('❌ 地图容器未找到')
       }
     }, 100)
@@ -555,53 +651,4 @@ onUnmounted(() => {
   font-family: 'Courier New', monospace;
 }
 
-/* 图层控制面板 */
-.layer-control-panel {
-  position: absolute;
-  top: 20px;
-  left: 20px;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
-  padding: 16px;
-  min-width: 200px;
-  z-index: 1000;
-}
-
-.panel-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #333;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 2px solid #f0f0f0;
-}
-
-.layer-item {
-  margin-bottom: 10px;
-}
-
-.layer-item:last-child {
-  margin-bottom: 0;
-}
-
-.layer-item label {
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-  font-size: 13px;
-  color: #555;
-  transition: color 0.2s;
-}
-
-.layer-item label:hover {
-  color: #1890ff;
-}
-
-.layer-item input[type="checkbox"] {
-  margin-right: 8px;
-  cursor: pointer;
-  width: 16px;
-  height: 16px;
-}
 </style>

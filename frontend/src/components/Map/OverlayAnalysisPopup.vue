@@ -54,7 +54,7 @@
         <div class="info-grid">
           <div class="info-item">
             <span class="label">区域名称:</span>
-            <span class="value">{{ economyData.admin_name || '未知' }}</span>
+            <span class="value">{{ economyData.admin_name || economyData.ADMIN_NAME || '未知' }}</span>
           </div>
           <div class="info-item">
             <span class="label">GDP (亿元):</span>
@@ -91,15 +91,15 @@
             class="project-item"
           >
             <div class="project-header">
-              <span class="project-name">{{ project.proj_name || '未知工程' }}</span>
+              <span class="project-name">{{ project.proj_name || project.PROJ_NAME || '未知工程' }}</span>
               <span class="project-status" :class="getStatusClass(project.status)">
-                {{ project.status || '未知' }}
+                {{ project.status || project.STATUS || '未知' }}
               </span>
             </div>
             <div class="project-details">
               <div class="detail-item">
                 <span class="label">类型:</span>
-                <span class="value">{{ project.proj_type || '未知' }}</span>
+                <span class="value">{{ project.proj_type || project.PROJ_TYPE || '未知' }}</span>
               </div>
               <div class="detail-item" v-if="project.area_km2">
                 <span class="label">面积:</span>
