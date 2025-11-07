@@ -1772,53 +1772,93 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
             
             shp_path = fixed_shp_path
             
-            # 确保 .cpg 文件存在（UTF-8编码）
+            # 检查是否存在.cpg文件，如果不存在则创建GBK编码
             cpg_path = os.path.join(upload_dir, f'{fixed_name}.cpg')
-            with open(cpg_path, 'w') as f:
-                f.write('UTF-8')
+            if not os.path.exists(cpg_path):
+                with open(cpg_path, 'w') as f:
+                    f.write('GBK')
+                logger.info(f"创建 .cpg 文件（GBK编码）: {cpg_path}")
+            else:
+                # 读取现有.cpg文件内容
+                with open(cpg_path, 'r') as f:
+                    cpg_encoding = f.read().strip()
+                logger.info(f"使用现有 .cpg 文件编码: {cpg_encoding}")
             
             logger.info(f"✅ 经济矢量数据已准备就绪: {shp_path}")
             
-            # 尝试为矢量数据生成动态样式
+            # 发布到GeoServer并生成样式
+            publish_success = False
             try:
                 from .geoserver_config import geoserver_manager
                 
-                # 读取矢量数据统计信息
-                min_val, max_val, mean_val = geoserver_manager._get_vector_statistics(shp_path, 'GDP')
+                # 1. 发布Shapefile到GeoServer
+                logger.info("正在发布到GeoServer...")
+                # 读取.cpg文件获取编码
+                encoding = cpg_encoding if 'cpg_encoding' in locals() else 'GBK'
                 
-                if min_val is not None and max_val is not None:
-                    logger.info(f"GDP统计信息: min={min_val}, max={max_val}, mean={mean_val}")
+                publish_success = geoserver_manager.publish_shapefile(
+                    layer_name='economy_vector',
+                    shapefile_path=shp_path,
+                    charset=encoding
+                )
+                
+                if publish_success:
+                    logger.info("✅ 成功发布到GeoServer")
                     
-                    # 根据数据分布生成样式
-                    style_name = 'economy_vector'
-                    sld_content = geoserver_manager._create_vector_sld_by_attribute(
-                        field_name='GDP',
-                        min_val=min_val,
-                        max_val=max_val,
-                        color_scheme='default'  # 黄-橙-红配色
-                    )
-                    
-                    # 删除旧样式（如果存在）
+                    # 2. 读取矢量数据统计信息并生成样式
                     try:
-                        geoserver_manager.delete_style(style_name)
-                    except:
-                        pass
-                    
-                    # 创建并应用新样式
-                    if geoserver_manager.create_style(style_name, sld_content):
-                        geoserver_manager.apply_style_to_layer('economy_vector', style_name)
-                        logger.info(f"✅ 经济矢量样式已自动生成并应用")
+                        min_val, max_val, mean_val = geoserver_manager._get_vector_statistics(shp_path, 'GDP')
+                        
+                        if min_val is not None and max_val is not None:
+                            logger.info(f"GDP统计信息: min={min_val}, max={max_val}, mean={mean_val}")
+                            
+                            # 根据数据分布生成样式
+                            style_name = 'economy_vector'
+                            sld_content = geoserver_manager._create_vector_sld_by_attribute(
+                                field_name='GDP',
+                                min_val=min_val,
+                                max_val=max_val,
+                                color_scheme='default'  # 黄-橙-红配色
+                            )
+                            
+                            # 删除旧样式（如果存在）
+                            try:
+                                geoserver_manager.delete_style(style_name)
+                            except:
+                                pass
+                            
+                            # 创建并应用新样式
+                            if geoserver_manager.create_style(style_name, sld_content):
+                                geoserver_manager.apply_style_to_layer('economy_vector', style_name)
+                                logger.info(f"✅ 经济矢量样式已自动生成并应用")
+                        else:
+                            logger.warning("无法读取GDP统计信息，使用默认样式")
+                    except Exception as e:
+                        logger.warning(f"生成矢量样式失败: {e}，使用默认样式")
                 else:
-                    logger.warning("无法读取GDP统计信息，使用默认样式")
+                    logger.error("❌ 发布到GeoServer失败")
             except Exception as e:
-                logger.warning(f"生成矢量样式失败: {e}，使用默认样式")
+                logger.error(f"发布到GeoServer时出错: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
             
-            return Response({
-                'success': True,
-                'message': '经济数据矢量上传成功。请在GeoServer中配置数据源以完成发布',
-                'file_name': file_name,
-                'shp_path': shp_path
-            })
+            # 返回结果
+            if publish_success:
+                return Response({
+                    'success': True,
+                    'message': '经济数据矢量上传并发布成功！',
+                    'file_name': file_name,
+                    'shp_path': shp_path,
+                    'layer_name': 'economy_vector'
+                })
+            else:
+                return Response({
+                    'success': True,
+                    'message': '经济数据矢量上传成功，但发布到GeoServer失败。请检查GeoServer服务状态。',
+                    'file_name': file_name,
+                    'shp_path': shp_path,
+                    'warning': 'GeoServer发布失败'
+                })
                 
         except Exception as e:
             logger.error(f"上传经济矢量失败: {str(e)}")
@@ -1924,52 +1964,93 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
             
             shp_path = fixed_shp_path
             
-            # 确保 .cpg 文件存在（UTF-8编码）
+            # 检查是否存在.cpg文件，如果不存在则创建GBK编码
             cpg_path = os.path.join(upload_dir, f'{fixed_name}.cpg')
-            with open(cpg_path, 'w') as f:
-                f.write('UTF-8')
+            if not os.path.exists(cpg_path):
+                with open(cpg_path, 'w') as f:
+                    f.write('GBK')
+                logger.info(f"创建 .cpg 文件（GBK编码）: {cpg_path}")
+            else:
+                # 读取现有.cpg文件内容
+                with open(cpg_path, 'r') as f:
+                    cpg_encoding = f.read().strip()
+                logger.info(f"使用现有 .cpg 文件编码: {cpg_encoding}")
             
             logger.info(f"✅ 工程矢量数据已准备就绪: {shp_path}")
             
-            # 为工程矢量生成动态样式（使用蓝色系统一样式）
+            # 发布到GeoServer并生成样式
+            publish_success = False
             try:
                 from .geoserver_config import geoserver_manager
                 import random
                 
-                # 为每次上传生成稍有不同的蓝色调
-                blue_shades = [
-                    ('#0000FF', 0.3),  # 纯蓝
-                    ('#0066FF', 0.35), # 亮蓝
-                    ('#0099FF', 0.3),  # 天蓝
-                    ('#3366FF', 0.35), # 中蓝
-                ]
-                color, opacity = random.choice(blue_shades)
+                # 1. 发布Shapefile到GeoServer
+                logger.info("正在发布到GeoServer...")
+                # 读取.cpg文件获取编码
+                encoding = cpg_encoding if 'cpg_encoding' in locals() else 'GBK'
                 
-                style_name = 'engineering_vector'
-                sld_content = geoserver_manager._create_vector_sld_simple(
-                    color=color,
-                    opacity=opacity
+                publish_success = geoserver_manager.publish_shapefile(
+                    layer_name='engineering_vector',
+                    shapefile_path=shp_path,
+                    charset=encoding
                 )
                 
-                # 删除旧样式（如果存在）
-                try:
-                    geoserver_manager.delete_style(style_name)
-                except:
-                    pass
-                
-                # 创建并应用新样式
-                if geoserver_manager.create_style(style_name, sld_content):
-                    geoserver_manager.apply_style_to_layer('engineering_vector', style_name)
-                    logger.info(f"✅ 工程矢量样式已生成（{color}）")
+                if publish_success:
+                    logger.info("✅ 成功发布到GeoServer")
+                    
+                    # 2. 为工程矢量生成动态样式（使用蓝色系统一样式）
+                    try:
+                        # 为每次上传生成稍有不同的蓝色调
+                        blue_shades = [
+                            ('#0000FF', 0.3),  # 纯蓝
+                            ('#0066FF', 0.35), # 亮蓝
+                            ('#0099FF', 0.3),  # 天蓝
+                            ('#3366FF', 0.35), # 中蓝
+                        ]
+                        color, opacity = random.choice(blue_shades)
+                        
+                        style_name = 'engineering_vector'
+                        sld_content = geoserver_manager._create_vector_sld_simple(
+                            color=color,
+                            opacity=opacity
+                        )
+                        
+                        # 删除旧样式（如果存在）
+                        try:
+                            geoserver_manager.delete_style(style_name)
+                        except:
+                            pass
+                        
+                        # 创建并应用新样式
+                        if geoserver_manager.create_style(style_name, sld_content):
+                            geoserver_manager.apply_style_to_layer('engineering_vector', style_name)
+                            logger.info(f"✅ 工程矢量样式已生成（{color}）")
+                    except Exception as e:
+                        logger.warning(f"生成工程矢量样式失败: {e}，使用默认样式")
+                else:
+                    logger.error("❌ 发布到GeoServer失败")
             except Exception as e:
-                logger.warning(f"生成工程矢量样式失败: {e}，使用默认样式")
+                logger.error(f"发布到GeoServer时出错: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
             
-            return Response({
-                'success': True,
-                'message': '工程项目矢量上传成功。请在GeoServer中配置数据源以完成发布',
-                'file_name': file_name,
-                'shp_path': shp_path
-            })
+            # 返回结果
+            if publish_success:
+                return Response({
+                    'success': True,
+                    'message': '工程项目矢量上传并发布成功！',
+                    'file_name': file_name,
+                    'shp_path': shp_path,
+                    'layer_name': 'engineering_vector'
+                })
+            else:
+                return Response({
+                    'success': True,
+                    'message': '工程项目矢量上传成功，但发布到GeoServer失败。请检查GeoServer服务状态。',
+                    'file_name': file_name,
+                    'shp_path': shp_path,
+                    'warning': 'GeoServer发布失败'
+                })
                 
         except Exception as e:
             logger.error(f"上传工程矢量失败: {str(e)}")

@@ -1165,6 +1165,132 @@ class GeoServerManager:
             logger.error(f"❌ 应用样式异常: {e}")
             
         return False
+    
+    def publish_shapefile(self, layer_name: str, shapefile_path: str, charset: str = 'GBK') -> bool:
+        """发布Shapefile矢量图层到GeoServer
+        
+        Args:
+            layer_name: 图层名称（也用作datastore名称）
+            shapefile_path: Shapefile文件路径（.shp文件）
+            charset: 字符集编码，默认GBK
+            
+        Returns:
+            bool: 发布是否成功
+        """
+        try:
+            import os
+            from urllib.parse import quote
+            
+            # 确保文件存在
+            if not os.path.exists(shapefile_path):
+                logger.error(f"Shapefile文件不存在: {shapefile_path}")
+                return False
+            
+            # 获取绝对路径
+            abs_path = os.path.abspath(shapefile_path)
+            # 将反斜杠转换为正斜杠（GeoServer使用）
+            file_url = 'file:///' + abs_path.replace('\\', '/')
+            
+            logger.info(f"开始发布Shapefile: {layer_name}")
+            logger.info(f"文件路径: {file_url}")
+            
+            # 1. 创建或更新Shapefile DataStore
+            datastore_name = f"{layer_name}_store"
+            
+            # 构建DataStore配置
+            datastore_data = {
+                "dataStore": {
+                    "name": datastore_name,
+                    "type": "Shapefile",
+                    "enabled": True,
+                    "connectionParameters": {
+                        "entry": [
+                            {"@key": "url", "$": file_url},
+                            {"@key": "charset", "$": charset},
+                            {"@key": "create spatial index", "$": "true"},
+                            {"@key": "memory mapped buffer", "$": "false"},
+                            {"@key": "cache and reuse memory maps", "$": "true"}
+                        ]
+                    }
+                }
+            }
+            
+            # 先尝试删除旧的datastore
+            try:
+                delete_url = f"workspaces/{self.workspace}/datastores/{datastore_name}"
+                self._make_request('DELETE', delete_url, params={'recurse': 'true'})
+                logger.info(f"已删除旧的DataStore: {datastore_name}")
+            except Exception as e:
+                logger.debug(f"删除旧DataStore失败（可能不存在）: {e}")
+            
+            # 创建新的datastore
+            result = self._make_request(
+                'POST',
+                f'workspaces/{self.workspace}/datastores',
+                json=datastore_data
+            )
+            
+            if result is None:
+                logger.error(f"创建DataStore失败: {datastore_name}")
+                return False
+            
+            logger.info(f"DataStore创建成功: {datastore_name}")
+            
+            # 2. 发布FeatureType（图层）
+            # 获取Shapefile的基础名称（不带扩展名）
+            base_name = os.path.splitext(os.path.basename(shapefile_path))[0]
+            
+            featuretype_data = {
+                "featureType": {
+                    "name": layer_name,
+                    "nativeName": base_name,
+                    "title": layer_name,
+                    "srs": "EPSG:4326",
+                    "projectionPolicy": "FORCE_DECLARED",
+                    "enabled": True,
+                    "store": {
+                        "name": f"{self.workspace}:{datastore_name}",
+                        "@class": "dataStore"
+                    }
+                }
+            }
+            
+            # 发布FeatureType
+            result = self._make_request(
+                'POST',
+                f'workspaces/{self.workspace}/datastores/{datastore_name}/featuretypes',
+                json=featuretype_data
+            )
+            
+            if result is None:
+                # 尝试简化的发布方式
+                logger.info("尝试简化的FeatureType发布...")
+                simple_featuretype_data = {
+                    "featureType": {
+                        "name": layer_name,
+                        "nativeName": base_name
+                    }
+                }
+                result = self._make_request(
+                    'POST',
+                    f'workspaces/{self.workspace}/datastores/{datastore_name}/featuretypes',
+                    json=simple_featuretype_data
+                )
+                
+                if result is None:
+                    logger.error(f"发布FeatureType失败: {layer_name}")
+                    return False
+            
+            logger.info(f"[OK] Shapefile图层发布成功: {layer_name}")
+            logger.info(f"     WMS URL: {self.base_url}/wms?service=WMS&version=1.1.0&request=GetMap&layers={self.workspace}:{layer_name}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"发布Shapefile失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
 
 
 # 默认GeoServer管理器实例
