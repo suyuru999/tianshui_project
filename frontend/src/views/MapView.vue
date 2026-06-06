@@ -10,23 +10,40 @@
       <!-- 用户信息 -->
       <div class="user-section">
         <div class="user-info">
-          <div class="user-icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M20 21V19C20 17.9391 19.5786 16.9217 18.8284 16.1716C18.0783 15.4214 17.0609 15 16 15H8C6.93913 15 5.92172 15.4214 5.17157 16.1716C4.42143 16.9217 4 17.9391 4 19V21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </div>
-          <span>未登录</span>
+          <User class="inline-icon user-icon" />
+          <span>{{ currentUser ? `${currentUser.username}（${currentUser.role_display || currentUser.role || '用户'}）` : '未登录' }}</span>
         </div>
-        <button class="login-btn">登录</button>
+        <button class="login-btn" @click="currentUser ? handleLogout() : (loginDialogVisible = true)">
+          {{ currentUser ? '退出' : '登录' }}
+        </button>
+      </div>
+
+      <div v-if="loginDialogVisible" class="login-mask" @click.self="loginDialogVisible = false">
+        <div class="login-dialog">
+          <div class="login-title">系统登录</div>
+          <label class="login-field">
+            <span>用户名</span>
+            <input v-model="loginForm.username" type="text" autocomplete="username" />
+          </label>
+          <label class="login-field">
+            <span>密码</span>
+            <input v-model="loginForm.password" type="password" autocomplete="current-password" @keydown.enter="handleLogin" />
+          </label>
+          <div class="login-actions">
+            <button class="dialog-cancel" @click="loginDialogVisible = false">取消</button>
+            <button class="dialog-confirm" :disabled="loginLoading" @click="handleLogin">
+              {{ loginLoading ? '登录中...' : '登录' }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- 图层管理 -->
       <div class="section">
         <div class="section-header" @click="toggleLayerManagement">
-          <i class="section-icon">📄</i>
+          <Files class="inline-icon section-icon" />
           <span>图层管理</span>
-          <i class="collapse-icon" :class="{ 'collapsed': !layerManagementExpanded }">▼</i>
+          <ArrowDown class="inline-icon collapse-icon" :class="{ 'collapsed': !layerManagementExpanded }" />
         </div>
         
         <div class="section-content" v-show="layerManagementExpanded">
@@ -34,12 +51,12 @@
           <div class="layer-group">
             <div class="layer-group-header" @click="toggleBusinessLayers">
               <h4>业务图层</h4>
-              <i class="collapse-icon" :class="{ 'collapsed': !businessLayersExpanded }">▼</i>
+              <ArrowDown class="inline-icon collapse-icon" :class="{ 'collapsed': !businessLayersExpanded }" />
             </div>
             <div class="layer-group-content" v-show="businessLayersExpanded">
               <div class="layer-item" v-for="layer in businessLayers" :key="layer.id">
                 <div class="layer-info">
-                  <i :class="layer.icon"></i>
+                  <component :is="layer.icon" class="inline-icon layer-icon" />
                   <span>{{ layer.name }}</span>
                 </div>
                 <div class="layer-controls">
@@ -47,7 +64,7 @@
                     <input 
                       type="checkbox" 
                       :checked="layer.visible"
-                      @change="toggleLayerVisibility(layer.id, true)"
+                      @change="handleBusinessLayerToggle(layer)"
                     />
                     <span class="slider"></span>
                   </label>
@@ -61,11 +78,11 @@
           <div class="layer-group">
             <div class="layer-group-header" @click="toggleTempLayers">
               <h4>临时图层</h4>
-              <i class="collapse-icon" :class="{ 'collapsed': !tempLayersExpanded }">▼</i>
+              <ArrowDown class="inline-icon collapse-icon" :class="{ 'collapsed': !tempLayersExpanded }" />
             </div>
             <div class="layer-group-content" v-show="tempLayersExpanded">
               <button class="upload-btn" @click="triggerFileUpload">
-                <i></i>
+                <Upload class="button-icon" />
                 上传本地文件 (KML/SHP.zip)
               </button>
               <input 
@@ -83,9 +100,9 @@
       <!-- 工具箱 -->
       <div class="section">
         <div class="section-header" @click="toggleToolbox">
-          <i class="section-icon">🔧</i>
+          <Setting class="inline-icon section-icon" />
           <span>工具箱</span>
-          <i class="collapse-icon" :class="{ 'collapsed': !toolboxExpanded }">▼</i>
+          <ArrowDown class="inline-icon collapse-icon" :class="{ 'collapsed': !toolboxExpanded }" />
         </div>
         <div class="section-content" v-show="toolboxExpanded">
           <p class="tool-tip">使用地图左侧的工具栏进行图形绘制。</p>
@@ -96,14 +113,14 @@
             <div class="coordinate-inputs">
               <input type="text" placeholder="经度,纬度" v-model="coordinateInput" />
               <button class="locate-btn" @click="locateCoordinate">
-                <i>🔍</i>
+                <Search class="button-icon" />
               </button>
             </div>
           </div>
 
           <!-- 导出地图 -->
           <button class="export-btn" @click="exportMap">
-           
+            <Camera class="button-icon" />
             导出地图为图片
           </button>
         </div>
@@ -112,14 +129,14 @@
       <!-- 业务功能 -->
       <div class="section">
         <div class="section-header" @click="toggleBusinessFunctions">
-          <i class="section-icon">📊</i>
+          <DataAnalysis class="inline-icon section-icon" />
           <span>业务功能</span>
-          <i class="collapse-icon" :class="{ 'collapsed': !businessFunctionsExpanded }">▼</i>
+          <ArrowDown class="inline-icon collapse-icon" :class="{ 'collapsed': !businessFunctionsExpanded }" />
         </div>
         <div class="section-content" v-show="businessFunctionsExpanded">
           <div class="business-functions">
             <div class="function-item" v-for="func in businessFunctions" :key="func.id" @click="handleBusinessFunctionClick(func)">
-              <i :class="func.icon"></i>
+              <component :is="func.icon" class="inline-icon function-icon" />
               <span>{{ func.name }}</span>
             </div>
           </div>
@@ -129,23 +146,51 @@
 
     <!-- 主地图区域 -->
     <div class="main-content">
-      <MapContainer />
+      <MapContainer ref="mapContainerRef" />
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { onMounted, ref, reactive } from 'vue'
+import { ElMessage } from 'element-plus'
+import {
+  ArrowDown,
+  Camera,
+  Connection,
+  DataAnalysis,
+  Files,
+  Guide,
+  Histogram,
+  MapLocation,
+  Message,
+  Search,
+  Setting,
+  Ship,
+  Sunrise,
+  TrendCharts,
+  Upload,
+  User
+} from '@element-plus/icons-vue'
 import MapContainer from '../components/Map/MapContainer.vue'
 import { useMapStore } from '../store/map'
 import { useRouter } from 'vue-router'
+import { authService, spatialService } from '../services/api.js'
 
 const router = useRouter()
 const mapStore = useMapStore()
 const { toggleLayerVisibility } = mapStore
 
 const fileInput = ref(null)
+const mapContainerRef = ref(null)
 const coordinateInput = ref('')
+const currentUser = ref(null)
+const loginDialogVisible = ref(false)
+const loginLoading = ref(false)
+const loginForm = reactive({
+  username: 'admin',
+  password: 'admin123456'
+})
 
 // 折叠状态控制
 const layerManagementExpanded = ref(true)
@@ -157,31 +202,31 @@ const businessFunctionsExpanded = ref(true)
 // 业务图层数据
 const businessLayers = reactive([
   {
-    id: 1,
+    id: 'water',
     name: '水系分布 (WMS)',
     type: 'wms',
-    icon: '💧',
+    icon: Ship,
     visible: false
   },
   {
-    id: 2,
+    id: 'dem',
     name: '高程渲染 (DEM)',
     type: 'dem',
-    icon: '🏔️',
+    icon: Sunrise,
     visible: false
   },
   {
-    id: 3,
+    id: 'eco',
     name: '生态保护红线',
     type: 'vector',
-    icon: '🛡️',
+    icon: Guide,
     visible: false
   },
   {
-    id: 4,
+    id: 'wfs-admin',
     name: '行政区划 (WFS)',
     type: 'wfs',
-    icon: '🏛️',
+    icon: MapLocation,
     visible: false
   }
 ])
@@ -191,49 +236,92 @@ const businessFunctions = reactive([
   {
     id: 1,
     name: '遥感生态指数分析',
-    icon: '🌿'
+    icon: DataAnalysis,
+    status: 'available'
   },
   {
     id: 2,
     name: '生态环境指数计算',
-    icon: '📊'
+    icon: Histogram,
+    status: 'available'
   },
   {
     id: 3,
     name: '重大工程叠加分析',
-    icon: '🏗️'
+    icon: Connection,
+    status: 'planned'
   },
   {
     id: 4,
     name: '气候环境监测统计',
-    icon: '📈'
+    icon: TrendCharts,
+    status: 'available',
+    route: '/climate-monitoring'
   },
   {
     id: 5,
     name: '民众意见反馈',
-    icon: '💬'
+    icon: Message,
+    status: 'available',
+    route: '/feedback'
   }
 ])
 
+businessFunctions[0].route = '/remote-sensing-analysis'
+businessFunctions[1].route = '/ecological-index'
+businessFunctions[2].status = 'available'
+businessFunctions[2].route = '/overlay-analysis'
+
+onMounted(() => {
+  loadCurrentUser()
+})
+
+const loadCurrentUser = async () => {
+  try {
+    currentUser.value = await authService.getProfile()
+  } catch {
+    currentUser.value = null
+  }
+}
+
+const handleLogin = async () => {
+  if (!loginForm.username || !loginForm.password) {
+    ElMessage.warning('请输入用户名和密码')
+    return
+  }
+  loginLoading.value = true
+  try {
+    const result = await authService.login({
+      username: loginForm.username,
+      password: loginForm.password
+    })
+    currentUser.value = result.user
+    loginDialogVisible.value = false
+    ElMessage.success('登录成功')
+  } catch (error) {
+    console.error(error)
+  } finally {
+    loginLoading.value = false
+  }
+}
+
+const handleLogout = async () => {
+  try {
+    await authService.logout()
+    currentUser.value = null
+    ElMessage.success('已退出登录')
+  } catch (error) {
+    console.error(error)
+  }
+}
+
 // 跳转到遥感生态指数分析
-const handleBusinessFunctionClick = (func) => {
-  if (func.name === '遥感生态指数分析') {
-    router.push('/remote-sensing-analysis')
-    console.log('func')
+const handleBusinessFunctionClick = async (func) => {
+  if (func.route) {
+    router.push(func.route)
+    return
   }
-  if (func.name === '生态环境指数计算') {
-    router.push('/ecological-index')
-  }
-  if (func.name === '气候环境监测统计') {
-    router.push('/climate-monitoring')
-  }
-  if (func.name === '民众意见反馈') {
-    router.push('/feedback')
-  }
-  if (func.name === '重大工程叠加分析') {
-    router.push('/overlay-analysis')
-  }
-  // 可扩展其他功能跳转
+  ElMessage.info(`${func.name} 暂未接入后端接口，当前仅作为业务入口占位`)
 }
 
 // 触发文件上传
@@ -245,30 +333,55 @@ const triggerFileUpload = () => {
 const handleFileUpload = (event) => {
   const file = event.target.files[0]
   if (file) {
-    console.log('上传文件:', file.name)
-    // TODO: 实现文件上传逻辑
+    mapContainerRef.value?.loadLocalFile(file).then((success) => {
+      if (success) {
+        ElMessage.success(`${file.name} 已加载为临时图层`)
+      }
+    })
   }
   event.target.value = ''
 }
 
 // 坐标定位
 const locateCoordinate = () => {
-  if (coordinateInput.value) {
-    console.log('定位坐标:', coordinateInput.value)
-    // TODO: 实现坐标定位逻辑
-  }
+  mapContainerRef.value?.locateCoordinate(coordinateInput.value)
 }
 
 // 导出地图
 const exportMap = () => {
-  console.log('导出地图')
-  // TODO: 实现地图导出逻辑
+  mapContainerRef.value?.exportMap('png')
 }
 
 // 加载WFS图层
 const loadWFSLayer = (layer) => {
-  console.log('加载WFS图层:', layer.name)
-  // TODO: 实现WFS图层加载逻辑
+  spatialService.getWFSCapabilities()
+    .then((result) => {
+      console.log('WFS capabilities:', result)
+      ElMessage.info(`${layer.name} 的 WFS 服务入口已连通，但尚未配置具体 typeName 图层加载`)
+    })
+    .catch(() => {
+      ElMessage.error('WFS 服务不可用，请检查 GeoServer 配置')
+    })
+}
+
+const handleBusinessLayerToggle = async (layer) => {
+  layer.visible = !layer.visible
+  toggleLayerVisibility(layer.id, true)
+  const applied = mapContainerRef.value?.setLayerVisibleById(layer.id, layer.visible)
+  if (applied) {
+    return
+  }
+  try {
+    if (layer.type === 'wms' || layer.type === 'dem') {
+      await spatialService.getWMSCapabilities()
+      ElMessage.info(`${layer.name} 后端 WMS 入口已连通，但尚未配置可渲染图层名称`)
+    } else {
+      await spatialService.getSpatialLayers()
+      ElMessage.info(`${layer.name} 正在等待后端返回可用业务图层数据`)
+    }
+  } catch {
+    ElMessage.error(`${layer.name} 对应的空间服务不可用，请检查 GeoServer/后端配置`)
+  }
 }
 
 // 折叠切换方法
@@ -304,12 +417,21 @@ const toggleBusinessFunctions = () => {
 /* 左侧边栏 */
 .sidebar {
   width: 350px;
+  height: 100vh;
   background: white;
   border-right: 1px solid #e8e8e8;
   display: flex;
   flex-direction: column;
   box-shadow: 2px 0 8px rgba(0,0,0,0.1);
   overflow-y: auto;
+  overflow-x: hidden;
+  flex-shrink: 0;
+}
+
+.sidebar-header,
+.user-section,
+.section {
+  flex-shrink: 0;
 }
 
 .sidebar-header {
@@ -341,18 +463,22 @@ const toggleBusinessFunctions = () => {
   color: #666;
 }
 
-.user-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  color: #666;
+.inline-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: currentColor;
 }
 
-.user-icon svg {
-  width: 20px;
-  height: 20px;
+.button-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.user-icon {
+  font-size: 16px;
+  color: #1677ff;
 }
 
 .login-btn {
@@ -367,6 +493,87 @@ const toggleBusinessFunctions = () => {
 
 .login-btn:hover {
   background: #40a9ff;
+}
+
+.login-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: rgba(15, 23, 42, 0.28);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-dialog {
+  width: 320px;
+  padding: 22px;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+}
+
+.login-title {
+  margin-bottom: 18px;
+  color: #1f2937;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 14px;
+  color: #4b5563;
+  font-size: 13px;
+}
+
+.login-field input {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #d9e2ec;
+  border-radius: 6px;
+  color: #1f2937;
+  background: #fff;
+  outline: none;
+}
+
+.login-field input:focus {
+  border-color: #1890ff;
+  box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.12);
+}
+
+.login-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.dialog-cancel,
+.dialog-confirm {
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.dialog-cancel {
+  border: 1px solid #d9e2ec;
+  color: #4b5563;
+  background: #fff;
+}
+
+.dialog-confirm {
+  border: 1px solid #1890ff;
+  color: #fff;
+  background: #1890ff;
+}
+
+.dialog-confirm:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* 功能区块 */
@@ -421,7 +628,7 @@ const toggleBusinessFunctions = () => {
 }
 
 .section-icon {
-  font-size: 16px;
+  color: #1677ff;
 }
 
 /* 图层管理 */
@@ -473,6 +680,11 @@ const toggleBusinessFunctions = () => {
   align-items: center;
   gap: 8px;
   font-size: 13px;
+}
+
+.layer-icon,
+.function-icon {
+  color: #4b5563;
 }
 
 .layer-controls {
@@ -659,5 +871,7 @@ input:checked + .slider:before {
 .main-content {
   flex: 1;
   position: relative;
+  min-width: 0;
+  height: 100vh;
 }
 </style> 

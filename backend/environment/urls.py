@@ -2,8 +2,8 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
     RemoteSensingImageViewSet,
-    # EcologicalIndexViewSet,
-    # RSEIResultViewSet,
+    EcologicalIndexViewSet,
+    RSEIResultViewSet,
     ProcessingTaskViewSet,
     CitizenFeedbackViewSet,
     ClimateDataFileViewSet,
@@ -17,19 +17,19 @@ from .views import (
     get_climate_analysis_results
 )
 from .spatial_views import (
-    # wms_capabilities,
-    # wms_map,
-    # wfs_capabilities,
-    # spatial_layers,
-    # publish_to_geoserver,
+    wms_capabilities,
+    wms_map,
+    wfs_capabilities,
+    spatial_layers,
+    publish_to_geoserver,
     geoserver_status
 )
 
 # 配置路由器，注册必要的视图集
 router = DefaultRouter()
 router.register(r'remote-sensing-images', RemoteSensingImageViewSet)
-# router.register(r'ecological-indices', EcologicalIndexViewSet)
-# router.register(r'rsei-results', RSEIResultViewSet)
+router.register(r'ecological-indices', EcologicalIndexViewSet)
+router.register(r'rsei-results', RSEIResultViewSet)
 router.register(r'processing-tasks', ProcessingTaskViewSet)
 router.register(r'feedback', CitizenFeedbackViewSet)
 router.register(r'climate-data-files', ClimateDataFileViewSet)
@@ -52,11 +52,10 @@ urlpatterns = [
     path('climate-monitoring/analyze/', analyze_climate_data_api, name='analyze_climate_data'),
     path('climate-monitoring/results/<uuid:task_id>/', get_climate_analysis_results, name='get_climate_analysis_results'),
     
-    # 地理空间服务路由（部分启用）
-    # path('spatial/wms/capabilities/', wms_capabilities, name='wms_capabilities'),
-    # path('spatial/wms/map/', wms_map, name='wms_map'),
-    # path('spatial/wfs/capabilities/', wfs_capabilities, name='wfs_capabilities'),
-    # path('spatial/layers/', spatial_layers, name='spatial_layers'),
-    # path('spatial/publish/', publish_to_geoserver, name='publish_to_geoserver'),
-    path('spatial/geoserver/status/', geoserver_status, name='geoserver_status'),  # 启用状态检查接口
+    path('spatial/wms/capabilities/', wms_capabilities, name='wms_capabilities'),
+    path('spatial/wms/map/', wms_map, name='wms_map'),
+    path('spatial/wfs/capabilities/', wfs_capabilities, name='wfs_capabilities'),
+    path('spatial/layers/', spatial_layers, name='spatial_layers'),
+    path('spatial/publish/', publish_to_geoserver, name='publish_to_geoserver'),
+    path('spatial/geoserver/status/', geoserver_status, name='geoserver_status'),
 ] 

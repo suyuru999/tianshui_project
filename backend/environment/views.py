@@ -48,8 +48,14 @@ from .serializers import (
     OverlayAnalysisTaskCreateSerializer
 )
 from .tasks import calculate_ecological_indices, calculate_rsei_only
-from .gdal_land_use_analysis import LandUseAnalyzer  # 导入土地利用分析器
-from .vector_rasterize import rasterize_shapefile_to_tiff
+try:
+    from .gdal_land_use_analysis import LandUseAnalyzer
+    from .vector_rasterize import rasterize_shapefile_to_tiff
+    GDAL_IMPORT_ERROR = None
+except ImportError as exc:
+    LandUseAnalyzer = None
+    rasterize_shapefile_to_tiff = None
+    GDAL_IMPORT_ERROR = exc
 from .file_utils import safe_file_cleanup, get_cleanup_files
 
 logger = logging.getLogger(__name__)
@@ -117,15 +123,12 @@ class RemoteSensingImageViewSet(viewsets.ModelViewSet):
             )
 
             print(f"任务创建成功，任务ID: {task.id}")
-
-            # 启动Celery任务进行异步计算
+            # 启动Celery任务进行计算。开发环境下 Celery eager 模式会同步执行，
+            # 生产环境配置 broker 后仍可异步执行。
             from .tasks import calculate_ecological_indices
-            celery_task = calculate_ecological_indices.delay(str(image.id), normalized_indices)
-
-            # 更新任务状态
-            task.status = 'processing'
-            task.save()
-
+            celery_task = calculate_ecological_indices.delay(str(image.id), normalized_indices, str(task.id))
+            
+            task.refresh_from_db()
             print(f"Celery任务启动成功，任务ID: {celery_task.id}")
 
             return Response({
@@ -209,14 +212,86 @@ class RemoteSensingImageViewSet(viewsets.ModelViewSet):
             response['Content-Type'] = 'application/json; charset=utf-8'
             return response
 
-# 暂时注释掉其他视图类，只保留遥感影像视图集
-# class EcologicalIndexViewSet(viewsets.ModelViewSet):
-#     """生态指数视图集"""
-#     pass
 
-# class RSEIResultViewSet(viewsets.ModelViewSet):
-#     """RSEI结果视图集"""
-#     pass
+class EcologicalIndexViewSet(viewsets.ModelViewSet):
+    """生态指数视图集"""
+    queryset = EcologicalIndex.objects.select_related('remote_sensing_image').all()
+    serializer_class = EcologicalIndexSerializer
+    permission_classes = [permissions.AllowAny]
+    
+    @action(detail=False, methods=['post'])
+    def calculate(self, request):
+        """按影像ID创建生态指数计算任务"""
+        serializer = EcologicalIndexCalculationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        image_id = serializer.validated_data['remote_sensing_image_id']
+        indices = serializer.validated_data['indices']
+        image = get_object_or_404(RemoteSensingImage, id=image_id)
+        
+        task = ProcessingTask.objects.create(
+            remote_sensing_image=image,
+            task_type=f'生态指数计算 - {", ".join(indices)}',
+            status='pending',
+            created_by=request.user if request.user.is_authenticated else None
+        )
+        
+        celery_task = calculate_ecological_indices.delay(str(image.id), indices, str(task.id))
+        
+        return Response({
+            'message': '生态指数计算已启动',
+            'task_id': str(task.id),
+            'celery_task_id': str(celery_task.id),
+            'indices': indices
+        }, status=status.HTTP_201_CREATED)
+    
+    @action(detail=True, methods=['get'])
+    def statistics(self, request, pk=None):
+        """获取单个生态指数统计信息"""
+        index = self.get_object()
+        return Response({
+            'id': str(index.id),
+            'index_type': index.index_type,
+            'index_type_display': index.get_index_type_display(),
+            'min_value': index.min_value,
+            'max_value': index.max_value,
+            'mean_value': index.mean_value,
+            'std_value': index.std_value,
+            'excellent_area': index.excellent_area,
+            'good_area': index.good_area,
+            'moderate_area': index.moderate_area,
+            'poor_area': index.poor_area,
+            'bad_area': index.bad_area,
+        })
+
+
+class RSEIResultViewSet(viewsets.ModelViewSet):
+    """RSEI结果视图集"""
+    queryset = RSEIResult.objects.select_related(
+        'remote_sensing_image',
+        'greenness',
+        'wetness',
+        'dryness',
+        'heat',
+        'rsei_result'
+    ).all()
+    serializer_class = RSEIResultSerializer
+    permission_classes = [permissions.AllowAny]
+    
+    @action(detail=False, methods=['post'])
+    def calculate(self, request):
+        """按影像ID创建RSEI计算任务"""
+        serializer = RSEICalculationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        image_id = serializer.validated_data['remote_sensing_image_id']
+        celery_task = calculate_rsei_only.delay(str(image_id))
+        
+        return Response({
+            'message': 'RSEI计算已启动',
+            'celery_task_id': str(celery_task.id),
+            'remote_sensing_image_id': str(image_id)
+        }, status=status.HTTP_201_CREATED)
 
 class ProcessingTaskViewSet(viewsets.ModelViewSet):
     """处理任务视图集"""
@@ -268,6 +343,11 @@ def calculate_ecological_structure_indices(request):
     包括：破碎度指数、内聚力指数、多样性指数、脆弱度指数
     """
     try:
+        if GDAL_IMPORT_ERROR:
+            return Response({
+                'error': f'土地利用分析依赖 GDAL/osgeo 未安装: {GDAL_IMPORT_ERROR}'
+            }, status=503)
+
         # 获取上传的土地利用数据文件
         if 'landuse_file' not in request.FILES:
             return Response({
@@ -431,6 +511,11 @@ def calculate_ecological_stress_indices(request):
     包括：土壤侵蚀指数、未利用地面积比例、耕地建设用地面积比例、土地退化指数
     """
     try:
+        if GDAL_IMPORT_ERROR:
+            return Response({
+                'error': f'土地利用分析依赖 GDAL/osgeo 未安装: {GDAL_IMPORT_ERROR}'
+            }, status=503)
+
         # 获取上传的土地利用数据文件
         if 'landuse_file' not in request.FILES:
             return Response({

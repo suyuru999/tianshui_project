@@ -167,6 +167,13 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 943718400  # 900MB
 DATA_UPLOAD_MAX_MEMORY_SIZE = 943718400  # 900MB
 MAX_UPLOAD_SIZE = 943718400  # 900MB
 
+# Celery 配置
+# 开发演示环境默认同步执行任务，避免未启动 Redis/RabbitMQ 时接口直接报错。
+CELERY_TASK_ALWAYS_EAGER = os.getenv('CELERY_TASK_ALWAYS_EAGER', 'true').lower() == 'true'
+CELERY_TASK_EAGER_PROPAGATES = False
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'memory://')
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'cache+memory://')
+
 # 日志配置
 LOGGING = {
     'version': 1,

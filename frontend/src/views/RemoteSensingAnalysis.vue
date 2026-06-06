@@ -104,6 +104,12 @@ const analysisEta = ref('');
 const currentStep = ref('准备分析环境...');
 const stepDetail = ref('正在初始化分析参数');
 const isPaused = ref(false);
+const backendIndexMap = {
+  NDVI: 'ndvi',
+  NDWI: 'ndwi',
+  LST: 'heat',
+  NDBSI: 'dryness'
+};
 
 // 计算属性
 const globalLoading = computed(() => loadingStore.globalLoading);
@@ -762,10 +768,15 @@ async function handleStartAnalysis() {
         console.log('准备调用计算接口，参数:', {
           imageId: imageId,
           selectedIndex: selectedIndex.value,
-          indices: [selectedIndex.value]
+          indices: [backendIndexMap[selectedIndex.value]]
         });
 
-        const calculateResult = await remoteSensingService.calculateIndices(imageId, [selectedIndex.value]);
+        const backendIndex = backendIndexMap[selectedIndex.value];
+        if (!backendIndex) {
+          throw new Error(`不支持的指数类型: ${selectedIndex.value}`);
+        }
+        
+        const calculateResult = await remoteSensingService.calculateIndices(imageId, [backendIndex]);
         console.log('计算接口调用成功，结果:', calculateResult);
         console.log('计算接口调用结果类型:', typeof calculateResult);
         console.log('计算接口调用结果键:', Object.keys(calculateResult || {}));

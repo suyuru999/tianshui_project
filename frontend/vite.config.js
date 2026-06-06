@@ -33,5 +33,36 @@ export default defineConfig({
         secure: false,
       }
     }
+  },
+  build: {
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      onwarn(warning, warn) {
+        if (warning.code === 'INVALID_ANNOTATION' && warning.id?.includes('@vueuse/core')) {
+          return
+        }
+        warn(warning)
+      },
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) {
+            return
+          }
+          if (id.includes('/ol/')) {
+            return 'vendor-ol'
+          }
+          if (id.includes('/element-plus/') || id.includes('/@element-plus/')) {
+            return 'vendor-element-plus'
+          }
+          if (id.includes('/vue') || id.includes('/@vue/')) {
+            return 'vendor-vue'
+          }
+          if (id.includes('/axios/')) {
+            return 'vendor-axios'
+          }
+          return 'vendor'
+        }
+      }
+    }
   }
 })

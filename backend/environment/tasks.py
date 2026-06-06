@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task(bind=True)
-def calculate_ecological_indices(self, image_id, indices_list):
+def calculate_ecological_indices(self, image_id, indices_list, task_id=None):
     """
     计算生态指数的Celery任务
     
@@ -60,42 +60,23 @@ def calculate_ecological_indices(self, image_id, indices_list):
         except RemoteSensingImage.DoesNotExist:
             raise ValueError(f"找不到ID为 {image_id} 的遥感影像")
         
-        # 查找现有的处理任务记录（由API创建）
-        try:
-            task = ProcessingTask.objects.filter(
-                remote_sensing_image=image,
-                task_type__contains='生态指数计算'
-            ).order_by('-created_at').first()
-            
-            # 如果没找到，尝试查找包含 'ecological_index_calculation' 的任务
-            if not task:
-                task = ProcessingTask.objects.filter(
-                    remote_sensing_image=image,
-                    task_type='ecological_index_calculation'
-                ).order_by('-created_at').first()
-            
-            if not task:
-                # 如果没有找到现有任务，创建一个新的
-                task = ProcessingTask.objects.create(
-                    remote_sensing_image=image,
-                    task_type='ecological_index_calculation',
-                    status='processing'
-                )
-                logger.info(f"创建新的处理任务成功，任务ID: {task.id}")
-            else:
-                # 更新现有任务状态
-                task.status = 'processing'
-                task.save()
-                logger.info(f"更新现有处理任务成功，任务ID: {task.id}")
-        except Exception as e:
-            logger.error(f"处理任务记录操作失败: {e}")
-            # 如果出错，创建一个新的任务记录
+        if task_id:
+            task = ProcessingTask.objects.get(id=task_id)
+            task.status = 'processing'
+            task.progress = 0
+            task.current_step = '开始处理'
+            task.started_at = timezone.now()
+            task.error_message = ''
+            task.save(update_fields=['status', 'progress', 'current_step', 'started_at', 'error_message'])
+            logger.info(f"复用处理任务成功，任务ID: {task.id}")
+        else:
             task = ProcessingTask.objects.create(
                 remote_sensing_image=image,
                 task_type='ecological_index_calculation',
-                status='processing'
+                status='processing',
+                started_at=timezone.now()
             )
-            logger.info(f"创建备用处理任务成功，任务ID: {task.id}")
+            logger.info(f"创建处理任务成功，任务ID: {task.id}")
         
         # 更新任务进度
         self.update_state(
@@ -143,6 +124,10 @@ def calculate_ecological_indices(self, image_id, indices_list):
                 
                 # 更新进度
                 progress = int((i / len(indices_list)) * 100)
+                if task:
+                    task.progress = progress
+                    task.current_step = f'正在计算 {index_type}'
+                    task.save(update_fields=['progress', 'current_step'])
                 self.update_state(
                     state='PROGRESS',
                     meta={

@@ -20,4 +20,14 @@ matplotlib==3.7.2
 Pillow==10.0.1
 
 # 开发工具
-python-dotenv==1.0.0 
+python-dotenv==1.0.0
+
+# 异步任务队列
+celery>=5.2,<7
+eventlet>=0.33
+
+# 栅格处理
+rasterio>=1.3.0
+
+# 文档和 schema 支持
+coreapi>=2.3.3 
