@@ -63,34 +63,35 @@ http.interceptors.response.use(
   (error) => {
     // 错误处理
     const { response } = error
+    const silentError = Boolean(error.config?.silentError)
     
-    if (response) {
+    if (response && !silentError) {
       const { status, data } = response
+      const message = data?.error || data?.detail || data?.message
       
       switch (status) {
         case 400:
-          ElMessage.error(data.error || '请求参数错误')
+          ElMessage.error(message || '请求参数错误')
           break
         case 401:
-          ElMessage.error('未授权，请重新登录')
+          ElMessage.error(message || '未授权，请重新登录')
           // 清除token并跳转到登录页
           localStorage.removeItem('access_token')
           localStorage.removeItem('refresh_token')
-          window.location.href = '/login'
           break
         case 403:
-          ElMessage.error('权限不足')
+          ElMessage.error(message || '权限不足')
           break
         case 404:
-          ElMessage.error('请求的资源不存在')
+          ElMessage.error(message || '请求的资源不存在')
           break
         case 500:
-          ElMessage.error('服务器内部错误')
+          ElMessage.error(message || '服务器内部错误')
           break
         default:
-          ElMessage.error(data.error || '请求失败')
+          ElMessage.error(message || '请求失败')
       }
-    } else {
+    } else if (!silentError) {
       ElMessage.error('网络错误，请检查网络连接')
     }
     

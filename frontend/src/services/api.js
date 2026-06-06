@@ -19,8 +19,8 @@ export const authService = {
   },
   
   // 获取用户信息
-  getProfile() {
-    return request.get(buildApiUrl(API_ENDPOINTS.AUTH.PROFILE))
+  getProfile(config = {}) {
+    return request.get(buildApiUrl(API_ENDPOINTS.AUTH.PROFILE), {}, config)
   },
   
   // 用户登出
@@ -249,14 +249,15 @@ export const climateMonitoringService = {
     }
     
     // 验证分析类型
-    const validAnalysisTypes = ['comprehensive', 'temperature', 'precipitation', 'humidity', 'wind_speed']
+    const validAnalysisTypes = ['comprehensive', 'temperature', 'precipitation', 'humidity', 'wind', 'wind_speed']
     if (!validAnalysisTypes.includes(analysisType)) {
       return Promise.reject(new Error(`无效的分析类型: ${analysisType}`))
     }
+    const normalizedAnalysisType = analysisType === 'wind_speed' ? 'wind' : analysisType
     
     return request.post(buildApiUrl(API_ENDPOINTS.CLIMATE_MONITORING.ANALYZE), {
       file_id: fileId,
-      analysis_type: analysisType
+      analysis_type: normalizedAnalysisType
     })
   },
   

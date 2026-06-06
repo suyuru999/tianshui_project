@@ -2,7 +2,11 @@
   <ErrorBoundary>
     <div class="feedback-page-apple">
       <div class="feedback-card-apple">
-        <h1 class="title-apple">意见反馈</h1>
+        <RouterLink to="/" class="feedback-back-link" title="返回主界面">
+          <ArrowLeft class="back-home-icon" />
+          <span>主界面</span>
+        </RouterLink>
+        <h1 class="title-apple">民众意见反馈</h1>
         <p class="subtitle-apple">我们期待你的声音，以帮助我们做得更好。</p>
 
         <el-form :model="form" :rules="rules" ref="formRef" label-position="top" class="form-apple">
@@ -54,6 +58,7 @@
 <script setup>
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import ErrorBoundary from '../components/Common/ErrorBoundary.vue'
 import { feedbackService } from '../services/api.js'
 

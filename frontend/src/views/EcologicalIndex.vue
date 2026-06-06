@@ -7,14 +7,18 @@
       <div class="left-panel">
         <!-- 标题栏 -->
         <div class="panel-header">
-          <h1>生态环境评估</h1>
+          <RouterLink to="/" class="back-home-link" title="返回主界面">
+            <ArrowLeft class="back-home-icon" />
+            <span>主界面</span>
+          </RouterLink>
+          <h1>生态环境指数计算</h1>
           <p>上传土地利用数据，系统将自动计算多种生态指数并进行可视化。</p>
         </div>
         
         <!-- 数据文件管理 -->
         <div class="section">
           <div class="section-header">
-            <i class="section-icon">📁</i>
+            <Files class="section-icon" />
             <span>数据文件管理</span>
           </div>
           <div class="section-content">
@@ -51,7 +55,7 @@
         <!-- 分析控制 -->
         <div class="section">
           <div class="section-header">
-            <i class="section-icon">🔍</i>
+            <Search class="section-icon" />
             <span>数据分析控制</span>
           </div>
           <div class="section-content">
@@ -69,7 +73,7 @@
         <!-- 指数选择区域 -->
         <div class="section">
           <div class="section-header">
-            <i class="section-icon">📊</i>
+            <Histogram class="section-icon" />
             <span>指数选择</span>
           </div>
           <div class="section-content">
@@ -181,7 +185,7 @@
 <script>
 import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Download, Upload } from '@element-plus/icons-vue'
+import { ArrowLeft, Download, Files, Histogram, Search } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { API_ENDPOINTS, buildApiUrl } from '../config/api.js'
 import http from '../utils/http.js'

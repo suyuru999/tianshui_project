@@ -5,14 +5,18 @@
       <div class="left-panel">
         <!-- 标题栏 -->
         <div class="panel-header">
-          <h1>气候环境监测</h1>
+          <RouterLink to="/" class="back-home-link" title="返回主界面">
+            <ArrowLeft class="back-home-icon" />
+            <span>主界面</span>
+          </RouterLink>
+          <h1>气候环境监测统计</h1>
           <p>上传CSV或Excel格式的气候监测数据，系统将自动生成统计图表。</p>
         </div>
         
         <!-- 数据文件管理 -->
         <div class="section">
           <div class="section-header">
-            <i class="section-icon">📁</i>
+            <Files class="section-icon" />
             <span>数据文件管理</span>
           </div>
           <div class="section-content">
@@ -47,7 +51,7 @@
         <!-- 分析控制 -->
         <div class="section">
           <div class="section-header">
-            <i class="section-icon">🔍</i>
+            <Search class="section-icon" />
             <span>数据分析控制</span>
           </div>
           <div class="section-content">
@@ -73,7 +77,7 @@
 
         <!-- 成功信息 -->
         <div v-if="successMessage" class="success-message">
-          <div class="success-icon">✅</div>
+          <CircleCheck class="success-icon" />
           <div class="success-content">
             <div class="success-title">操作成功</div>
             <div class="success-details">{{ successMessage }}</div>
@@ -85,7 +89,7 @@
 
         <!-- 错误信息 -->
         <div v-if="errorMessage" class="error-message">
-          <div class="error-icon">❌</div>
+          <CircleClose class="error-icon" />
           <div class="error-content">
             <div class="error-title">操作失败</div>
             <div class="error-details">{{ errorMessage }}</div>
@@ -101,7 +105,7 @@
       <div class="right-panel">
         <!-- 无数据时的占位符 -->
         <div v-if="!hasData" class="placeholder">
-          <div class="placeholder-icon">⭕</div>
+          <CirclePlus class="placeholder-icon" />
           <p>请先上传气候数据并开始分析</p>
         </div>
 
@@ -166,6 +170,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
+import { ArrowLeft, CircleCheck, CircleClose, CirclePlus, Files, Search } from '@element-plus/icons-vue'
 import { climateMonitoringService } from '../services/api.js'
 
 // 响应式数据
@@ -1624,11 +1629,18 @@ const drawWindSpeedChart = () => {
 .placeholder {
   text-align: center;
   color: #999;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 .placeholder-icon {
-  font-size: 48px;
-  margin-bottom: 20px;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 16px;
+  color: #c3ccd6;
   opacity: 0.5;
 }
 

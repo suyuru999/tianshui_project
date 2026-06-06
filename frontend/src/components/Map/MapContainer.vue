@@ -2,6 +2,11 @@
   <div id="map-container">
     <div ref="mapEl" id="map"></div>
 
+    <div v-if="baseMapLoading" class="map-loading">
+      <span class="loading-dot"></span>
+      正在加载底图...
+    </div>
+
     <div class="left-toolbar">
       <button
         v-for="tool in drawingTools"
@@ -180,12 +185,14 @@ import { Circle as CircleGeom, LineString, Point, Polygon } from 'ol/geom'
 import { fromCircle } from 'ol/geom/Polygon'
 import { getArea as getGeodesicArea, getLength as getGeodesicLength } from 'ol/sphere'
 import Feature from 'ol/Feature'
+import shp from 'shpjs'
 import { MapUtils } from '../../utils/mapUtils'
 
 const mapEl = ref(null)
 const currentMapType = ref('tdt_vec')
 const activeTool = ref('select')
 const rotation = ref(0)
+const baseMapLoading = ref(true)
 const coordinates = reactive({ lng: '-', lat: '-' })
 const viewState = reactive({ zoom: 8, rotation: 0 })
 const managedLayers = reactive([])
@@ -226,16 +233,22 @@ const activeToolLabel = computed(() => {
 
 let map
 let baseLayer
+let fallbackBaseLayer
+let blankBaseLayer
+let baseLayerLoadingTimer
+let baseLayerErrorCount = 0
 let drawInteraction
 let modifyInteraction
 let selectInteraction
 let snapInteraction
 let draggedLayerIndex = null
+let resizeObserver
 const drawSource = new VectorSource()
 const drawLayer = new VectorLayer({
   source: drawSource,
   style: feature => getDrawingStyle(feature, isFeatureSelected(feature))
 })
+drawLayer.setZIndex(1000)
 
 const demoOverlayDefinitions = [
   { id: 'water', name: '水系分布 (示例)', geometry: new LineString([fromLonLat([113.6, 30.2]), fromLonLat([114.2, 30.55]), fromLonLat([115.0, 30.7])]), styleType: 'water' },
@@ -249,6 +262,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
+  resizeObserver?.disconnect()
   if (map) {
     map.setTarget(undefined)
   }
@@ -256,16 +270,29 @@ onUnmounted(() => {
 
 watch(currentMapType, type => {
   if (!map) return
-  map.removeLayer(baseLayer)
-  baseLayer = MapUtils.createBaseMap(type)
-  map.getLayers().insertAt(0, baseLayer)
+  const nextBaseLayer = MapUtils.createBaseMap(type)
+  nextBaseLayer.setZIndex(2)
+  map.getLayers().insertAt(1, nextBaseLayer)
+  if (baseLayer) {
+    map.removeLayer(baseLayer)
+  }
+  baseLayer = nextBaseLayer
+  updateFallbackBaseLayer()
+  bindBaseLayerLoading(baseLayer)
 })
 
 function initMap() {
+  blankBaseLayer = MapUtils.createBaseMap('blank')
+  blankBaseLayer.setZIndex(0)
+  fallbackBaseLayer = MapUtils.createBaseMap('osm')
+  fallbackBaseLayer.setZIndex(1)
   baseLayer = MapUtils.createBaseMap(currentMapType.value)
+  baseLayer.setZIndex(2)
+  updateFallbackBaseLayer()
+  bindBaseLayerLoading(baseLayer)
   map = new Map({
     target: mapEl.value,
-    layers: [baseLayer, drawLayer],
+    layers: [blankBaseLayer, fallbackBaseLayer, baseLayer, drawLayer],
     view: new View({
       center: fromLonLat(defaultCenter),
       zoom: defaultZoom
@@ -275,6 +302,13 @@ function initMap() {
     ]),
     interactions: defaultInteractions({ altShiftDragRotate: true, pinchRotate: true })
   })
+  requestAnimationFrame(() => {
+    map.updateSize()
+  })
+  resizeObserver = new ResizeObserver(() => {
+    map?.updateSize()
+  })
+  resizeObserver.observe(mapEl.value)
 
   modifyInteraction = new Modify({ source: drawSource })
   selectInteraction = new Select({ condition: click, layers: [drawLayer] })
@@ -294,11 +328,16 @@ function initMap() {
   bindMapEvents()
 }
 
+function updateFallbackBaseLayer(forceVisible = false) {
+  if (!fallbackBaseLayer) return
+  fallbackBaseLayer.setVisible(forceVisible || currentMapType.value !== 'osm')
+}
+
 function bindMapEvents() {
   map.on('pointermove', event => {
     const [lng, lat] = toLonLat(event.coordinate)
-    coordinates.lng = lng.toFixed(4)
-    coordinates.lat = lat.toFixed(4)
+    coordinates.lng = Number.isFinite(lng) ? lng.toFixed(4) : '-'
+    coordinates.lat = Number.isFinite(lat) ? lat.toFixed(4) : '-'
   })
 
   map.on('singleclick', event => {
@@ -329,6 +368,46 @@ function bindMapEvents() {
   view.on('change:resolution', updateViewState)
   view.on('change:rotation', updateViewState)
   updateViewState()
+}
+
+function bindBaseLayerLoading(layer) {
+  baseMapLoading.value = true
+  baseLayerErrorCount = 0
+  clearTimeout(baseLayerLoadingTimer)
+  baseLayerLoadingTimer = setTimeout(() => {
+    baseMapLoading.value = false
+  }, 3500)
+
+  const source = layer.getSource?.()
+  if (!source?.on) return
+  let loadingTiles = 0
+  source.on('tileloadstart', () => {
+    loadingTiles += 1
+    baseMapLoading.value = true
+  })
+  const finish = () => {
+    loadingTiles = Math.max(0, loadingTiles - 1)
+    if (loadingTiles === 0) {
+      clearTimeout(baseLayerLoadingTimer)
+      baseLayerLoadingTimer = setTimeout(() => {
+        baseMapLoading.value = false
+        if (baseLayerErrorCount === 0) {
+          updateFallbackBaseLayer(false)
+        }
+      }, 180)
+    }
+  }
+  source.on('tileloadend', finish)
+  source.on('tileloaderror', () => {
+    baseLayerErrorCount += 1
+    updateFallbackBaseLayer(true)
+    baseMapLoading.value = false
+    finish()
+    if (currentMapType.value.startsWith('tdt') && baseLayerErrorCount >= 6) {
+      ElMessage.warning('天地图底图加载失败，已自动切换到 OSM')
+      currentMapType.value = 'osm'
+    }
+  })
 }
 
 function addDemoLayer(definition) {
@@ -373,15 +452,16 @@ function getDrawingStyle(feature, selected = false) {
   const label = feature.get('label')
   const measurement = feature.get('measurementLabel')
   const baseStroke = selected ? 3 : 2
-  const accentColor = selected ? '#315f8c' : '#5f7f9d'
-  const fillColor = selected ? 'rgba(76, 119, 156, 0.20)' : 'rgba(95, 127, 157, 0.14)'
+  const accentColor = '#5f7f9d'
+  const selectedColor = '#315f8c'
+  const fillColor = 'rgba(95, 127, 157, 0.14)'
 
   if (type === 'text') {
     return new Style({
       text: new Text({
         text: label,
-        font: selected ? '600 14px sans-serif' : '14px sans-serif',
-        fill: new Fill({ color: '#2f465c' }),
+        font: selected ? '600 14px sans-serif' : '500 14px sans-serif',
+        fill: new Fill({ color: selected ? selectedColor : '#2f465c' }),
         stroke: new Stroke({ color: '#ffffff', width: 4 }),
         offsetY: -12
       })
@@ -390,7 +470,7 @@ function getDrawingStyle(feature, selected = false) {
   if (type === 'arrow') {
     const geometry = feature.getGeometry()
     const styles = [
-      new Style({ stroke: new Stroke({ color: accentColor, width: baseStroke }) })
+      new Style({ stroke: new Stroke({ color: selected ? selectedColor : accentColor, width: baseStroke }) })
     ]
     const coordinates = geometry.getCoordinates()
     if (coordinates.length >= 2) {
@@ -416,7 +496,7 @@ function getDrawingStyle(feature, selected = false) {
       fill: new Fill({ color: fillColor }),
       image: new CircleStyle({
         radius: selected ? 7 : 6,
-        fill: new Fill({ color: accentColor }),
+        fill: new Fill({ color: selected ? selectedColor : accentColor }),
         stroke: new Stroke({ color: '#fff', width: 2 })
       })
     })
@@ -428,10 +508,9 @@ function getDrawingStyle(feature, selected = false) {
       text: new Text({
         text: measurement,
         font: '600 12px sans-serif',
-        padding: [5, 8, 5, 8],
+        padding: [4, 0, 4, 0],
         fill: new Fill({ color: '#315f8c' }),
-        backgroundFill: new Fill({ color: 'rgba(255, 255, 255, 0.94)' }),
-        backgroundStroke: new Stroke({ color: 'rgba(95, 127, 157, 0.30)', width: 1 }),
+        stroke: new Stroke({ color: 'rgba(255, 255, 255, 0.95)', width: 4 }),
         offsetY: -10
       })
     }))
@@ -457,6 +536,16 @@ function selectTool(toolId) {
   drawInteraction.on('drawend', event => {
     event.feature.set('drawType', toolId)
     refreshMeasurementFeature(event.feature)
+    event.feature.changed()
+    drawLayer.changed()
+    syncLayerZIndexes()
+    requestAnimationFrame(() => {
+      activeTool.value = 'select'
+      clearDrawInteraction()
+      selectInteraction.setActive(true)
+      modifyInteraction.setActive(true)
+      drawLayer.changed()
+    })
   })
   map.addInteraction(drawInteraction)
 }
@@ -578,6 +667,10 @@ function getFeatureInteriorCoordinate(feature) {
 function getMeasurementLabel(feature) {
   const geometry = feature.getGeometry()
   const type = feature.get('drawType')
+  if (geometry instanceof Point || type === 'marker' || type === 'point') {
+    const [lng, lat] = toLonLat(geometry.getCoordinates())
+    return `${lng.toFixed(5)}, ${lat.toFixed(5)}`
+  }
   if (geometry instanceof Polygon) {
     return formatArea(getGeodesicArea(geometry, { projection: 'EPSG:3857' }))
   }
@@ -640,8 +733,10 @@ function resetRotation() {
 function updateViewState() {
   const view = map.getView()
   rotation.value = view.getRotation()
-  viewState.zoom = Number(view.getZoom() || 0).toFixed(1)
-  viewState.rotation = Math.round((view.getRotation() * 180) / Math.PI)
+  const zoom = Number(view.getZoom())
+  const viewRotation = Number(view.getRotation())
+  viewState.zoom = Number.isFinite(zoom) ? zoom.toFixed(1) : '-'
+  viewState.rotation = Number.isFinite(viewRotation) ? Math.round((viewRotation * 180) / Math.PI) : 0
 }
 
 function locateCoordinate(input) {
@@ -657,6 +752,7 @@ function locateCoordinate(input) {
   }
   map.getView().animate({ center: fromLonLat([lng, lat]), zoom: 13, duration: 400 })
   const marker = new Feature({ geometry: new Point(fromLonLat([lng, lat])), drawType: 'marker' })
+  refreshMeasurementFeature(marker)
   drawSource.addFeature(marker)
   return true
 }
@@ -665,8 +761,43 @@ async function loadLocalFile(file) {
   if (!file) return false
   const lowerName = file.name.toLowerCase()
   if (lowerName.endsWith('.zip')) {
-    ElMessage.warning('Shapefile ZIP 需要接入后端解析或新增 shpjs 依赖后才能加载')
-    return false
+    try {
+      const arrayBuffer = await file.arrayBuffer()
+      const geojson = await shp(arrayBuffer)
+      const source = new VectorSource()
+      const collections = Array.isArray(geojson) ? geojson : [geojson]
+      collections.forEach(collection => {
+        source.addFeatures(new GeoJSON().readFeatures(collection, {
+          dataProjection: 'EPSG:4326',
+          featureProjection: 'EPSG:3857'
+        }))
+      })
+      if (source.getFeatures().length === 0) {
+        ElMessage.warning('Shapefile ZIP 中未解析到有效要素')
+        return false
+      }
+      const layer = new VectorLayer({
+        source,
+        visible: true,
+        style: getBusinessStyle('eco')
+      })
+      map.addLayer(layer)
+      managedLayers.push({
+        id: `temp-${Date.now()}`,
+        name: file.name,
+        group: '临时图层',
+        visible: true,
+        temporary: true,
+        layer
+      })
+      syncLayerZIndexes()
+      fitLayer(layer)
+      return true
+    } catch (error) {
+      console.error(error)
+      ElMessage.error('Shapefile ZIP 加载失败，请确认包含 .shp/.shx/.dbf/.prj 文件')
+      return false
+    }
   }
 
   try {
@@ -727,14 +858,18 @@ async function exportMap(format = 'png') {
     mapCanvas.width = size[0]
     mapCanvas.height = size[1]
     const mapContext = mapCanvas.getContext('2d')
-    document.querySelectorAll('#map .ol-layer canvas, #map canvas').forEach(canvas => {
+    Array.from(document.querySelectorAll('#map .ol-layer canvas, #map canvas')).forEach(canvas => {
       if (canvas.width <= 0) return
-      const opacity = canvas.parentNode.style.opacity || canvas.style.opacity
+      const layerElement = canvas.closest('.ol-layer') || canvas.parentNode
+      if (layerElement && getComputedStyle(layerElement).display === 'none') return
+      const opacity = layerElement?.style.opacity || canvas.style.opacity
       mapContext.globalAlpha = opacity === '' ? 1 : Number(opacity)
       const transform = canvas.style.transform
-      const matrix = transform.match(/^matrix\(([^(]*)\)$/)?.[1]?.split(',').map(Number)
+      const matrix = transform?.match(/^matrix\(([^(]*)\)$/)?.[1]?.split(',').map(Number)
       if (matrix) {
         CanvasRenderingContext2D.prototype.setTransform.apply(mapContext, matrix)
+      } else {
+        mapContext.setTransform(1, 0, 0, 1, 0, 0)
       }
       mapContext.drawImage(canvas, 0, 0)
     })
@@ -789,7 +924,7 @@ function syncLayerZIndexes() {
   managedLayers.forEach((item, index) => {
     item.layer.setZIndex(index + 10)
   })
-  drawLayer.setZIndex(100)
+  drawLayer.setZIndex(1000)
 }
 
 defineExpose({
@@ -1178,6 +1313,44 @@ defineExpose({
   border-radius: 6px;
   font-size: 12px;
   z-index: 1000;
+}
+
+.map-loading {
+  position: absolute;
+  left: 50%;
+  top: 18px;
+  transform: translateX(-50%);
+  z-index: 1001;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid #dbe3ec;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #315f8c;
+  font-size: 13px;
+  box-shadow: 0 8px 24px rgba(30, 50, 70, 0.12);
+  pointer-events: none;
+}
+
+.loading-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1677ff;
+  animation: pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(0.72);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .feature-toolbar {

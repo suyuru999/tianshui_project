@@ -2,14 +2,18 @@
   <div class="analysis-sidebar">
     <!-- 页面标题 -->
     <div class="panel-header">
-      <h1>遥感影像分析</h1>
+      <RouterLink to="/" class="back-home-link" title="返回主界面">
+        <ArrowLeft class="back-home-icon" />
+        <span>主界面</span>
+      </RouterLink>
+      <h1>遥感生态指数分析</h1>
       <p class="panel-subtitle">上传遥感影像数据，系统将自动提取多种生态指数并进行可视化。</p>
     </div>
 
     <!-- 数据文件管理 -->
     <div class="section">
       <div class="section-title">
-        <i class="section-icon">📊</i>
+        <Files class="section-icon" />
         <span>数据文件管理</span>
       </div>
 
@@ -42,7 +46,7 @@
     <!-- 数据分析控制 -->
     <div class="section">
       <div class="section-title">
-        <i class="section-icon">🔍</i>
+        <Search class="section-icon" />
         <span>数据分析控制</span>
       </div>
 
@@ -58,7 +62,7 @@
     <!-- 指数选择 -->
     <div class="section">
       <div class="section-title">
-        <i class="section-icon">📈</i>
+        <TrendCharts class="section-icon" />
         <span>指数选择</span>
       </div>
 
@@ -104,7 +108,7 @@
     <!-- 缓存管理 -->
     <div class="section">
       <div class="section-title">
-        <i class="section-icon">🗂️</i>
+        <FolderOpened class="section-icon" />
         <span>缓存管理</span>
       </div>
 
@@ -120,8 +124,7 @@
 
 <script setup>
 import { ref, watch } from 'vue';
-import { ElIcon, ElButton, ElRadioGroup, ElRadio } from 'element-plus';
-import { Upload } from '@element-plus/icons-vue';
+import { ArrowLeft, FolderOpened, Files, Search, TrendCharts } from '@element-plus/icons-vue';
 
 const props = defineProps({
   selectedIndex: String,

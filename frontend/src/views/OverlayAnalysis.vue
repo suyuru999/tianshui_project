@@ -5,6 +5,10 @@
       <div class="left-panel">
         <!-- 标题栏 -->
         <div class="panel-header">
+          <RouterLink to="/" class="back-home-link" title="返回主界面">
+            <ArrowLeft class="back-home-icon" />
+            <span>主界面</span>
+          </RouterLink>
           <h1>重大工程叠加分析</h1>
           <p>上传生态指数栅格、经济数据矢量和工程项目矢量，系统将自动进行叠加分析并评估风险。</p>
         </div>
@@ -12,7 +16,7 @@
         <!-- 图层控制 -->
         <div class="section">
           <div class="section-header">
-            <i class="section-icon">🗺️</i>
+            <MapLocation class="section-icon" />
             <span>图层控制</span>
           </div>
           <div class="section-content">
@@ -72,7 +76,7 @@
         <!-- 数据上传管理 -->
         <div class="section">
           <div class="section-header">
-            <i class="section-icon">📤</i>
+            <Upload class="section-icon" />
             <span>数据上传管理</span>
           </div>
           <div class="section-content">
@@ -86,7 +90,7 @@
         <!-- 使用说明 -->
         <div class="section">
           <div class="section-header">
-            <i class="section-icon">ℹ️</i>
+            <InfoFilled class="section-icon" />
             <span>使用说明</span>
           </div>
           <div class="section-content">
@@ -113,6 +117,7 @@
 
 <script setup>
 import { ref, reactive } from 'vue'
+import { ArrowLeft, InfoFilled, MapLocation, Upload } from '@element-plus/icons-vue'
 import OverlayMapContainer from '../components/Map/OverlayMapContainer.vue'
 import DataUploadPanel from '../components/Map/DataUploadPanel.vue'
 

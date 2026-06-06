@@ -285,7 +285,7 @@ def geoserver_status(request):
                     '查看后端日志了解更多信息'
                 ]
             }
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        })
 
 
 

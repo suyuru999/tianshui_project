@@ -135,10 +135,20 @@
         </div>
         <div class="section-content" v-show="businessFunctionsExpanded">
           <div class="business-functions">
-            <div class="function-item" v-for="func in businessFunctions" :key="func.id" @click="handleBusinessFunctionClick(func)">
-              <component :is="func.icon" class="inline-icon function-icon" />
-              <span>{{ func.name }}</span>
-            </div>
+            <button
+              v-for="func in businessFunctions"
+              :key="func.id"
+              type="button"
+              class="function-item"
+              :class="{ active: route.path === func.route }"
+              @click="handleBusinessFunctionClick(func)"
+            >
+              <span class="function-icon-box">
+                <component :is="func.icon" class="inline-icon function-icon" />
+              </span>
+              <span class="function-name">{{ func.name }}</span>
+              <ArrowRight class="inline-icon function-arrow" />
+            </button>
           </div>
         </div>
       </div>
@@ -156,6 +166,7 @@ import { onMounted, ref, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   ArrowDown,
+  ArrowRight,
   Camera,
   Connection,
   DataAnalysis,
@@ -174,10 +185,11 @@ import {
 } from '@element-plus/icons-vue'
 import MapContainer from '../components/Map/MapContainer.vue'
 import { useMapStore } from '../store/map'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { authService, spatialService } from '../services/api.js'
 
 const router = useRouter()
+const route = useRoute()
 const mapStore = useMapStore()
 const { toggleLayerVisibility } = mapStore
 
@@ -278,7 +290,7 @@ onMounted(() => {
 
 const loadCurrentUser = async () => {
   try {
-    currentUser.value = await authService.getProfile()
+    currentUser.value = await authService.getProfile({ silentError: true })
   } catch {
     currentUser.value = null
   }
@@ -366,7 +378,6 @@ const loadWFSLayer = (layer) => {
 
 const handleBusinessLayerToggle = async (layer) => {
   layer.visible = !layer.visible
-  toggleLayerVisibility(layer.id, true)
   const applied = mapContainerRef.value?.setLayerVisibleById(layer.id, layer.visible)
   if (applied) {
     return
@@ -578,26 +589,27 @@ const toggleBusinessFunctions = () => {
 
 /* 功能区块 */
 .section {
-  padding: 16px;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 14px 16px;
+  border-bottom: 1px solid #edf2f7;
 }
 
 .section-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 12px;
-  font-weight: 500;
-  color: #333;
+  margin-bottom: 10px;
+  font-weight: 700;
+  color: #26384a;
   cursor: pointer;
   user-select: none;
   transition: background 0.2s;
-  padding: 4px;
-  border-radius: 4px;
+  padding: 6px;
+  border-radius: 6px;
+  font-size: 14px;
 }
 
 .section-header:hover {
-  background: #f5f5f5;
+  background: #eef4f9;
 }
 
 .collapse-icon {
@@ -613,7 +625,7 @@ const toggleBusinessFunctions = () => {
 
 .section-content {
   animation: slideDown 0.3s ease-out;
-  padding: 0 12px;
+  padding: 0 4px;
 }
 
 @keyframes slideDown {
@@ -628,7 +640,7 @@ const toggleBusinessFunctions = () => {
 }
 
 .section-icon {
-  color: #1677ff;
+  color: #4f78a0;
 }
 
 /* 图层管理 */
@@ -849,22 +861,76 @@ input:checked + .slider:before {
 .business-functions {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .function-item {
+  appearance: none;
+  width: 100%;
+  min-height: 40px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px;
-  border-radius: 4px;
+  gap: 9px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #33465a;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
   font-size: 13px;
+  text-align: left;
 }
 
-.function-item:hover {
-  background: #f5f5f5;
+.function-item:hover,
+.function-item.active {
+  background: #f3f7fb;
+  border-color: #dbe6f0;
+  color: #315f8c;
+}
+
+.function-icon-box {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #5f7184;
+  background: #f7fafc;
+  border: 1px solid #e4ebf2;
+  flex-shrink: 0;
+}
+
+.function-item:hover .function-icon-box,
+.function-item.active .function-icon-box {
+  color: #315f8c;
+  background: #eaf2f9;
+  border-color: #cfddea;
+}
+
+.function-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.function-arrow {
+  width: 14px;
+  height: 14px;
+  color: #9aa8b6;
+  opacity: 0;
+  transform: translateX(-2px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.function-item:hover .function-arrow,
+.function-item.active .function-arrow {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 /* 主地图区域 */

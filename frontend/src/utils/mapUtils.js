@@ -1,7 +1,6 @@
 import TileLayer from 'ol/layer/Tile'
 import ImageLayer from 'ol/layer/Image'
 import VectorLayer from 'ol/layer/Vector'
-import OSM from 'ol/source/OSM'
 import XYZ from 'ol/source/XYZ'
 import ImageWMS from 'ol/source/ImageWMS'
 import TileWMS from 'ol/source/TileWMS'
@@ -13,28 +12,54 @@ import { transform } from 'ol/proj'
 // 天地图token（请替换为你自己的）
 const TDT_TOKEN = '69874af7f35c741d7132c50f80acad29'
 
+function createTiandituUrls(layer) {
+  return Array.from({ length: 8 }, (_, index) =>
+    `https://t${index}.tianditu.gov.cn/${layer}_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=default&FORMAT=tiles&TILEMATRIXSET=w&tk=${TDT_TOKEN}&TILECOL={x}&TILEROW={y}&TILEMATRIX={z}`
+  )
+}
+
+const osmUrls = [
+  'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'
+]
+
 // 地图工具类
 export class MapUtils {
   // 创建底图图层
   static createBaseMap(type) {
     switch (type) {
+      case 'blank':
+        return new TileLayer({
+          source: new XYZ({
+            url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mO88ePHTwAJiwPL8wIMlQAAAABJRU5ErkJggg==',
+            maxZoom: 22
+          }),
+          visible: true
+        })
       case 'osm':
         return new TileLayer({
-          source: new OSM(),
-          visible: true
+          source: new XYZ({
+            urls: osmUrls,
+            crossOrigin: 'anonymous',
+            maxZoom: 19
+          }),
+          visible: true,
+          preload: 1
         })
       case 'tdt_vec': // 天地图标准矢量
         return new TileLayer({
           source: new XYZ({
-            url: `https://t{0-7}.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&FORMAT=tiles&TILEMATRIXSET=w&tk=${TDT_TOKEN}&TILECOL={x}&TILEROW={y}&TILEMATRIX={z}`,
+            urls: createTiandituUrls('vec'),
             crossOrigin: 'anonymous'
           }),
-          visible: true
+          visible: true,
+          preload: 1
         })
       case 'tdt_img': // 天地图影像
         return new TileLayer({
           source: new XYZ({
-            url: `https://t{0-7}.tianditu.gov.cn/img_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&tk=${TDT_TOKEN}&TILECOL={x}&TILEROW={y}&TILEMATRIX={z}`,
+            urls: createTiandituUrls('img'),
             crossOrigin: 'anonymous'
           }),
           visible: true
@@ -42,7 +67,7 @@ export class MapUtils {
       case 'tdt_ter': // 天地图地形
         return new TileLayer({
           source: new XYZ({
-            url: `https://t{0-7}.tianditu.gov.cn/ter_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ter&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&tk=${TDT_TOKEN}&TILECOL={x}&TILEROW={y}&TILEMATRIX={z}`,
+            urls: createTiandituUrls('ter'),
             crossOrigin: 'anonymous'
           }),
           visible: true
@@ -50,7 +75,7 @@ export class MapUtils {
       case 'tdt_gray': // 天地图灰色
         return new TileLayer({
           source: new XYZ({
-            url: `https://t{0-7}.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&FORMAT=tiles&TILEMATRIXSET=w&tk=${TDT_TOKEN}&TILECOL={x}&TILEROW={y}&TILEMATRIX={z}`,
+            urls: createTiandituUrls('vec'),
             crossOrigin: 'anonymous'
           }),
           visible: true
@@ -75,7 +100,7 @@ export class MapUtils {
         // 默认天地图标准矢量
         return new TileLayer({
           source: new XYZ({
-            url: `https://t{0-7}.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&FORMAT=tiles&TILEMATRIXSET=w&tk=${TDT_TOKEN}&TILECOL={x}&TILEROW={y}&TILEMATRIX={z}`,
+            urls: createTiandituUrls('vec'),
             crossOrigin: 'anonymous'
           }),
           visible: true
