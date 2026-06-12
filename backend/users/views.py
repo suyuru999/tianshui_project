@@ -14,6 +14,7 @@ class UserViewSet(viewsets.ModelViewSet):
     """用户视图集"""
     queryset = User.objects.all()
     serializer_class = UserSerializer
+    authentication_classes = []
     
     def get_serializer_class(self):
         """根据操作类型选择序列化器"""
@@ -25,7 +26,7 @@ class UserViewSet(viewsets.ModelViewSet):
     
     def get_permissions(self):
         """设置权限"""
-        if self.action in ['create', 'login']:
+        if self.action in ['create', 'login', 'logout', 'profile']:
             permission_classes = [permissions.AllowAny]
         else:
             permission_classes = [permissions.IsAuthenticated]

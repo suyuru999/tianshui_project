@@ -72,7 +72,7 @@ import AnalysisResult from '../components/RemoteSensing/AnalysisResult.vue';
 import LoadingSpinner from '../components/Common/LoadingSpinner.vue';
 import ProgressBar from '../components/Common/ProgressBar.vue';
 import ErrorBoundary from '../components/Common/ErrorBoundary.vue';
-import { remoteSensingService, ecologicalIndicesService, processingTaskService } from '../services/api.js';
+import { remoteSensingService } from '../services/api.js';
 import { useLoadingStore } from '../store/loading.js';
 import { useMessageStore } from '../store/message.js';
 
@@ -105,11 +105,15 @@ const currentStep = ref('准备分析环境...');
 const stepDetail = ref('正在初始化分析参数');
 const isPaused = ref(false);
 const backendIndexMap = {
-  NDVI: 'ndvi',
-  NDWI: 'ndwi',
-  LST: 'heat',
-  NDBSI: 'dryness'
+  ndvi: 'ndvi',
+  ndwi: 'ndwi',
+  heat: 'heat',
+  dryness: 'dryness',
+  wetness: 'wetness',
+  greenness: 'greenness',
+  rsei: 'rsei'
 };
+const fourBandSupportedIndices = ['ndvi', 'ndwi'];
 
 // 计算属性
 const globalLoading = computed(() => loadingStore.globalLoading);
@@ -131,15 +135,7 @@ onMounted(() => {
 function checkAuthStatus() {
   const token = localStorage.getItem('access_token');
   if (!token) {
-    messageStore.warning('请先登录系统');
-    
-    // 创建一个临时token用于测试（仅开发环境使用）
-    const tempToken = 'temporary_dev_token_for_testing';
-    localStorage.setItem('access_token', tempToken);
-    messageStore.info('已创建临时测试令牌');
-    
-    // 在实际生产环境中应该跳转到登录页面
-    // window.location.href = '/login';
+    messageStore.warning('当前未登录，系统将以匿名方式提交分析任务');
   }
 }
 
@@ -630,18 +626,18 @@ function debugCacheStatus() {
 function handleFileChange(file) {
   if (file) {
     // 验证文件类型
-    const allowedTypes = ['.tif', '.tiff', '.jpg', '.jpeg', '.png'];
+    const allowedTypes = ['.tif', '.tiff', '.jpg', '.jpeg', '.png', '.zip'];
     const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
     
     if (!allowedTypes.includes(fileExtension)) {
-      messageStore.error('不支持的文件格式，请选择 .tif, .tiff, .jpg, .jpeg, .png 格式的文件');
+      messageStore.error('不支持的文件格式，请选择 .tif, .tiff, .jpg, .jpeg, .png，或ADF完整文件夹ZIP');
       return;
     }
     
-    // 验证文件大小（900MB限制）
-    const maxSize = 900 * 1024 * 1024;
+    // 验证文件大小（后端会落盘并分块处理）
+    const maxSize = 20 * 1024 * 1024 * 1024;
     if (file.size > maxSize) {
-      messageStore.error('文件大小不能超过900MB');
+      messageStore.error('文件大小不能超过20GB；更大的遥感成果建议先裁剪或走后台分片上传');
       return;
     }
     
@@ -651,7 +647,11 @@ function handleFileChange(file) {
     resultData.value = null;
     currentTaskId.value = null;
     analysisProgress.value = 0;
-    
+
+    if (/4band/i.test(file.name) && !fourBandSupportedIndices.includes(selectedIndex.value)) {
+      selectedIndex.value = 'ndvi';
+      messageStore.info('检测到4波段影像，已切换为NDVI。热度/RSEI需要热红外或更多波段。');
+    }
     messageStore.success('文件选择成功');
   }
 }
@@ -720,95 +720,33 @@ async function handleStartAnalysis() {
     
     console.log('开始分析，初始进度:', analysisProgress.value); // 添加调试日志
     
-    // 模拟分析步骤
-    const analysisSteps = [
-      { progress: 10, step: '上传文件', detail: '正在上传遥感影像文件...' },
-      { progress: 25, step: '预处理', detail: '正在进行影像预处理...' },
-      { progress: 40, step: '计算指数', detail: `正在计算${selectedIndex.value}指数...` },
-      { progress: 60, step: '后处理', detail: '正在进行结果后处理...' },
-      { progress: 80, step: '生成报告', detail: '正在生成分析报告...' },
-      { progress: 100, step: '完成', detail: '分析完成！' }
-    ];
-    
-    // 1. 上传遥感影像
-    currentStep.value = '上传文件';
-    stepDetail.value = '正在上传遥感影像文件...';
-    
-    // 确保数据格式正确
-    const uploadData = {
-      name: fileName.value || '未命名影像',
-      image_type: 'sentinel2',  // 修正为有效的选项
-      description: `用户上传的${selectedIndex.value}分析影像`,
-      acquisition_date: new Date().toISOString().split('T')[0],
-      center_lat: 39.9042,  // 使用有效的坐标值（北京坐标作为示例）
-      center_lon: 116.4074
-    };
-    
-    console.log('上传数据:', uploadData);
-    console.log('文件对象:', currentFile.value);
-    
-    const uploadResult = await remoteSensingService.upload(currentFile.value, uploadData);
-    
-    // 检查上传结果
-    console.log('上传结果:', uploadResult);
-    
-    if (uploadResult && uploadResult.id) {
-      const imageId = uploadResult.id;
-      currentImageId.value = imageId; // 保存影像ID
-      console.log('获取到影像ID:', imageId);
-      analysisProgress.value = 20;
-      messageStore.success('文件上传成功，开始分析...');
+    currentStep.value = '上传并分析影像';
+    stepDetail.value = '正在按公式计算指数并生成可视化结果...';
+    analysisProgress.value = 15;
 
-      // 2. 启动生态指数计算
-      currentStep.value = '启动生态指数计算';
-      stepDetail.value = '正在启动生态指数计算任务...';
-
-      try {
-        // 调用计算接口
-        console.log('准备调用计算接口，参数:', {
-          imageId: imageId,
-          selectedIndex: selectedIndex.value,
-          indices: [backendIndexMap[selectedIndex.value]]
-        });
-
-        const backendIndex = backendIndexMap[selectedIndex.value];
-        if (!backendIndex) {
-          throw new Error(`不支持的指数类型: ${selectedIndex.value}`);
-        }
-        
-        const calculateResult = await remoteSensingService.calculateIndices(imageId, [backendIndex]);
-        console.log('计算接口调用成功，结果:', calculateResult);
-        console.log('计算接口调用结果类型:', typeof calculateResult);
-        console.log('计算接口调用结果键:', Object.keys(calculateResult || {}));
-
-        analysisProgress.value = 30;
-        messageStore.success('生态指数计算已启动，正在处理中...');
-
-        // 3. 使用返回的任务ID
-        if (calculateResult && calculateResult.task_id) {
-          currentTaskId.value = calculateResult.task_id;
-          analysisProgress.value = 40;
-          console.log('获取到任务ID:', currentTaskId.value);
-
-          // 4. 启动真正的任务状态轮询
-          console.log('启动任务状态轮询，等待真正的计算完成');
-          
-          // 启动进度模拟器
-          startProgressSimulator();
-          
-          pollTaskStatus(currentTaskId.value, imageId);
-        } else {
-          console.error('未获取到任务ID，calculateResult:', calculateResult);
-          throw new Error('未获取到任务ID');
-        }
-      } catch (error) {
-        console.error('启动生态指数计算失败:', error);
-        messageStore.error(`启动生态指数计算失败: ${error.message}`);
-        throw error;
-      }
-    } else {
-      throw new Error('文件上传失败');
+    const backendIndex = backendIndexMap[selectedIndex.value];
+    if (!backendIndex) {
+      throw new Error(`不支持的指数类型: ${selectedIndex.value}`);
     }
+
+    startProgressSimulator();
+    const analyzeResult = await remoteSensingService.analyzeUpload(currentFile.value, backendIndex, {
+      name: fileName.value || '未命名影像'
+    });
+    stopProgressSimulator();
+
+    analysisProgress.value = 100;
+    currentStep.value = '分析完成';
+    stepDetail.value = '计算结果已生成';
+    currentTaskId.value = analyzeResult?.result?.id || null;
+    currentImageId.value = `${fileName.value}_${backendIndex}`;
+    resultData.value = {
+      ...analyzeResult,
+      remote_sensing_image_id: currentImageId.value
+    };
+    status.value = 'done';
+    saveAnalysisResult(resultData.value, currentImageId.value, selectedIndex.value);
+    messageStore.success('分析完成！');
     
   } catch (error) {
     console.error('分析失败:', error);
@@ -832,6 +770,14 @@ async function handleStartAnalysis() {
       } else if (data) {
         errorDetails = JSON.stringify(data);
       }
+      if (Array.isArray(data?.supported_index_labels) && data.supported_index_labels.length > 0) {
+        errorDetails = `${errorDetails} 建议选择：${data.supported_index_labels.join('、')}。`;
+      }
+      if (Array.isArray(data?.supported_indices) && data.supported_indices.includes('ndvi')) {
+        selectedIndex.value = 'ndvi';
+      } else if (Array.isArray(data?.supported_indices) && data.supported_indices.length > 0) {
+        selectedIndex.value = data.supported_indices[0];
+      }
       
       console.log('错误响应详情:', { status: responseStatus, data });
     } else if (error.request) {
@@ -848,7 +794,10 @@ async function handleStartAnalysis() {
     status.value = 'error';
     resultData.value = { 
       error: errorMessage,
-      details: errorDetails 
+      details: errorDetails,
+      bands_count: error.response?.data?.bands_count,
+      supported_indices: error.response?.data?.supported_indices,
+      supported_index_labels: error.response?.data?.supported_index_labels,
     };
     
     // 显示错误消息
@@ -1292,16 +1241,18 @@ onUnmounted(() => {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  background: #f4f7fa;
 }
 
 /* 左侧控制面板 */
 .control-panel {
-  width: 350px;
-  background: #fafafa;
-  border-right: 1px solid #e8e8e8;
+  width: 360px;
+  background: #ffffff;
+  border-right: 1px solid #dbe6f0;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  box-shadow: 2px 0 12px rgba(15, 23, 42, 0.06);
 }
 
 /* 自定义滚动条样式 */
@@ -1328,7 +1279,7 @@ onUnmounted(() => {
 .result-area {
   flex: 1;
   position: relative;
-  background: #f5f5f5;
+  background: #f4f7fa;
   min-height: 500px;
   height: 100vh;
   display: flex;
@@ -1363,43 +1314,63 @@ onUnmounted(() => {
 /* 分析进度样式 */
 .analysis-progress {
   width: 100%;
-  max-width: 600px;
+  max-width: 720px;
   text-align: center;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  min-height: 100%;
+  padding: 40px 32px;
+  border: 1px solid #dbe6f0;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgba(30, 50, 70, 0.08);
+}
+
+:deep(.result-area > *) {
+  width: 100%;
+  max-width: 1280px;
+}
+
+:deep(.result-area .placeholder),
+:deep(.result-area .empty-state),
+:deep(.result-area .result-card),
+:deep(.result-area .chart-card),
+:deep(.result-area .stats-card) {
+  border-radius: 10px;
 }
 
 .progress-title {
   font-size: 24px;
-  font-weight: 600;
-  color: #303133;
-  margin-bottom: 32px;
+  font-weight: 700;
+  color: #26384a;
+  margin-bottom: 28px;
 }
 
 .analysis-status {
   margin-top: 24px;
-  padding: 20px;
-  background: #f8f9fa;
-  border-radius: 12px;
-  border-left: 4px solid #409eff;
+  width: 100%;
+  padding: 18px 20px;
+  background: #f7fafc;
+  border-radius: 10px;
+  border: 1px solid #dbe6f0;
+  text-align: left;
 }
 
 .status-text {
   font-size: 16px;
-  font-weight: 500;
-  color: #303133;
+  font-weight: 600;
+  color: #26384a;
   margin: 0 0 8px 0;
 }
 
 .status-detail {
   font-size: 14px;
-  color: #606266;
+  color: #667789;
   margin: 0;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 @media (max-width: 900px) {

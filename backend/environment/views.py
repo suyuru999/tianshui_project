@@ -1,18 +1,27 @@
 from rest_framework import viewsets, status, permissions
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import AllowAny
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
+from django.http import HttpResponse
 from django.utils import timezone
+from django.utils.text import get_valid_filename
 import os
 import json
 import logging
 import requests
 import time
+import uuid
+import re
+import zipfile
+import numpy as np
+import rasterio
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 # 取消注释必要的导入
 from .models import (
@@ -23,6 +32,8 @@ from .models import (
     CitizenFeedback,
     ClimateDataFile,
     ClimateAnalysisResult,
+    BusinessLayer,
+    BusinessLayerAuditLog,
     EcologicalIndexFile,
     EcologicalProjectFile,
     OverlayAnalysisTask
@@ -40,6 +51,11 @@ from .serializers import (
     ClimateDataFileUploadSerializer,
     ClimateAnalysisResultSerializer,
     ClimateAnalysisRequestSerializer,
+    BusinessLayerSerializer,
+    BusinessLayerStyleSerializer,
+    BusinessLayerAuditLogSerializer,
+    BusinessLayerServiceSerializer,
+    BusinessLayerUploadSerializer,
     EcologicalIndexFileSerializer,
     EcologicalIndexFileUploadSerializer,
     EcologicalProjectFileSerializer,
@@ -48,6 +64,17 @@ from .serializers import (
     OverlayAnalysisTaskCreateSerializer
 )
 from .tasks import calculate_ecological_indices, calculate_rsei_only
+from .ecological_indices import EcologicalIndexCalculator
+from .raster_processing import (
+    calculate_normalized_index_windowed,
+    calculate_normalized_index_preview_stats,
+    prepare_raster_upload,
+    preview_array,
+    raster_band_statistics,
+    remove_tree,
+    RasterioLandUseAnalyzer,
+    validate_shapefile_zip,
+)
 try:
     from .gdal_land_use_analysis import LandUseAnalyzer
     from .vector_rasterize import rasterize_shapefile_to_tiff
@@ -327,6 +354,7 @@ class CitizenFeedbackViewSet(viewsets.ModelViewSet):
     """民众意见反馈视图集"""
     queryset = CitizenFeedback.objects.all()
     serializer_class = CitizenFeedbackSerializer
+    authentication_classes = []
     permission_classes = [permissions.AllowAny]
 
     def perform_create(self, serializer):
@@ -335,7 +363,748 @@ class CitizenFeedbackViewSet(viewsets.ModelViewSet):
         else:
             serializer.save(created_by=None)
 
+    @action(detail=False, methods=['delete'], url_path='clear')
+    def clear(self, request):
+        deleted_count = self.get_queryset().count()
+        self.get_queryset().delete()
+        return Response({
+            'message': '反馈记录已清空',
+            'deleted_count': deleted_count
+        }, status=status.HTTP_200_OK)
+
+
+REMOTE_INDEX_METHODS = {
+    'ndvi': ('NDVI', 'calculate_ndvi'),
+    'ndwi': ('NDWI', 'calculate_ndwi'),
+    'ndbi': ('NDBI', 'calculate_ndbi'),
+    'dryness': ('干度指数', 'calculate_dryness'),
+    'wetness': ('湿度指数', 'calculate_wetness'),
+    'heat': ('热度指数', 'calculate_heat'),
+    'greenness': ('绿度指数', 'calculate_greenness'),
+}
+
+
+REMOTE_INDEX_LABELS = {
+    'ndvi': '绿化指数(NDVI)',
+    'ndwi': '湿度指数(NDWI)',
+    'ndbi': '建筑指数(NDBI)',
+    'dryness': '干度指数(NDBSI)',
+    'wetness': '湿度指数(Tasseled Cap)',
+    'heat': '热度指数(LST/Heat)',
+    'greenness': '绿度指数',
+    'rsei': '遥感生态指数(RSEI)',
+}
+
+
+def _supported_remote_indices(band_count):
+    if band_count is None:
+        return sorted([*REMOTE_INDEX_METHODS.keys(), 'rsei'])
+    if band_count == 1:
+        return ['uploaded_raster']
+    if band_count >= 6:
+        return sorted([*REMOTE_INDEX_METHODS.keys(), 'rsei'])
+    if band_count == 5:
+        return ['ndvi', 'ndwi']
+    if band_count == 4:
+        return ['ndvi', 'ndwi']
+    if band_count == 3:
+        return ['ndvi', 'ndwi', 'ndbi']
+    return []
+
+
+def _unsupported_remote_index_response(index_type, band_count):
+    supported_indices = _supported_remote_indices(band_count)
+    requested_label = REMOTE_INDEX_LABELS.get(index_type, index_type.upper())
+    supported_labels = [
+        REMOTE_INDEX_LABELS.get(item, item.upper())
+        for item in supported_indices
+        if item != 'uploaded_raster'
+    ]
+
+    if band_count == 4:
+        detail = (
+            f'当前影像为4波段，不支持{requested_label}。'
+            '这类GF/PMS四波段影像通常可计算NDVI或NDWI；'
+            '热度指数、干度指数和RSEI需要包含短波红外/热红外等更多有效波段的数据。'
+        )
+    elif band_count and band_count < 6:
+        detail = (
+            f'当前影像为{band_count}波段，不支持{requested_label}。'
+            '请改选该影像支持的指数，或上传包含至少6个有效波段的多光谱影像。'
+        )
+    else:
+        detail = f'当前影像不支持{requested_label}，请检查影像波段配置。'
+
+    return Response({
+        'error': detail,
+        'bands_count': band_count,
+        'requested_index': index_type,
+        'supported_indices': supported_indices,
+        'supported_index_labels': supported_labels,
+    }, status=400)
+
+
+def _save_uploaded_file(uploaded_file, subdir):
+    safe_name = get_valid_filename(uploaded_file.name)
+    relative_path = os.path.join(subdir, f'{uuid.uuid4().hex}_{safe_name}')
+    absolute_path = os.path.join(settings.MEDIA_ROOT, relative_path)
+    os.makedirs(os.path.dirname(absolute_path), exist_ok=True)
+    with open(absolute_path, 'wb+') as destination:
+        for chunk in uploaded_file.chunks():
+            destination.write(chunk)
+    return relative_path.replace('\\', '/'), absolute_path
+
+
+def _media_url(request, relative_path):
+    if not relative_path:
+        return None
+    url = settings.MEDIA_URL + relative_path.replace('\\', '/')
+    return request.build_absolute_uri(url)
+
+
+def _statistics_payload(stats):
+    return {
+        'min_value': stats.get('min_value') if stats else None,
+        'max_value': stats.get('max_value') if stats else None,
+        'mean_value': stats.get('mean_value') if stats else None,
+        'std_value': stats.get('std_value') if stats else None,
+        'excellent_area': stats.get('excellent_area') if stats else None,
+        'good_area': stats.get('good_area') if stats else None,
+        'moderate_area': stats.get('moderate_area') if stats else None,
+        'poor_area': stats.get('poor_area') if stats else None,
+        'bad_area': stats.get('bad_area') if stats else None,
+    }
+
+
+def _single_band_statistics(path):
+    return preview_array(path), raster_band_statistics(path)
+
+
+def _safe_layer_name(name):
+    base = re.sub(r'[^0-9A-Za-z_]+', '_', name or '').strip('_').lower()
+    if not base:
+        base = 'business_layer'
+    if base[0].isdigit():
+        base = f'layer_{base}'
+    return f'{base}_{uuid.uuid4().hex[:8]}'
+
+
+def _build_ogc_urls(geoserver, layer_name, layer_type):
+    qualified_layer = f'{geoserver.workspace}:{layer_name}'
+    base_ows = f'{geoserver.base_url}/ows'
+    urls = {
+        'wms_url': (
+            f'{base_ows}?service=WMS&version=1.3.0&request=GetMap'
+            f'&layers={qualified_layer}&format=image/png&transparent=true'
+        )
+    }
+    if layer_type == 'vector':
+        urls['wfs_url'] = (
+            f'{base_ows}?service=WFS&version=2.0.0&request=GetFeature'
+            f'&typeNames={qualified_layer}&outputFormat=application/json'
+        )
+        urls['wcs_url'] = None
+    else:
+        urls['wfs_url'] = None
+        urls['wcs_url'] = (
+            f'{base_ows}?service=WCS&version=2.0.1&request=GetCoverage'
+            f'&coverageId={qualified_layer}'
+        )
+    return urls
+
+
+def _raster_layer_metadata(path):
+    """读取栅格基础元数据，供前端定位和服务说明使用。"""
+    metadata = {}
+    try:
+        with rasterio.open(path) as dataset:
+            bounds = dataset.bounds
+            metadata.update({
+                'bounds': [bounds.left, bounds.bottom, bounds.right, bounds.top],
+                'crs': dataset.crs.to_string() if dataset.crs else None,
+                'width': dataset.width,
+                'height': dataset.height,
+                'band_count': dataset.count,
+                'dtype': dataset.dtypes[0] if dataset.dtypes else None,
+            })
+    except Exception as exc:
+        logger.warning(f"读取栅格元数据失败: {exc}")
+    return metadata
+
+
+def _vector_layer_metadata(path):
+    """读取矢量基础元数据，供前端定位和服务说明使用。"""
+    metadata = {}
+    try:
+        from osgeo import ogr
+        datasource = ogr.Open(path)
+        if datasource is None:
+            return metadata
+
+        layer = datasource.GetLayer(0)
+        extent = layer.GetExtent()
+        spatial_ref = layer.GetSpatialRef()
+        crs = None
+        if spatial_ref:
+            auth_name = spatial_ref.GetAuthorityName(None)
+            auth_code = spatial_ref.GetAuthorityCode(None)
+            if auth_name and auth_code:
+                crs = f'{auth_name}:{auth_code}'
+            else:
+                crs = spatial_ref.ExportToWkt()
+
+        if extent:
+            min_x, max_x, min_y, max_y = extent
+            metadata['bounds'] = [min_x, min_y, max_x, max_y]
+        metadata['crs'] = crs or 'EPSG:4326'
+        metadata['feature_count'] = layer.GetFeatureCount()
+        datasource = None
+    except Exception as exc:
+        logger.warning(f"读取矢量元数据失败: {exc}")
+    return metadata
+
+
+def _extract_shapefile_zip(zip_path, target_dir):
+    os.makedirs(target_dir, exist_ok=True)
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        for member in zip_ref.infolist():
+            normalized = member.filename.replace('\\', '/')
+            if normalized.startswith('/') or '..' in normalized.split('/'):
+                raise ValueError('ZIP文件中包含不安全路径')
+        zip_ref.extractall(target_dir)
+
+    shp_files = []
+    for root, _, files in os.walk(target_dir):
+        for file_name in files:
+            if file_name.lower().endswith('.shp'):
+                shp_files.append(os.path.join(root, file_name))
+    if not shp_files:
+        raise ValueError('ZIP文件中未找到.shp文件')
+    return shp_files[0]
+
+
+def _convert_kml_to_shapefile(kml_path, target_dir, output_name):
+    os.makedirs(target_dir, exist_ok=True)
+    try:
+        from osgeo import ogr
+    except ImportError as exc:
+        raise RuntimeError('当前环境缺少 GDAL/OGR，无法将 KML 转换为 Shapefile') from exc
+
+    data_source = ogr.Open(kml_path)
+    if data_source is None:
+        raise ValueError('KML 文件无法读取，请检查文件内容是否完整')
+
+    source_layer = None
+    for index in range(data_source.GetLayerCount()):
+        candidate = data_source.GetLayerByIndex(index)
+        if candidate and candidate.GetFeatureCount() > 0:
+            source_layer = candidate
+            break
+    if source_layer is None:
+        source_layer = data_source.GetLayer(0)
+    if source_layer is None:
+        raise ValueError('KML 文件中未找到可转换的图层')
+
+    shapefile_path = os.path.join(target_dir, f'{output_name}.shp')
+    driver = ogr.GetDriverByName('ESRI Shapefile')
+    if os.path.exists(shapefile_path):
+        driver.DeleteDataSource(shapefile_path)
+
+    target_ds = driver.CreateDataSource(shapefile_path)
+    if target_ds is None:
+        raise RuntimeError('创建 Shapefile 失败')
+
+    source_srs = source_layer.GetSpatialRef()
+    geometry_type = source_layer.GetGeomType()
+    target_layer = target_ds.CreateLayer(output_name, srs=source_srs, geom_type=geometry_type)
+    layer_defn = source_layer.GetLayerDefn()
+
+    for field_index in range(layer_defn.GetFieldCount()):
+        field_defn = layer_defn.GetFieldDefn(field_index)
+        target_layer.CreateField(field_defn)
+
+    target_defn = target_layer.GetLayerDefn()
+    source_layer.ResetReading()
+    for feature in source_layer:
+        target_feature = ogr.Feature(target_defn)
+        target_feature.SetFrom(feature)
+        geometry = feature.GetGeometryRef()
+        if geometry is not None:
+            target_feature.SetGeometry(geometry.Clone())
+        if target_layer.CreateFeature(target_feature) != 0:
+            raise RuntimeError('KML 转换写入 Shapefile 失败')
+        target_feature = None
+
+    data_source = None
+    target_ds = None
+
+    cpg_path = os.path.splitext(shapefile_path)[0] + '.cpg'
+    with open(cpg_path, 'w', encoding='utf-8') as cpg_file:
+        cpg_file.write('UTF-8')
+
+    return shapefile_path
+
+
+def _update_url_query(url, **params):
+    parsed = urlsplit(url)
+    query = {key: value for key, value in parse_qsl(parsed.query, keep_blank_values=True)}
+    for key, value in params.items():
+        if value is None:
+            query.pop(key, None)
+        else:
+            query[key] = value
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
+
+
+def _service_health_payload(status_value='unknown', message=None):
+    return {
+        'service_health_status': status_value,
+        'service_health_message': message,
+        'service_checked_at': timezone.now(),
+    }
+
+
+def _hex_to_rgb(color):
+    color = (color or '').strip().lstrip('#')
+    if len(color) != 6:
+        raise ValueError('颜色值必须是 6 位十六进制')
+    return tuple(int(color[index:index + 2], 16) for index in (0, 2, 4))
+
+
+def _interpolate_color(start_color, end_color, factor):
+    start_rgb = _hex_to_rgb(start_color)
+    end_rgb = _hex_to_rgb(end_color)
+    rgb = tuple(round(start_rgb[index] + (end_rgb[index] - start_rgb[index]) * factor) for index in range(3))
+    return f'#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}'
+
+
+def _log_business_layer_action(layer, action, status_value='info', message=None, operator=None, details=None):
+    operator_name = None
+    if operator and getattr(operator, 'is_authenticated', False):
+        operator_name = operator.username
+    elif layer.uploaded_by:
+        operator_name = layer.uploaded_by.username
+
+    return BusinessLayerAuditLog.objects.create(
+        business_layer=layer,
+        action=action,
+        status=status_value,
+        operator=operator if operator and getattr(operator, 'is_authenticated', False) else None,
+        operator_name=operator_name,
+        message=message,
+        details=details or {},
+    )
+
+
+def _vector_style_sld(layer_name, style_config):
+    fill_color = style_config.get('fill_color') or '#1f8f4d'
+    stroke_color = style_config.get('stroke_color') or fill_color
+    stroke_width = style_config.get('stroke_width', 2)
+    fill_opacity = style_config.get('fill_opacity', 0.18)
+    classification_field = (style_config.get('classification_field') or '').strip()
+    color_scheme = style_config.get('color_scheme') or 'green_yellow_red'
+    geometry_type = (style_config.get('geometry_type') or 'polygon').lower()
+
+    if classification_field and style_config.get('min_value') is not None and style_config.get('max_value') is not None:
+        min_val = float(style_config['min_value'])
+        max_val = float(style_config['max_value'])
+        if max_val <= min_val:
+            max_val = min_val + 1
+        threshold1 = min_val + (max_val - min_val) * 0.33
+        threshold2 = min_val + (max_val - min_val) * 0.67
+        schemes = {
+            'green_yellow_red': ('#2E8B57', '#F6C344', '#D64545'),
+            'blue_cyan_green': ('#315f8c', '#4fb7c5', '#1f8f4d'),
+            'purple_pink_red': ('#7c5cc4', '#d17ab4', '#d64545'),
+        }
+        low_color, mid_color, high_color = schemes.get(color_scheme, schemes['green_yellow_red'])
+        symbolizer = f'''
+          <Rule>
+            <Name>low</Name>
+            <ogc:Filter>
+              <ogc:PropertyIsLessThan>
+                <ogc:PropertyName>{classification_field}</ogc:PropertyName>
+                <ogc:Literal>{threshold1:.6f}</ogc:Literal>
+              </ogc:PropertyIsLessThan>
+            </ogc:Filter>
+            <PolygonSymbolizer>
+              <Fill><CssParameter name="fill">{low_color}</CssParameter><CssParameter name="fill-opacity">{fill_opacity}</CssParameter></Fill>
+              <Stroke><CssParameter name="stroke">{stroke_color}</CssParameter><CssParameter name="stroke-width">{stroke_width}</CssParameter></Stroke>
+            </PolygonSymbolizer>
+          </Rule>
+          <Rule>
+            <Name>medium</Name>
+            <ogc:Filter>
+              <ogc:And>
+                <ogc:PropertyIsGreaterThanOrEqualTo>
+                  <ogc:PropertyName>{classification_field}</ogc:PropertyName>
+                  <ogc:Literal>{threshold1:.6f}</ogc:Literal>
+                </ogc:PropertyIsGreaterThanOrEqualTo>
+                <ogc:PropertyIsLessThan>
+                  <ogc:PropertyName>{classification_field}</ogc:PropertyName>
+                  <ogc:Literal>{threshold2:.6f}</ogc:Literal>
+                </ogc:PropertyIsLessThan>
+              </ogc:And>
+            </ogc:Filter>
+            <PolygonSymbolizer>
+              <Fill><CssParameter name="fill">{mid_color}</CssParameter><CssParameter name="fill-opacity">{fill_opacity}</CssParameter></Fill>
+              <Stroke><CssParameter name="stroke">{stroke_color}</CssParameter><CssParameter name="stroke-width">{stroke_width}</CssParameter></Stroke>
+            </PolygonSymbolizer>
+          </Rule>
+          <Rule>
+            <Name>high</Name>
+            <ogc:Filter>
+              <ogc:PropertyIsGreaterThanOrEqualTo>
+                <ogc:PropertyName>{classification_field}</ogc:PropertyName>
+                <ogc:Literal>{threshold2:.6f}</ogc:Literal>
+              </ogc:PropertyIsGreaterThanOrEqualTo>
+            </ogc:Filter>
+            <PolygonSymbolizer>
+              <Fill><CssParameter name="fill">{high_color}</CssParameter><CssParameter name="fill-opacity">{fill_opacity}</CssParameter></Fill>
+              <Stroke><CssParameter name="stroke">{stroke_color}</CssParameter><CssParameter name="stroke-width">{stroke_width}</CssParameter></Stroke>
+            </PolygonSymbolizer>
+          </Rule>'''
+    elif geometry_type == 'point':
+        symbolizer = f'''
+          <Rule>
+            <PointSymbolizer>
+              <Graphic>
+                <Mark>
+                  <WellKnownName>circle</WellKnownName>
+                  <Fill><CssParameter name="fill">{fill_color}</CssParameter></Fill>
+                  <Stroke><CssParameter name="stroke">{stroke_color}</CssParameter><CssParameter name="stroke-width">{stroke_width}</CssParameter></Stroke>
+                </Mark>
+                <Size>10</Size>
+              </Graphic>
+            </PointSymbolizer>
+          </Rule>'''
+    elif geometry_type == 'line':
+        symbolizer = f'''
+          <Rule>
+            <LineSymbolizer>
+              <Stroke>
+                <CssParameter name="stroke">{stroke_color}</CssParameter>
+                <CssParameter name="stroke-width">{stroke_width}</CssParameter>
+              </Stroke>
+            </LineSymbolizer>
+          </Rule>'''
+    else:
+        symbolizer = f'''
+          <Rule>
+            <PolygonSymbolizer>
+              <Fill><CssParameter name="fill">{fill_color}</CssParameter><CssParameter name="fill-opacity">{fill_opacity}</CssParameter></Fill>
+              <Stroke><CssParameter name="stroke">{stroke_color}</CssParameter><CssParameter name="stroke-width">{stroke_width}</CssParameter></Stroke>
+            </PolygonSymbolizer>
+          </Rule>'''
+
+    return f'''<?xml version="1.0" encoding="UTF-8"?>
+<StyledLayerDescriptor version="1.0.0"
+  xmlns="http://www.opengis.net/sld"
+  xmlns:ogc="http://www.opengis.net/ogc"
+  xmlns:xlink="http://www.w3.org/1999/xlink"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.opengis.net/sld http://schemas.opengis.net/sld/1.0.0/StyledLayerDescriptor.xsd">
+  <NamedLayer>
+    <Name>{layer_name}</Name>
+    <UserStyle>
+      <Title>{layer_name} vector style</Title>
+      <FeatureTypeStyle>{symbolizer}
+      </FeatureTypeStyle>
+    </UserStyle>
+  </NamedLayer>
+</StyledLayerDescriptor>'''
+
+
+def _raster_style_sld(layer_name, style_config):
+    opacity = style_config.get('raster_opacity', 0.72)
+    min_value = float(style_config.get('min_value', 0))
+    max_value = float(style_config.get('max_value', 100))
+    if max_value <= min_value:
+        max_value = min_value + 1
+    ramp = style_config.get('raster_color_ramp') or 'green_yellow_red'
+    ramps = {
+        'green_yellow_red': ('#2E8B57', '#F6C344', '#D64545'),
+        'blue_cyan_green': ('#315f8c', '#4fb7c5', '#1f8f4d'),
+        'gray_blue': ('#6b7280', '#93c5fd', '#1d4ed8'),
+    }
+    start_color, mid_color, end_color = ramps.get(ramp, ramps['green_yellow_red'])
+    q1 = min_value + (max_value - min_value) * 0.5
+    return f'''<?xml version="1.0" encoding="UTF-8"?>
+<StyledLayerDescriptor version="1.0.0"
+  xmlns="http://www.opengis.net/sld"
+  xmlns:xlink="http://www.w3.org/1999/xlink"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.opengis.net/sld http://schemas.opengis.net/sld/1.0.0/StyledLayerDescriptor.xsd">
+  <NamedLayer>
+    <Name>{layer_name}</Name>
+    <UserStyle>
+      <Title>{layer_name} raster style</Title>
+      <FeatureTypeStyle>
+        <Rule>
+          <RasterSymbolizer>
+            <Opacity>{opacity}</Opacity>
+            <ColorMap type="ramp">
+              <ColorMapEntry color="{start_color}" quantity="{min_value:.6f}" opacity="{opacity}" />
+              <ColorMapEntry color="{mid_color}" quantity="{q1:.6f}" opacity="{opacity}" />
+              <ColorMapEntry color="{end_color}" quantity="{max_value:.6f}" opacity="{opacity}" />
+            </ColorMap>
+          </RasterSymbolizer>
+        </Rule>
+      </FeatureTypeStyle>
+    </UserStyle>
+  </NamedLayer>
+</StyledLayerDescriptor>'''
+
+
+def _check_layer_service_availability(layer):
+    timeout = 20
+
+    try:
+        if layer.layer_type == 'vector' and layer.wfs_url:
+            type_name = layer.service_type_name or layer.geoserver_layer_name
+            if layer.geoserver_workspace and type_name and ':' not in type_name and not layer.metadata.get('is_external_service'):
+                type_name = f'{layer.geoserver_workspace}:{type_name}'
+            probe_url = _update_url_query(
+                layer.wfs_url,
+                service='WFS',
+                request='GetFeature',
+                version='2.0.0',
+                typeNames=type_name,
+                outputFormat='application/json',
+                count='1'
+            )
+            response = requests.get(probe_url, timeout=timeout)
+            if response.ok:
+                return _service_health_payload('healthy', 'WFS 服务可访问')
+            return _service_health_payload('unhealthy', f'WFS 检测失败: HTTP {response.status_code}')
+
+        if layer.wms_url:
+            metadata = layer.metadata or {}
+            bounds = metadata.get('bounds') or [-180, -90, 180, 90]
+            crs = layer.service_srs or metadata.get('crs') or 'EPSG:4326'
+            layers = layer.service_type_name or layer.geoserver_layer_name
+            if layer.geoserver_workspace and layers and ':' not in layers and not metadata.get('is_external_service'):
+                layers = f'{layer.geoserver_workspace}:{layers}'
+            probe_url = _update_url_query(
+                layer.wms_url,
+                service='WMS',
+                request='GetMap',
+                version='1.1.0',
+                layers=layers,
+                bbox=','.join(str(value) for value in bounds),
+                width='32',
+                height='32',
+                srs=crs,
+                format='image/png',
+                transparent='true'
+            )
+            response = requests.get(probe_url, timeout=timeout)
+            if response.ok and 'image/' in (response.headers.get('Content-Type') or ''):
+                return _service_health_payload('healthy', 'WMS 服务可访问')
+            return _service_health_payload('unhealthy', f'WMS 检测失败: HTTP {response.status_code}')
+
+        if layer.wcs_url:
+            coverage_id = layer.service_type_name or layer.geoserver_layer_name
+            if layer.geoserver_workspace and coverage_id and ':' not in coverage_id and not (layer.metadata or {}).get('is_external_service'):
+                coverage_id = f'{layer.geoserver_workspace}:{coverage_id}'
+            probe_url = _update_url_query(
+                layer.wcs_url,
+                service='WCS',
+                request='DescribeCoverage',
+                version='2.0.1',
+                coverageId=coverage_id
+            )
+            response = requests.get(probe_url, timeout=timeout)
+            if response.ok:
+                return _service_health_payload('healthy', 'WCS 服务可访问')
+            return _service_health_payload('unhealthy', f'WCS 检测失败: HTTP {response.status_code}')
+    except requests.RequestException as exc:
+        return _service_health_payload('unhealthy', f'服务检测异常: {exc}')
+    except Exception as exc:
+        return _service_health_payload('unhealthy', f'服务检测失败: {exc}')
+
+    return _service_health_payload('unknown', '当前图层没有可检测的标准服务地址')
+
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def geoserver_ows_proxy(request):
+    """代理GeoServer OWS服务，避免浏览器直接访问GeoServer时被CORS拦截。"""
+    from .geoserver_config import get_geoserver_manager
+
+    geoserver = get_geoserver_manager()
+    try:
+        upstream = requests.get(
+            f'{geoserver.base_url}/ows',
+            params=request.GET,
+            auth=geoserver.auth,
+            timeout=120,
+        )
+    except requests.RequestException as exc:
+        return Response({'error': f'GeoServer代理请求失败: {exc}'}, status=502)
+
+    content_type = upstream.headers.get('Content-Type', 'application/octet-stream')
+    response = HttpResponse(
+        upstream.content,
+        status=upstream.status_code,
+        content_type=content_type,
+    )
+    for header in ['Cache-Control', 'Expires', 'ETag', 'Last-Modified']:
+        if upstream.headers.get(header):
+            response[header] = upstream.headers[header]
+    response['Access-Control-Allow-Origin'] = '*'
+    return response
+
+
+def _landuse_visualization_payload(request, analyzer, source_file_name):
+    result_dir_rel = f'landuse_results/{uuid.uuid4().hex}'
+    result_dir_abs = os.path.join(settings.MEDIA_ROOT, result_dir_rel)
+    os.makedirs(result_dir_abs, exist_ok=True)
+    visualization_rel = f'{result_dir_rel}/land_use_visualization.png'
+    visualization_abs = os.path.join(settings.MEDIA_ROOT, visualization_rel)
+    analyzer.create_landuse_visualization(visualization_abs)
+    return {
+        'source_filename': source_file_name,
+        'visualization_file_url': _media_url(request, visualization_rel),
+        'landuse_statistics': analyzer.get_landuse_statistics(),
+    }
+
+
 @api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def analyze_remote_sensing_upload(request):
+    """上传遥感/成果栅格并直接计算或统计展示，不要求先入库。"""
+    if 'file' not in request.FILES:
+        return Response({'error': '请上传 GeoTIFF 或常见影像文件'}, status=400)
+
+    index_type = str(request.data.get('index_type') or 'ndvi').lower()
+    if index_type == 'lst':
+        index_type = 'heat'
+    if index_type == 'ndbsi':
+        index_type = 'dryness'
+
+    uploaded_file = request.FILES['file']
+    extension = os.path.splitext(uploaded_file.name.lower())[1]
+    if extension == '.adf':
+        return Response({
+            'error': 'ADF 是 ArcGIS 栅格目录格式，不能作为单文件上传。请上传包含完整ADF文件夹的ZIP，或先转为GeoTIFF(.tif)。'
+        }, status=400)
+    if extension not in ['.tif', '.tiff', '.jpg', '.jpeg', '.png', '.zip']:
+        return Response({'error': '仅支持 .tif/.tiff/.jpg/.jpeg/.png 或 ADF文件夹ZIP'}, status=400)
+
+    upload_rel, upload_abs = _save_uploaded_file(uploaded_file, 'analysis_tmp')
+    result_dir_rel = f'analysis_results/{uuid.uuid4().hex}'
+    result_dir_abs = os.path.join(settings.MEDIA_ROOT, result_dir_rel)
+    os.makedirs(result_dir_abs, exist_ok=True)
+
+    calculator = None
+    cleanup_dirs = []
+    try:
+        raster_abs = upload_abs
+        if extension == '.zip':
+            raster_abs, cleanup_dirs = prepare_raster_upload(upload_abs, result_dir_abs)
+            extension = '.tif'
+
+        if extension in ['.tif', '.tiff']:
+            with rasterio.open(raster_abs) as probe_dataset:
+                band_count = int(probe_dataset.count)
+        else:
+            band_count = None
+        results = []
+        supported_indices = _supported_remote_indices(band_count)
+        if index_type not in supported_indices and band_count != 1:
+            return _unsupported_remote_index_response(index_type, band_count)
+
+        if band_count == 1 and extension in ['.tif', '.tiff']:
+            label = '上传成果栅格'
+            index_data, stats = _single_band_statistics(raster_abs)
+            index_result_type = 'uploaded_raster'
+        elif extension in ['.tif', '.tiff'] and index_type in ['ndvi', 'ndwi'] and band_count and band_count >= 3:
+            index_result_type = index_type
+            label = REMOTE_INDEX_METHODS[index_type][0]
+            index_data, stats = calculate_normalized_index_preview_stats(raster_abs, index_type)
+            result_file_url = None
+        else:
+            calculator = EcologicalIndexCalculator(raster_abs)
+            if not calculator.load_image():
+                return Response({'error': '影像加载失败，请检查文件格式、波段数或坐标信息'}, status=400)
+            band_count = int(calculator.bands.shape[0])
+            if index_type == 'rsei':
+                rsei_result = calculator.calculate_rsei()
+                if not rsei_result:
+                    return _unsupported_remote_index_response(index_type, band_count)
+                index_data = rsei_result['rsei']
+                stats = calculator.calculate_statistics(index_data)
+                label = 'RSEI'
+                index_result_type = 'rsei'
+            else:
+                method_info = REMOTE_INDEX_METHODS.get(index_type)
+                if not method_info:
+                    return Response({
+                        'error': f'不支持的指数类型: {index_type}',
+                        'supported_indices': sorted([*REMOTE_INDEX_METHODS.keys(), 'rsei'])
+                }, status=400)
+                label, method_name = method_info
+                index_data = getattr(calculator, method_name)()
+                if index_data is None:
+                    return _unsupported_remote_index_response(index_type, band_count)
+                stats = calculator.calculate_statistics(index_data)
+                index_result_type = index_type
+
+        if not stats:
+            return Response({'error': '统计结果生成失败'}, status=500)
+
+        result_png_rel = f'{result_dir_rel}/{index_result_type}.png'
+        result_png_abs = os.path.join(settings.MEDIA_ROOT, result_png_rel)
+        result_file_url = locals().get('result_file_url')
+        if calculator:
+            result_tif_rel = f'{result_dir_rel}/{index_result_type}.tif'
+            result_tif_abs = os.path.join(settings.MEDIA_ROOT, result_tif_rel)
+            calculator.save_result(index_data, result_tif_abs)
+            result_file_url = _media_url(request, result_tif_rel)
+
+        preview_calculator = calculator or EcologicalIndexCalculator(raster_abs)
+        preview_calculator.create_visualization(index_data, label, result_png_abs)
+
+        results.append({
+            'id': uuid.uuid4().hex,
+            'index_type': index_result_type,
+            'index_type_display': label,
+            **_statistics_payload(stats),
+            'result_file_url': result_file_url,
+            'visualization_file_url': _media_url(request, result_png_rel),
+        })
+
+        return Response({
+            'message': '分析完成',
+            'source': {
+                'filename': uploaded_file.name,
+                'uploaded_file_url': _media_url(request, upload_rel),
+                'bands_count': band_count,
+                'supported_indices': _supported_remote_indices(band_count),
+            },
+            'indices': results,
+            'result': results[0],
+        })
+    except Exception as exc:
+        logger.exception('上传遥感影像分析失败')
+        return Response({'error': f'分析失败: {exc}'}, status=500)
+    finally:
+        if calculator:
+            calculator.close()
+        try:
+            if os.path.exists(upload_abs):
+                os.remove(upload_abs)
+        except Exception as cleanup_error:
+            logger.warning(f'清理上传临时文件失败: {cleanup_error}')
+        for cleanup_dir in cleanup_dirs:
+            remove_tree(cleanup_dir)
+
+
+@api_view(['POST'])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def calculate_ecological_structure_indices(request):
     """
@@ -343,11 +1112,6 @@ def calculate_ecological_structure_indices(request):
     包括：破碎度指数、内聚力指数、多样性指数、脆弱度指数
     """
     try:
-        if GDAL_IMPORT_ERROR:
-            return Response({
-                'error': f'土地利用分析依赖 GDAL/osgeo 未安装: {GDAL_IMPORT_ERROR}'
-            }, status=503)
-
         # 获取上传的土地利用数据文件
         if 'landuse_file' not in request.FILES:
             return Response({
@@ -355,6 +1119,10 @@ def calculate_ecological_structure_indices(request):
             }, status=400)
         
         landuse_file = request.FILES['landuse_file']
+        if landuse_file.name.lower().endswith('.adf'):
+            return Response({
+                'error': 'ADF 是 ArcGIS 栅格目录格式，不能作为单文件上传。请先用 GDAL/ArcGIS 转为 GeoTIFF(.tif) 后再上传。'
+            }, status=400)
         
         # 保存文件到临时位置
         file_path = default_storage.save(
@@ -369,6 +1137,10 @@ def calculate_ecological_structure_indices(request):
             raster_input = abs_file_path
             lower = file_path.lower()
             if lower.endswith('.zip') or lower.endswith('.shp'):
+                if GDAL_IMPORT_ERROR or rasterize_shapefile_to_tiff is None:
+                    return Response({
+                        'error': f'Shapefile栅格化需要 GDAL/osgeo。当前环境未安装: {GDAL_IMPORT_ERROR}'
+                    }, status=503)
                 # 选择分类字段：前端可传入 landuse_attr，否则尝试常见字段
                 attr = request.data.get('landuse_attr') or 'class'
                 try_fields = [attr, 'landuse', 'code', 'class_id']
@@ -386,7 +1158,8 @@ def calculate_ecological_structure_indices(request):
                     raise last_err or ValueError('栅格化失败，未找到有效属性字段')
 
             # 创建土地利用分析器
-            analyzer = LandUseAnalyzer(raster_input)
+            analyzer_cls = LandUseAnalyzer if LandUseAnalyzer is not None else RasterioLandUseAnalyzer
+            analyzer = analyzer_cls(raster_input)
             
             # 加载土地利用数据
             if not analyzer.load_landuse_data():
@@ -424,6 +1197,9 @@ def calculate_ecological_structure_indices(request):
                 results['fragility'] = fragility_result
             else:
                 results['fragility'] = {'error': '脆弱度指数计算失败'}
+
+            visualization = _landuse_visualization_payload(request, analyzer, landuse_file.name)
+            analyzer.close()
             
             # 清理临时文件
             abs_file_path = default_storage.path(file_path)
@@ -443,6 +1219,7 @@ def calculate_ecological_structure_indices(request):
             return Response({
                 'message': '生态环境结构指数计算完成',
                 'results': results,
+                'visualization': visualization,
                 'summary': {
                     'fragmentation_index': results.get('fragmentation', {}).get('overall_fragmentation', 0),
                     'cohesion_index': results.get('cohesion', {}).get('cohesion_index', 0),
@@ -504,6 +1281,7 @@ def calculate_ecological_structure_indices(request):
         }, status=500)
 
 @api_view(['POST'])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def calculate_ecological_stress_indices(request):
     """
@@ -511,11 +1289,6 @@ def calculate_ecological_stress_indices(request):
     包括：土壤侵蚀指数、未利用地面积比例、耕地建设用地面积比例、土地退化指数
     """
     try:
-        if GDAL_IMPORT_ERROR:
-            return Response({
-                'error': f'土地利用分析依赖 GDAL/osgeo 未安装: {GDAL_IMPORT_ERROR}'
-            }, status=503)
-
         # 获取上传的土地利用数据文件
         if 'landuse_file' not in request.FILES:
             return Response({
@@ -523,6 +1296,10 @@ def calculate_ecological_stress_indices(request):
             }, status=400)
         
         landuse_file = request.FILES['landuse_file']
+        if landuse_file.name.lower().endswith('.adf'):
+            return Response({
+                'error': 'ADF 是 ArcGIS 栅格目录格式，不能作为单文件上传。请先用 GDAL/ArcGIS 转为 GeoTIFF(.tif) 后再上传。'
+            }, status=400)
         
         # 保存文件到临时位置
         file_path = default_storage.save(
@@ -537,6 +1314,10 @@ def calculate_ecological_stress_indices(request):
             raster_input = abs_file_path
             lower = file_path.lower()
             if lower.endswith('.zip') or lower.endswith('.shp'):
+                if GDAL_IMPORT_ERROR or rasterize_shapefile_to_tiff is None:
+                    return Response({
+                        'error': f'Shapefile栅格化需要 GDAL/osgeo。当前环境未安装: {GDAL_IMPORT_ERROR}'
+                    }, status=503)
                 attr = request.data.get('landuse_attr') or 'class'
                 try_fields = [attr, 'landuse', 'code', 'class_id']
                 tmp_tif = os.path.splitext(abs_file_path)[0] + '.tif'
@@ -553,7 +1334,8 @@ def calculate_ecological_stress_indices(request):
                     raise last_err or ValueError('栅格化失败，未找到有效属性字段')
 
             # 创建土地利用分析器
-            analyzer = LandUseAnalyzer(raster_input)
+            analyzer_cls = LandUseAnalyzer if LandUseAnalyzer is not None else RasterioLandUseAnalyzer
+            analyzer = analyzer_cls(raster_input)
             
             # 加载土地利用数据
             if not analyzer.load_landuse_data():
@@ -591,6 +1373,9 @@ def calculate_ecological_stress_indices(request):
                 results['land_degradation'] = land_degradation_result
             else:
                 results['land_degradation'] = {'error': '土地退化指数计算失败'}
+
+            visualization = _landuse_visualization_payload(request, analyzer, landuse_file.name)
+            analyzer.close()
             
             # 清理临时文件
             abs_file_path = default_storage.path(file_path)
@@ -615,6 +1400,7 @@ def calculate_ecological_stress_indices(request):
             return Response({
                 'message': '生态环境胁迫指数计算完成',
                 'results': results,
+                'visualization': visualization,
                 'summary': {
                     'soil_erosion_index': results.get('soil_erosion', {}).get('soil_erosion_index', 0),
                     'unused_land_proportion': results.get('unused_land', {}).get('unused_land_ratio', 0),
@@ -781,10 +1567,10 @@ def validate_climate_file(file_obj):
         errors.append('文件对象不存在')
         return errors
     
-    # 2. 检查文件大小（限制为50MB）
-    max_size = 50 * 1024 * 1024  # 50MB
+    # 2. 检查文件大小（栅格数据可能较大，后端会落盘并分块统计）
+    max_size = getattr(settings, 'MAX_UPLOAD_SIZE', 10 * 1024 * 1024 * 1024)
     if file_obj.size > max_size:
-        errors.append(f'文件大小不能超过50MB，当前大小: {file_obj.size / (1024*1024):.2f}MB')
+        errors.append(f'文件大小不能超过{max_size / (1024*1024*1024):.1f}GB，当前大小: {file_obj.size / (1024*1024):.2f}MB')
     
     # 3. 检查文件是否为空
     if file_obj.size == 0:
@@ -792,8 +1578,8 @@ def validate_climate_file(file_obj):
     
     # 4. 检查文件类型
     file_name = file_obj.name.lower()
-    if not file_name.endswith(('.csv', '.xlsx', '.xls')):
-        errors.append('只支持CSV和Excel文件格式(.csv, .xlsx, .xls)')
+    if not file_name.endswith(('.csv', '.xlsx', '.xls', '.tif', '.tiff', '.zip')):
+        errors.append('只支持CSV、Excel、GeoTIFF或ADF ZIP文件格式(.csv, .xlsx, .xls, .tif, .tiff, .zip)')
     
     # 5. 检查文件名
     if not file_name or file_name.strip() == '':
@@ -806,6 +1592,7 @@ def validate_climate_file(file_obj):
     return errors
 
 @api_view(['POST'])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def upload_climate_data(request):
     """上传气候数据文件"""
@@ -855,6 +1642,10 @@ def upload_climate_data(request):
                 file_type = 'csv'
             elif file_name.endswith(('.xlsx', '.xls')):
                 file_type = 'xlsx'
+            elif file_name.endswith(('.tif', '.tiff')):
+                file_type = 'tif'
+            elif file_name.endswith('.zip'):
+                file_type = 'zip'
             else:
                 return Response({
                     'error': '不支持的文件格式'
@@ -925,6 +1716,7 @@ def validate_analysis_request(data):
     return errors
 
 @api_view(['POST'])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def analyze_climate_data_api(request):
     """气候数据分析API"""
@@ -1045,6 +1837,7 @@ def analyze_climate_data_api(request):
 
 
 @api_view(['GET'])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def get_climate_analysis_results(request, task_id):
     """获取气候分析结果"""
@@ -1111,6 +1904,424 @@ def get_climate_analysis_results(request, task_id):
         return Response({
             'error': f'获取结果失败: {str(e)}'
         }, status=500)
+
+
+# 业务图层上传/发布
+class BusinessLayerViewSet(viewsets.ModelViewSet):
+    """业务图层：上传用户成果数据并发布为GeoServer WMS/WFS/WCS服务"""
+    queryset = BusinessLayer.objects.all()
+    serializer_class = BusinessLayerSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    permission_classes = [permissions.AllowAny]
+
+    def get_permissions(self):
+        read_actions = {'list', 'retrieve', 'logs'}
+        if self.action in read_actions:
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            if self.request.data.get('service_url'):
+                return BusinessLayerServiceSerializer
+            return BusinessLayerUploadSerializer
+        return BusinessLayerSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        layer = serializer.save(
+            uploaded_by=request.user if request.user.is_authenticated else None,
+            status='uploaded'
+        )
+
+        try:
+            if layer.service_url:
+                self._register_external_service_layer(layer)
+            else:
+                self._publish_layer(layer)
+            _log_business_layer_action(
+                layer,
+                'upload',
+                'success' if layer.status == 'published' else 'info',
+                '业务图层已创建',
+                operator=request.user,
+                details={'source_format': layer.source_format, 'status': layer.status}
+            )
+        except Exception as exc:
+            logger.error(f"业务图层发布失败: {exc}")
+            import traceback
+            logger.error(traceback.format_exc())
+            layer.status = 'failed'
+            layer.error_message = str(exc)
+            layer.save(update_fields=['status', 'error_message', 'updated_at'])
+            _log_business_layer_action(layer, 'upload', 'failed', str(exc), operator=request.user)
+
+        layer.refresh_from_db()
+        response_status = status.HTTP_201_CREATED if layer.status == 'published' else status.HTTP_202_ACCEPTED
+        return Response(BusinessLayerSerializer(layer, context={'request': request}).data, status=response_status)
+
+    @action(detail=True, methods=['post'])
+    def publish(self, request, pk=None):
+        """重新发布已上传的业务图层"""
+        layer = self.get_object()
+        try:
+            if layer.service_url:
+                self._register_external_service_layer(layer)
+            else:
+                self._publish_layer(layer)
+            _log_business_layer_action(layer, 'publish', 'success', '业务图层发布成功', operator=request.user)
+        except Exception as exc:
+            layer.status = 'failed'
+            layer.error_message = str(exc)
+            layer.save(update_fields=['status', 'error_message', 'updated_at'])
+            _log_business_layer_action(layer, 'publish', 'failed', str(exc), operator=request.user)
+            return Response(BusinessLayerSerializer(layer, context={'request': request}).data, status=500)
+
+        layer.refresh_from_db()
+        return Response(BusinessLayerSerializer(layer, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'])
+    def unpublish(self, request, pk=None):
+        """撤销GeoServer发布，但保留用户上传的源文件和系统记录"""
+        layer = self.get_object()
+        try:
+            self._unpublish_layer(layer)
+            _log_business_layer_action(layer, 'unpublish', 'success', '业务图层已撤销发布', operator=request.user)
+        except Exception as exc:
+            logger.error(f"业务图层撤销发布失败: {exc}")
+            _log_business_layer_action(layer, 'unpublish', 'failed', str(exc), operator=request.user)
+            return Response({'error': str(exc)}, status=500)
+
+        layer.refresh_from_db()
+        return Response(BusinessLayerSerializer(layer, context={'request': request}).data)
+
+    def destroy(self, request, *args, **kwargs):
+        """删除业务图层记录；如果已发布，先同步清理GeoServer服务"""
+        layer = self.get_object()
+        layer_name = layer.name
+        if layer.status == 'published' or layer.geoserver_store_name:
+            self._unpublish_layer(layer, raise_on_error=False)
+        _log_business_layer_action(layer, 'delete', 'success', f'业务图层 {layer_name} 已删除', operator=request.user)
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=['get'])
+    def logs(self, request, pk=None):
+        layer = self.get_object()
+        queryset = layer.audit_logs.all()
+        return Response(BusinessLayerAuditLogSerializer(queryset, many=True).data)
+
+    @action(detail=True, methods=['post'])
+    def style(self, request, pk=None):
+        layer = self.get_object()
+        serializer = BusinessLayerStyleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        style_config = serializer.validated_data
+
+        try:
+            self._apply_business_layer_style(layer, style_config, operator=request.user)
+        except Exception as exc:
+            logger.error(f"业务图层样式更新失败: {exc}")
+            _log_business_layer_action(layer, 'style_update', 'failed', str(exc), operator=request.user)
+            return Response({'error': str(exc)}, status=400)
+
+        layer.refresh_from_db()
+        return Response(BusinessLayerSerializer(layer, context={'request': request}).data)
+
+    def _publish_layer(self, layer):
+        from .geoserver_config import get_geoserver_manager
+
+        layer.status = 'publishing'
+        layer.error_message = ''
+        layer.save(update_fields=['status', 'error_message', 'updated_at'])
+
+        if not layer.file:
+            raise ValueError('当前业务图层没有源文件，无法发布到 GeoServer')
+
+        geoserver = get_geoserver_manager()
+        geoserver.create_workspace()
+
+        source_path = layer.file.path
+        layer_name = _safe_layer_name(layer.name or os.path.splitext(os.path.basename(source_path))[0])
+
+        if layer.layer_type == 'vector':
+            extract_dir = os.path.join(settings.MEDIA_ROOT, 'business_layers', str(layer.id), 'vector')
+            if layer.source_format == 'kml':
+                shp_path = _convert_kml_to_shapefile(source_path, extract_dir, layer_name)
+                charset = 'UTF-8'
+            else:
+                is_valid_zip, zip_message = validate_shapefile_zip(source_path)
+                if not is_valid_zip:
+                    raise ValueError(zip_message)
+
+                shp_path = _extract_shapefile_zip(source_path, extract_dir)
+                cpg_path = os.path.splitext(shp_path)[0] + '.cpg'
+                charset = 'GBK'
+                if os.path.exists(cpg_path):
+                    with open(cpg_path, 'r', encoding='utf-8', errors='ignore') as cpg_file:
+                        charset = cpg_file.read().strip() or charset
+
+            published = geoserver.publish_shapefile(layer_name, shp_path, charset=charset)
+            store_name = f'{layer_name}_store'
+            metadata = {
+                **(layer.metadata or {}),
+                'source_shp_path': shp_path,
+                'charset': charset,
+                'source_origin': 'upload',
+                **_vector_layer_metadata(shp_path),
+            }
+        else:
+            store_name = f'{layer_name}_store'
+            published = geoserver.publish_raster(store_name, layer_name, source_path)
+            metadata = {
+                **(layer.metadata or {}),
+                'source_raster_path': source_path,
+                'source_origin': 'upload',
+                **_raster_layer_metadata(source_path),
+            }
+
+        urls = _build_ogc_urls(geoserver, layer_name, layer.layer_type)
+        health = _check_layer_service_availability(layer=type('LayerProbe', (), {
+            'layer_type': layer.layer_type,
+            'wms_url': urls['wms_url'],
+            'wfs_url': urls['wfs_url'],
+            'wcs_url': urls['wcs_url'],
+            'service_type_name': None,
+            'geoserver_layer_name': layer_name,
+            'geoserver_workspace': geoserver.workspace,
+            'service_srs': metadata.get('crs'),
+            'metadata': metadata,
+        })())
+        layer.geoserver_workspace = geoserver.workspace
+        layer.geoserver_store_name = store_name
+        layer.geoserver_layer_name = layer_name
+        layer.wms_url = urls['wms_url']
+        layer.wfs_url = urls['wfs_url']
+        layer.wcs_url = urls['wcs_url']
+        layer.metadata = metadata
+        layer.status = 'published' if published else 'failed'
+        layer.error_message = '' if published else 'GeoServer发布失败，请检查GeoServer服务、文件路径和日志'
+        layer.published_at = timezone.now() if published else None
+        layer.service_srs = metadata.get('crs')
+        layer.service_health_status = health['service_health_status'] if published else 'unhealthy'
+        layer.service_health_message = health['service_health_message'] if published else layer.error_message
+        layer.service_checked_at = health['service_checked_at'] if published else timezone.now()
+        layer.save()
+
+        if published:
+            self._apply_business_layer_style(layer)
+
+        if not published:
+            raise RuntimeError(layer.error_message)
+
+    def _register_external_service_layer(self, layer):
+        metadata = dict(layer.metadata or {})
+        metadata['is_external_service'] = True
+        metadata['service_registered_at'] = timezone.now().isoformat()
+        metadata['source_origin'] = 'external_service'
+
+        service_url = (layer.service_url or '').strip()
+        service_type_name = (layer.service_type_name or '').strip()
+
+        if layer.source_format == 'wms':
+            layer.wms_url = service_url
+            layer.wfs_url = None
+            layer.wcs_url = None
+        elif layer.source_format == 'wfs':
+            layer.wms_url = None
+            layer.wfs_url = service_url
+            layer.wcs_url = None
+        elif layer.source_format == 'wcs':
+            layer.wms_url = None
+            layer.wfs_url = None
+            layer.wcs_url = service_url
+
+        layer.geoserver_workspace = None
+        layer.geoserver_store_name = None
+        layer.geoserver_layer_name = service_type_name or layer.name
+        layer.metadata = metadata
+        layer.status = 'published'
+        layer.error_message = ''
+        layer.published_at = timezone.now()
+        health = _check_layer_service_availability(layer)
+        layer.service_health_status = health['service_health_status']
+        layer.service_health_message = health['service_health_message']
+        layer.service_checked_at = health['service_checked_at']
+        layer.save()
+        if layer.source_format == 'wms' and layer.style_config:
+            _log_business_layer_action(layer, 'style_update', 'info', '外部服务已记录样式配置，需由外部服务端实际生效', operator=None)
+
+    def _unpublish_layer(self, layer, raise_on_error=True):
+        from .geoserver_config import get_geoserver_manager
+
+        metadata = dict(layer.metadata or {})
+        if metadata.get('is_external_service'):
+            metadata['last_unpublished_at'] = timezone.now().isoformat()
+            layer.status = 'uploaded'
+            layer.error_message = ''
+            layer.wms_url = None
+            layer.wfs_url = None
+            layer.wcs_url = None
+            layer.published_at = None
+            layer.service_health_status = 'unknown'
+            layer.service_health_message = '服务已撤销发布'
+            layer.service_checked_at = timezone.now()
+            layer.metadata = metadata
+            layer.save(update_fields=[
+                'status', 'error_message', 'wms_url', 'wfs_url', 'wcs_url',
+                'published_at', 'service_health_status', 'service_health_message',
+                'service_checked_at', 'metadata', 'updated_at'
+            ])
+            return
+
+        geoserver = get_geoserver_manager()
+        store_name = layer.geoserver_store_name
+        if not store_name and layer.geoserver_layer_name:
+            store_name = f'{layer.geoserver_layer_name}_store'
+
+        success = True
+        if store_name:
+            if layer.layer_type == 'vector':
+                success = geoserver.delete_datastore(store_name, recurse=True)
+            else:
+                success = geoserver.delete_coveragestore(store_name, recurse=True)
+
+        if not success and raise_on_error:
+            raise RuntimeError('GeoServer服务清理失败，请检查GeoServer是否启动或手动删除对应存储')
+
+        metadata = dict(layer.metadata or {})
+        metadata['last_unpublished_at'] = timezone.now().isoformat()
+        layer.status = 'uploaded'
+        layer.error_message = '' if success else 'GeoServer服务清理失败，数据库记录已保留'
+        layer.geoserver_workspace = None
+        layer.geoserver_store_name = None
+        layer.geoserver_layer_name = None
+        layer.wms_url = None
+        layer.wfs_url = None
+        layer.wcs_url = None
+        layer.published_at = None
+        layer.service_health_status = 'unknown'
+        layer.service_health_message = '服务已撤销发布'
+        layer.service_checked_at = timezone.now()
+        layer.metadata = metadata
+        layer.save()
+
+    def _apply_business_layer_style(self, layer, style_config=None, operator=None):
+        from .geoserver_config import get_geoserver_manager
+
+        next_style_config = dict(layer.style_config or {})
+        if style_config:
+            next_style_config.update(style_config)
+
+        if layer.metadata.get('is_external_service'):
+            layer.style_name = next_style_config.get('style_name') or layer.style_name
+            layer.style_config = next_style_config
+            if style_config and 'sld_content' in style_config:
+                layer.sld_content = style_config.get('sld_content') or None
+            layer.save(update_fields=['style_name', 'style_config', 'sld_content', 'updated_at'])
+            _log_business_layer_action(
+                layer,
+                'style_update',
+                'info',
+                '外部服务图层仅记录样式配置，未直接改写远程服务样式',
+                operator=operator,
+                details={'style_name': layer.style_name, 'style_config': layer.style_config}
+            )
+            return
+
+        if not layer.geoserver_layer_name:
+            raise ValueError('当前图层尚未发布到 GeoServer，不能应用样式')
+
+        geoserver = get_geoserver_manager()
+        metadata = dict(layer.metadata or {})
+        if layer.layer_type == 'vector':
+            vector_meta = metadata.get('style_vector_meta') or {}
+            if not vector_meta:
+                source_path = metadata.get('source_shp_path')
+                geometry_type = 'polygon'
+                classification_field = next_style_config.get('classification_field')
+                min_value = None
+                max_value = None
+                if source_path:
+                    try:
+                        from osgeo import ogr
+                        datasource = ogr.Open(source_path)
+                        if datasource:
+                            source_layer = datasource.GetLayer(0)
+                            geom_name = source_layer.GetGeomType()
+                            if geom_name in [1, 4]:
+                                geometry_type = 'point'
+                            elif geom_name in [2, 5]:
+                                geometry_type = 'line'
+                            if classification_field:
+                                values = []
+                                for feature in source_layer:
+                                    value = feature.GetField(classification_field)
+                                    if value is not None:
+                                        try:
+                                            values.append(float(value))
+                                        except (TypeError, ValueError):
+                                            pass
+                                if values:
+                                    min_value = min(values)
+                                    max_value = max(values)
+                            datasource = None
+                    except Exception as exc:
+                        logger.warning(f'读取矢量样式元数据失败: {exc}')
+                vector_meta = {
+                    'geometry_type': geometry_type,
+                    'min_value': min_value,
+                    'max_value': max_value,
+                }
+            next_style_config.setdefault('geometry_type', vector_meta.get('geometry_type') or 'polygon')
+            if vector_meta.get('min_value') is not None:
+                next_style_config['min_value'] = vector_meta['min_value']
+            if vector_meta.get('max_value') is not None:
+                next_style_config['max_value'] = vector_meta['max_value']
+            generated_sld = next_style_config.get('sld_content') or _vector_style_sld(layer.geoserver_layer_name, next_style_config)
+        else:
+            raster_meta = metadata.get('style_raster_meta') or {}
+            if not raster_meta:
+                source_path = metadata.get('source_raster_path')
+                if source_path and os.path.exists(source_path):
+                    try:
+                        with rasterio.open(source_path) as dataset:
+                            data = dataset.read(1, masked=True)
+                            valid_data = data.compressed() if hasattr(data, 'compressed') else data.flatten()
+                            if valid_data.size:
+                                raster_meta = {
+                                    'min_value': float(np.min(valid_data)),
+                                    'max_value': float(np.max(valid_data)),
+                                    'nodata': dataset.nodata,
+                                }
+                    except Exception as exc:
+                        logger.warning(f'读取栅格样式元数据失败: {exc}')
+            next_style_config.setdefault('min_value', raster_meta.get('min_value', 0.0))
+            next_style_config.setdefault('max_value', raster_meta.get('max_value', 100.0))
+            next_style_config.setdefault('nodata', raster_meta.get('nodata'))
+            generated_sld = next_style_config.get('sld_content') or _raster_style_sld(layer.geoserver_layer_name, next_style_config)
+
+        style_name = next_style_config.get('style_name') or layer.style_name or f'{layer.geoserver_layer_name}_style'
+        created = geoserver.create_style(style_name, generated_sld)
+        if not created:
+            raise RuntimeError('GeoServer 样式创建或更新失败')
+        if not geoserver.apply_style_to_layer(layer.geoserver_layer_name, style_name):
+            raise RuntimeError('GeoServer 样式应用失败')
+
+        layer.style_name = style_name
+        layer.style_config = {key: value for key, value in next_style_config.items() if key != 'sld_content'}
+        layer.sld_content = generated_sld
+        layer.metadata = metadata
+        layer.save(update_fields=['style_name', 'style_config', 'sld_content', 'metadata', 'updated_at'])
+        _log_business_layer_action(
+            layer,
+            'style_update',
+            'success',
+            '业务图层样式已更新',
+            operator=operator,
+            details={'style_name': style_name, 'style_config': layer.style_config}
+        )
 
 
 # 叠加分析相关视图集
@@ -1192,6 +2403,7 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
     """叠加分析任务视图集"""
     queryset = OverlayAnalysisTask.objects.all()
     serializer_class = OverlayAnalysisTaskSerializer
+    authentication_classes = []
     permission_classes = [AllowAny]
     parser_classes = [MultiPartParser, FormParser, JSONParser]  # 支持文件上传
 
@@ -1218,6 +2430,74 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
             instance.save()
             # 不要重新抛出异常，让DRF正常返回创建成功的响应
             # 前端可以通过轮询任务状态来获取失败信息
+
+    @action(detail=False, methods=['delete'], url_path='delete-uploaded-layer')
+    def delete_uploaded_layer(self, request):
+        """删除叠加分析中已上传并发布的固定业务图层"""
+        layer_type = request.query_params.get('data_type') or request.data.get('data_type')
+        layer_configs = {
+            'ecology': {
+                'label': '生态指数栅格',
+                'store': 'ecology_raster',
+                'kind': 'raster',
+                'paths': [
+                    os.path.join(settings.MEDIA_ROOT, 'ecological_projects', 'ecology_raster.tif'),
+                ],
+            },
+            'economy': {
+                'label': '经济数据矢量',
+                'store': 'economy_vector_store',
+                'kind': 'vector',
+                'paths': [
+                    os.path.join(settings.MEDIA_ROOT, 'ecological_projects', 'economy_vector'),
+                ],
+            },
+            'engineering': {
+                'label': '工程项目矢量',
+                'store': 'engineering_vector_store',
+                'kind': 'vector',
+                'paths': [
+                    os.path.join(settings.MEDIA_ROOT, 'ecological_projects', 'engineering_vector'),
+                ],
+            },
+        }
+
+        if layer_type not in layer_configs:
+            return Response({
+                'success': False,
+                'message': '不支持的数据类型'
+            }, status=400)
+
+        config = layer_configs[layer_type]
+        geoserver_success = True
+        try:
+            from .geoserver_config import geoserver_manager
+            if config['kind'] == 'raster':
+                geoserver_success = geoserver_manager.delete_coveragestore(config['store'], recurse=True)
+            else:
+                geoserver_success = geoserver_manager.delete_datastore(config['store'], recurse=True)
+        except Exception as exc:
+            geoserver_success = False
+            logger.warning(f"删除{config['label']}GeoServer服务失败: {exc}")
+
+        removed_paths = []
+        for path in config['paths']:
+            try:
+                if os.path.isdir(path):
+                    remove_tree(path)
+                    removed_paths.append(path)
+                elif os.path.exists(path):
+                    os.remove(path)
+                    removed_paths.append(path)
+            except Exception as exc:
+                logger.warning(f"删除本地文件失败 {path}: {exc}")
+
+        return Response({
+            'success': geoserver_success,
+            'message': f"{config['label']}已删除" if geoserver_success else f"{config['label']}本地记录已清理，但GeoServer服务删除可能未完成",
+            'data_type': layer_type,
+            'removed_paths': removed_paths,
+        })
 
     @action(detail=True, methods=['post'])
     def restart_analysis(self, request, pk=None):
@@ -1680,10 +2960,10 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                 }, status=400)
             
             # 验证文件大小（最大100MB）
-            if uploaded_file.size > 100 * 1024 * 1024:
+            if uploaded_file.size > 1024 * 1024 * 1024:
                 return Response({
                     'success': False,
-                    'message': '文件大小超过100MB限制'
+                    'message': '文件大小超过1GB限制'
                 }, status=400)
             
             # 保存文件
@@ -1783,10 +3063,10 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                 }, status=400)
             
             # 验证文件大小
-            if uploaded_file.size > 100 * 1024 * 1024:
+            if uploaded_file.size > 1024 * 1024 * 1024:
                 return Response({
                     'success': False,
-                    'message': '文件大小超过100MB限制'
+                    'message': '文件大小超过1GB限制'
                 }, status=400)
             
             # 保存文件
@@ -1803,6 +3083,13 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
             with open(zip_path, 'wb+') as destination:
                 for chunk in uploaded_file.chunks():
                     destination.write(chunk)
+
+            is_valid_zip, zip_message = validate_shapefile_zip(zip_path)
+            if not is_valid_zip:
+                return Response({
+                    'success': False,
+                    'message': zip_message
+                }, status=400)
             
             logger.info(f"经济矢量ZIP文件已保存: {zip_path}")
             
@@ -1975,10 +3262,10 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                 }, status=400)
             
             # 验证文件大小
-            if uploaded_file.size > 100 * 1024 * 1024:
+            if uploaded_file.size > 1024 * 1024 * 1024:
                 return Response({
                     'success': False,
-                    'message': '文件大小超过100MB限制'
+                    'message': '文件大小超过1GB限制'
                 }, status=400)
             
             # 保存文件
@@ -1995,6 +3282,13 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
             with open(zip_path, 'wb+') as destination:
                 for chunk in uploaded_file.chunks():
                     destination.write(chunk)
+
+            is_valid_zip, zip_message = validate_shapefile_zip(zip_path)
+            if not is_valid_zip:
+                return Response({
+                    'success': False,
+                    'message': zip_message
+                }, status=400)
             
             logger.info(f"工程矢量ZIP文件已保存: {zip_path}")
             

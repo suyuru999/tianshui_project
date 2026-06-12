@@ -9,8 +9,6 @@ import { API_CONFIG } from '../config/api.js'
 
 // 创建axios实例
 const http = axios.create({
-  // 使用API配置中的完整URL
-  baseURL: API_CONFIG.BASE_URL,
   timeout: API_CONFIG.TIMEOUT,
   headers: API_CONFIG.HEADERS,
   withCredentials: true, // 支持跨域携带cookie
@@ -27,9 +25,17 @@ function getCookie(name) {
 // 请求拦截器
 http.interceptors.request.use(
   (config) => {
+    if (!config.headers) {
+      config.headers = {}
+    }
+
     // 添加认证token
     const token = localStorage.getItem('access_token')
-    if (token) {
+    const skipAuth = Boolean(config.skipAuth)
+    const isTemporaryToken = token === 'temporary_dev_token_for_testing'
+    if (skipAuth || isTemporaryToken) {
+      delete config.headers.Authorization
+    } else if (token) {
       config.headers.Authorization = `Token ${token}`
     }
     

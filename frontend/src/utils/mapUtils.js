@@ -138,7 +138,8 @@ export class MapUtils {
 
     return new TileLayer({
       source: source,
-      visible: options.visible !== false
+      visible: options.visible !== false,
+      opacity: options.opacity !== undefined ? options.opacity : 1
     })
   }
 

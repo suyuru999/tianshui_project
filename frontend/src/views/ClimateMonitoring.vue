@@ -10,7 +10,7 @@
             <span>主界面</span>
           </RouterLink>
           <h1>气候环境监测统计</h1>
-          <p>上传CSV或Excel格式的气候监测数据，系统将自动生成统计图表。</p>
+          <p>上传表格或气候栅格数据，系统将自动生成统计图表。</p>
         </div>
         
         <!-- 数据文件管理 -->
@@ -24,7 +24,7 @@
               <input
                 ref="fileInput"
                 type="file"
-                accept=".csv,.xlsx,.xls"
+                accept=".csv,.xlsx,.xls,.tif,.tiff,.zip"
                 @change="handleFileSelect"
                 style="display: none"
               />
@@ -39,7 +39,7 @@
                 </div>
                 <div class="upload-text">上传气候数据文件</div>
                 <div class="upload-hint">拖放文件到此处或点击选择文件</div>
-                <div class="upload-types">支持的文件类型: .csv, .xlsx, .xls</div>
+                <div class="upload-types">支持 .csv/.xlsx/.xls 表格，.tif/.tiff 气候栅格，或ADF文件夹ZIP</div>
               </div>
               <div class="file-status">
                 {{ selectedFile ? selectedFile.name : '未选择文件' }}
@@ -235,22 +235,22 @@ const validateClimateDataFile = (file) => {
     }
   }
 
-  // 2. 检查文件大小（限制为50MB）
-  const maxSize = 50 * 1024 * 1024 // 50MB
+  // 2. 检查文件大小（栅格数据可能较大，后端会分块统计）
+  const maxSize = 20 * 1024 * 1024 * 1024 // 20GB
   if (file.size > maxSize) {
     return {
       isValid: false,
-      errorMessage: '文件大小不能超过50MB'
+      errorMessage: '文件大小不能超过20GB；更大的数据建议先裁剪或使用后台分片上传'
     }
   }
 
   // 3. 检查文件类型
-  const allowedTypes = ['.csv', '.xlsx', '.xls']
+  const allowedTypes = ['.csv', '.xlsx', '.xls', '.tif', '.tiff', '.zip']
   const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'))
   if (!allowedTypes.includes(fileExtension)) {
     return {
       isValid: false,
-      errorMessage: '只支持CSV和Excel格式文件(.csv, .xlsx, .xls)'
+      errorMessage: '只支持CSV、Excel、GeoTIFF或ADF文件夹ZIP'
     }
   }
 
@@ -1200,7 +1200,7 @@ const drawWindSpeedChart = () => {
 <style scoped>
 .climate-monitoring {
   min-height: 100vh;
-  background: white;
+  background: #f4f7fa;
   padding: 0;
   margin: 0;
   overflow-x: auto;
@@ -1232,15 +1232,16 @@ const drawWindSpeedChart = () => {
   display: flex;
   min-height: 100vh;
   min-width: 1200px; /* 确保最小宽度，避免内容被压缩 */
+  background: #f4f7fa;
 }
 
 .left-panel {
-  width: 350px;
-  background: white;
-  border-right: 1px solid #e8e8e8;
+  width: 360px;
+  background: #ffffff;
+  border-right: 1px solid #dbe6f0;
   display: flex;
   flex-direction: column;
-  box-shadow: 2px 0 12px rgba(0,0,0,0.08);
+  box-shadow: 2px 0 12px rgba(15, 23, 42, 0.06);
   overflow-y: auto;
 }
 
@@ -1265,31 +1266,55 @@ const drawWindSpeedChart = () => {
 }
 
 .panel-header {
-  background: linear-gradient(135deg, #1890ff 0%, #40a9ff 100%);
+  background: linear-gradient(135deg, #1f78d1 0%, #4a9ae6 100%);
   color: white;
-  padding: 20px 16px;
-  text-align: center;
-  box-shadow: 0 2px 8px rgba(24, 144, 255, 0.2);
+  padding: 22px 18px;
+  text-align: left;
+  box-shadow: 0 2px 10px rgba(31, 120, 209, 0.18);
+}
+
+.back-home-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.14);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.back-home-link:hover {
+  background: rgba(255, 255, 255, 0.22);
+  transform: translateY(-1px);
+}
+
+.back-home-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .panel-header h1 {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
+  font-size: 17px;
+  font-weight: 700;
 }
 
 .panel-header p {
-  margin: 8px 0 0 0;
+  margin: 10px 0 0 0;
   font-size: 12px;
-  opacity: 0.9;
-  line-height: 1.4;
+  opacity: 0.92;
+  line-height: 1.6;
 }
 
 /* 功能区块 */
 .section {
-  padding: 20px 16px;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 18px 16px;
+  border-bottom: 1px solid #edf2f7;
 }
 
 .section:last-child {
@@ -1300,9 +1325,9 @@ const drawWindSpeedChart = () => {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
   font-weight: 600;
-  color: #333;
+  color: #2f455c;
   font-size: 15px;
 }
 
@@ -1334,9 +1359,9 @@ const drawWindSpeedChart = () => {
 
 .upload-zone {
   width: 100%;
-  background: #f8f9fa;
-  border: 2px dashed #d9d9d9;
-  border-radius: 8px;
+  background: #f8fbfd;
+  border: 1px dashed #cfddea;
+  border-radius: 10px;
   padding: 24px 16px;
   text-align: center;
   cursor: pointer;
@@ -1348,8 +1373,8 @@ const drawWindSpeedChart = () => {
 }
 
 .upload-zone:hover {
-  border-color: #1890ff;
-  background: #f0f8ff;
+  border-color: #4a9ae6;
+  background: #f2f8fd;
 }
 
 .upload-icon {
@@ -1368,42 +1393,43 @@ const drawWindSpeedChart = () => {
 
 .upload-text {
   font-size: 14px;
-  font-weight: 500;
-  color: #333;
+  font-weight: 600;
+  color: #2f455c;
 }
 
 .upload-hint {
   font-size: 12px;
-  color: #666;
+  color: #667789;
 }
 
 .upload-types {
   font-size: 11px;
-  color: #999;
+  color: #8a98a8;
 }
 
 .file-status {
   font-size: 12px;
-  color: #666;
+  color: #5f7184;
   text-align: center;
   padding: 8px 12px;
-  background: #f8f9fa;
-  border-radius: 4px;
-  border-left: 3px solid #1890ff;
+  background: #f7fafc;
+  border-radius: 8px;
+  border: 1px solid #dbe6f0;
 }
 
 .analysis-btn {
   width: 100%;
-  background: #1890ff;
+  height: 42px;
+  background: #1f78d1;
   color: white;
   border: none;
-  padding: 14px 16px;
+  padding: 0 16px;
   border-radius: 8px;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: 0 2px 4px rgba(24, 144, 255, 0.2);
+  box-shadow: 0 4px 10px rgba(31, 120, 209, 0.18);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1411,9 +1437,9 @@ const drawWindSpeedChart = () => {
 }
 
 .analysis-btn:hover:not(.disabled) {
-  background: #40a9ff;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(24, 144, 255, 0.3);
+  background: #3389dd;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(31, 120, 209, 0.2);
 }
 
 .analysis-btn.disabled {
@@ -1427,11 +1453,11 @@ const drawWindSpeedChart = () => {
 
 /* 进度指示器样式 */
 .progress-section {
-  margin-top: 16px;
+  margin: 16px;
   padding: 16px;
-  background: #f8f9fa;
-  border-radius: 8px;
-  border-left: 3px solid #1890ff;
+  background: #f7fafc;
+  border-radius: 10px;
+  border: 1px solid #dbe6f0;
 }
 
 .progress-bar {
@@ -1474,24 +1500,23 @@ const drawWindSpeedChart = () => {
 
 .progress-text {
   font-size: 13px;
-  color: #666;
+  color: #667789;
   text-align: center;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .error-message {
-  background: #fff2f0;
-  color: #ff4d4f;
+  background: #fff7f7;
+  color: #b42318;
   padding: 16px;
-  border-radius: 8px;
-  margin-top: 16px;
-  border: 1px solid #ffccc7;
+  border-radius: 10px;
+  margin: 0 16px 16px;
+  border: 1px solid #f3d2cf;
   font-size: 14px;
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  box-shadow: 0 2px 8px rgba(255, 77, 79, 0.1);
-  border-left: 4px solid #ff4d4f;
+  box-shadow: 0 8px 20px rgba(180, 35, 24, 0.06);
 }
 
 .error-icon {
@@ -1521,52 +1546,52 @@ const drawWindSpeedChart = () => {
 }
 
 .retry-btn, .dismiss-btn {
-  padding: 8px 16px;
+  height: 34px;
+  padding: 0 16px;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .retry-btn {
-  background: #1890ff;
+  background: #1f78d1;
   color: white;
-  box-shadow: 0 2px 4px rgba(24, 144, 255, 0.2);
+  box-shadow: 0 4px 10px rgba(31, 120, 209, 0.18);
 }
 
 .retry-btn:hover {
-  background: #40a9ff;
+  background: #3389dd;
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(24, 144, 255, 0.3);
+  box-shadow: 0 8px 18px rgba(31, 120, 209, 0.2);
 }
 
 .dismiss-btn {
-  background: #f5f5f5;
-  color: #666;
-  border: 1px solid #d9d9d9;
+  background: #f7fafc;
+  color: #5f7184;
+  border: 1px solid #dbe6f0;
 }
 
 .dismiss-btn:hover {
-  background: #e6f7ff;
-  border-color: #1890ff;
-  color: #1890ff;
+  background: #eef5fb;
+  border-color: #bfd5e8;
+  color: #315f8c;
 }
 
 .success-message {
-  background: #f6ffed;
-  color: #52c41a;
+  background: #f4fbf7;
+  color: #1f7a4f;
   padding: 16px;
-  border-radius: 8px;
-  margin-top: 16px;
-  border: 1px solid #b7eb8f;
+  border-radius: 10px;
+  margin: 0 16px 16px;
+  border: 1px solid #cde7d7;
   font-size: 14px;
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  box-shadow: 0 2px 8px rgba(82, 196, 26, 0.1);
-  border-left: 4px solid #52c41a;
+  box-shadow: 0 8px 20px rgba(31, 122, 79, 0.06);
 }
 
 .success-icon {
@@ -1597,10 +1622,10 @@ const drawWindSpeedChart = () => {
 
 .right-panel {
   flex: 1;
-  background: white;
+  background: #f4f7fa;
   display: flex;
   flex-direction: column;
-  padding: 40px;
+  padding: 20px;
   overflow-y: auto;
   overflow-x: auto;
   max-height: 100vh;
@@ -1628,12 +1653,16 @@ const drawWindSpeedChart = () => {
 
 .placeholder {
   text-align: center;
-  color: #999;
-  min-height: 280px;
+  color: #8a98a8;
+  min-height: 320px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  background: #ffffff;
+  border: 1px dashed #dbe6f0;
+  border-radius: 12px;
+  box-shadow: 0 8px 20px rgba(30, 50, 70, 0.05);
 }
 
 .placeholder-icon {
@@ -1646,7 +1675,7 @@ const drawWindSpeedChart = () => {
 
 .placeholder p {
   font-size: 14px;
-  color: #999;
+  color: #8a98a8;
   margin: 0;
 }
 
@@ -1655,7 +1684,9 @@ const drawWindSpeedChart = () => {
   width: 100%;
   height: 100%;
   display: block;
-  padding: 20px;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 0;
 }
 
 @keyframes fadeIn {
@@ -1665,13 +1696,18 @@ const drawWindSpeedChart = () => {
 
 .stats-overview {
   margin-bottom: 30px;
+  padding: 20px;
+  border: 1px solid #dbe6f0;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(30, 50, 70, 0.06);
 }
 
 .stats-overview h3 {
-  color: #333;
-  margin-bottom: 20px;
+  color: #26384a;
+  margin-bottom: 18px;
   font-size: 18px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .stats-grid {
@@ -1681,15 +1717,15 @@ const drawWindSpeedChart = () => {
 }
 
 .stat-item {
-  background: #f8f9fa;
+  background: #f8fbfd;
   padding: 20px;
-  border-radius: 8px;
-  border-left: 4px solid #007bff;
+  border-radius: 10px;
+  border: 1px solid #dbe6f0;
 }
 
 .stat-label {
-  font-weight: 600;
-  color: #333;
+  font-weight: 700;
+  color: #2f455c;
   margin-bottom: 15px;
   font-size: 14px;
 }
@@ -1713,21 +1749,29 @@ const drawWindSpeedChart = () => {
 }
 
 .stat-value .label {
-  color: #6c757d;
+  color: #6f8192;
   font-size: 12px;
 }
 
 .stat-value .value {
-  color: #333;
+  color: #26384a;
   font-weight: 600;
   font-size: 14px;
 }
 
+.charts-section {
+  padding: 20px;
+  border: 1px solid #dbe6f0;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(30, 50, 70, 0.06);
+}
+
 .charts-section h3 {
-  color: #333;
-  margin-bottom: 25px;
+  color: #26384a;
+  margin-bottom: 20px;
   font-size: 18px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .charts-grid {
@@ -1739,20 +1783,20 @@ const drawWindSpeedChart = () => {
 }
 
 .chart-container {
-  background: #f8f9fa;
+  background: #f8fbfd;
   padding: 20px;
-  border-radius: 8px;
-  border: 1px solid #e9ecef;
+  border-radius: 10px;
+  border: 1px solid #dbe6f0;
   min-width: 400px; /* 确保图表容器最小宽度 */
   overflow: hidden; /* 防止内容溢出 */
 }
 
 .chart-container h4 {
-  color: #495057;
+  color: #2f455c;
   margin-bottom: 15px;
   font-size: 14px;
   text-align: center;
-  font-weight: 500;
+  font-weight: 700;
 }
 
 .chart-container canvas {
@@ -1774,8 +1818,7 @@ const drawWindSpeedChart = () => {
   .left-panel {
     width: 100%;
     border-right: none;
-    border-bottom: 1px solid #e0e0e0;
-    padding: 30px;
+    border-bottom: 1px solid #dbe6f0;
   }
   
   .right-panel {
@@ -1790,7 +1833,6 @@ const drawWindSpeedChart = () => {
   }
   
   .left-panel {
-    padding: 20px;
     width: 100%;
   }
   

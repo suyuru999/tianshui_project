@@ -1,3 +1,5 @@
+from urllib.parse import parse_qsl, urlsplit
+
 from rest_framework import serializers
 from .models import (
     RemoteSensingImage,
@@ -7,6 +9,8 @@ from .models import (
     CitizenFeedback,
     ClimateDataFile,
     ClimateAnalysisResult,
+    BusinessLayer,
+    BusinessLayerAuditLog,
     EcologicalIndexFile,
     EcologicalProjectFile,
     OverlayAnalysisTask
@@ -128,9 +132,10 @@ class RemoteSensingImageUploadSerializer(serializers.ModelSerializer):
                 f"不支持的文件格式。支持的格式: {', '.join(allowed_extensions)}"
             )
         
-        # 检查文件大小（900MB限制）
-        if value.size > 900 * 1024 * 1024:
-            raise serializers.ValidationError("文件大小不能超过900MB")
+        # 检查文件大小（大栅格由后端落盘后分块处理）
+        max_size = 20 * 1024 * 1024 * 1024
+        if value.size > max_size:
+            raise serializers.ValidationError("文件大小不能超过20GB")
         
         return value
     
@@ -233,8 +238,8 @@ class ClimateDataFileUploadSerializer(serializers.ModelSerializer):
     
     def validate_file(self, value):
         """验证文件类型"""
-        if not value.name.lower().endswith(('.csv', '.xlsx', '.xls')):
-            raise serializers.ValidationError("只支持CSV和Excel文件格式")
+        if not value.name.lower().endswith(('.csv', '.xlsx', '.xls', '.tif', '.tiff', '.zip')):
+            raise serializers.ValidationError("只支持CSV、Excel、GeoTIFF或ADF ZIP文件格式")
         return value
 
 
@@ -253,6 +258,164 @@ class ClimateAnalysisResultSerializer(serializers.ModelSerializer):
             'chart_data', 'report_file', 'created_at'
         ]
         read_only_fields = ['id', 'created_at']
+
+
+class BusinessLayerSerializer(serializers.ModelSerializer):
+    """业务图层序列化器"""
+    uploaded_by_username = serializers.SerializerMethodField()
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    layer_type_display = serializers.CharField(source='get_layer_type_display', read_only=True)
+    source_format_display = serializers.CharField(source='get_source_format_display', read_only=True)
+    recent_logs = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BusinessLayer
+        fields = [
+            'id', 'name', 'description', 'layer_type', 'layer_type_display',
+            'source_format', 'source_format_display', 'file', 'status', 'status_display',
+            'service_url', 'service_type_name', 'service_srs', 'style_name', 'style_config', 'sld_content',
+            'service_health_status', 'service_health_message', 'service_checked_at',
+            'geoserver_workspace', 'geoserver_store_name', 'geoserver_layer_name',
+            'wms_url', 'wfs_url', 'wcs_url', 'metadata', 'error_message',
+            'uploaded_by', 'uploaded_by_username', 'created_at', 'updated_at', 'published_at', 'recent_logs'
+        ]
+        read_only_fields = [
+            'id', 'layer_type', 'source_format', 'status',
+            'service_url', 'service_type_name', 'service_srs', 'style_name', 'style_config', 'sld_content',
+            'service_health_status', 'service_health_message', 'service_checked_at',
+            'geoserver_workspace', 'geoserver_store_name', 'geoserver_layer_name',
+            'wms_url', 'wfs_url', 'wcs_url', 'metadata', 'error_message',
+            'uploaded_by', 'created_at', 'updated_at', 'published_at', 'recent_logs'
+        ]
+
+    def get_uploaded_by_username(self, obj):
+        return obj.uploaded_by.username if obj.uploaded_by else None
+
+    def get_recent_logs(self, obj):
+        logs = getattr(obj, 'audit_logs', None)
+        if logs is None:
+            logs = obj.audit_logs.all()
+        recent = list(logs.all()[:5])
+        return BusinessLayerAuditLogSerializer(recent, many=True).data
+
+
+class BusinessLayerUploadSerializer(serializers.ModelSerializer):
+    """业务图层上传序列化器"""
+
+    class Meta:
+        model = BusinessLayer
+        fields = ['id', 'name', 'description', 'file']
+        read_only_fields = ['id']
+
+    def validate_file(self, value):
+        lower_name = value.name.lower()
+        allowed = ('.zip', '.kml', '.tif', '.tiff')
+        if not lower_name.endswith(allowed):
+            raise serializers.ValidationError('只支持 Shapefile ZIP、KML 或 GeoTIFF(.tif/.tiff)')
+        max_size = 20 * 1024 * 1024 * 1024
+        if value.size > max_size:
+            raise serializers.ValidationError('文件大小不能超过20GB')
+        return value
+
+    def validate(self, data):
+        uploaded_file = data.get('file')
+        lower_name = uploaded_file.name.lower() if uploaded_file else ''
+        if lower_name.endswith('.zip'):
+            data['layer_type'] = 'vector'
+            data['source_format'] = 'shapefile'
+        elif lower_name.endswith('.kml'):
+            data['layer_type'] = 'vector'
+            data['source_format'] = 'kml'
+        elif lower_name.endswith(('.tif', '.tiff')):
+            data['layer_type'] = 'raster'
+            data['source_format'] = 'geotiff'
+        return data
+
+
+class BusinessLayerServiceSerializer(serializers.ModelSerializer):
+    """外部标准服务图层接入序列化器"""
+
+    service_type_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    service_srs = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    style_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    class Meta:
+        model = BusinessLayer
+        fields = [
+            'id', 'name', 'description', 'layer_type', 'source_format',
+            'service_url', 'service_type_name', 'service_srs', 'style_name'
+        ]
+        read_only_fields = ['id']
+
+    def validate(self, data):
+        source_format = data.get('source_format')
+        layer_type = data.get('layer_type')
+        service_url = (data.get('service_url') or '').strip()
+        service_type_name = (data.get('service_type_name') or '').strip()
+
+        if source_format not in ['wms', 'wfs', 'wcs']:
+            raise serializers.ValidationError('外部服务图层仅支持 WMS/WFS/WCS')
+        if not service_url:
+            raise serializers.ValidationError('请填写标准服务地址')
+        if layer_type not in ['vector', 'raster']:
+            raise serializers.ValidationError('请指定图层类型')
+
+        if source_format == 'wfs' and layer_type != 'vector':
+            raise serializers.ValidationError('WFS 只能对应矢量图层')
+        if source_format == 'wcs' and layer_type != 'raster':
+            raise serializers.ValidationError('WCS 只能对应栅格图层')
+
+        parsed = urlsplit(service_url)
+        params = {key.lower(): value for key, value in parse_qsl(parsed.query, keep_blank_values=True)}
+        declared_service = (params.get('service') or '').lower()
+        if declared_service and declared_service != source_format:
+            raise serializers.ValidationError(f'服务地址中声明的是 {declared_service.upper()}，与当前选择不一致')
+
+        if source_format == 'wms':
+            layers = params.get('layers') or service_type_name
+            if not layers:
+                raise serializers.ValidationError('WMS 服务请提供图层名称，或在地址中带上 layers 参数')
+        elif source_format == 'wfs':
+            type_name = params.get('typename') or params.get('typenames') or service_type_name
+            if not type_name:
+                raise serializers.ValidationError('WFS 服务请提供 typeName，或在地址中带上 typeName 参数')
+
+        return data
+
+
+class BusinessLayerStyleSerializer(serializers.Serializer):
+    style_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    fill_color = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    stroke_color = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    stroke_width = serializers.FloatField(required=False, min_value=0)
+    fill_opacity = serializers.FloatField(required=False, min_value=0, max_value=1)
+    classification_field = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    color_scheme = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    raster_color_ramp = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    raster_opacity = serializers.FloatField(required=False, min_value=0, max_value=1)
+    nodata = serializers.FloatField(required=False, allow_null=True)
+    sld_content = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    def validate(self, data):
+        fill_color = data.get('fill_color')
+        stroke_color = data.get('stroke_color')
+        for color_value in [fill_color, stroke_color]:
+            if color_value and not color_value.startswith('#'):
+                raise serializers.ValidationError('颜色值请使用 #RRGGBB 格式')
+        return data
+
+
+class BusinessLayerAuditLogSerializer(serializers.ModelSerializer):
+    action_display = serializers.CharField(source='get_action_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = BusinessLayerAuditLog
+        fields = [
+            'id', 'action', 'action_display', 'status', 'status_display',
+            'operator', 'operator_name', 'message', 'details', 'created_at'
+        ]
+        read_only_fields = fields
 
 
 class ClimateAnalysisRequestSerializer(serializers.Serializer):

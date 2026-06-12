@@ -60,6 +60,18 @@ export default defineConfig({
           if (id.includes('/axios/')) {
             return 'vendor-axios'
           }
+          if (id.includes('/echarts/')) {
+            return 'vendor-echarts'
+          }
+          if (
+            id.includes('/shpjs/') ||
+            id.includes('/jszip/') ||
+            id.includes('/pbf/') ||
+            id.includes('/proj4/') ||
+            id.includes('/@mapbox/')
+          ) {
+            return 'vendor-geo'
+          }
           return 'vendor'
         }
       }

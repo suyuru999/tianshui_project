@@ -30,12 +30,12 @@
           </div>
           <div class="upload-text">上传遥感影像文件</div>
           <div class="upload-hint">拖放文件到此处或点击选择文件</div>
-          <div class="upload-types">支持的文件类型: .tif, .tiff, .jpg, .jpeg, .png</div>
+          <div class="upload-types">支持 .tif/.tiff 多波段影像或成果栅格；ADF请上传完整文件夹ZIP</div>
         </div>
         <input 
           ref="fileInput" 
           type="file" 
-          accept=".tif,.tiff,.jpg,.jpeg,.png" 
+          accept=".tif,.tiff,.jpg,.jpeg,.png,.zip" 
           style="display: none"
           @change="handleFileChange"
         >
@@ -100,6 +100,14 @@
           >
             <span class="btn-text">干度指数 (NDBSI)</span>
             <el-tag v-if="hasCachedResult && localIndex === 'dryness'" size="small" type="success" class="cache-tag">已缓存</el-tag>
+          </button>
+          <button
+            class="index-btn"
+            :class="{ active: localIndex === 'rsei' }"
+            @click="onIndexChange('rsei')"
+          >
+            <span class="btn-text">遥感生态指数 (RSEI)</span>
+            <el-tag v-if="hasCachedResult && localIndex === 'rsei'" size="small" type="success" class="cache-tag">已缓存</el-tag>
           </button>
         </div>
       </div>

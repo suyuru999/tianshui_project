@@ -226,7 +226,12 @@ class ClimateDataFile(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255, verbose_name='文件名')
     file = models.FileField(upload_to='climate_data/', verbose_name='文件')
-    file_type = models.CharField(max_length=10, choices=[('csv', 'CSV'), ('xlsx', 'Excel')], default='csv', verbose_name='文件类型')
+    file_type = models.CharField(
+        max_length=10,
+        choices=[('csv', 'CSV'), ('xlsx', 'Excel'), ('tif', 'GeoTIFF'), ('zip', 'ADF ZIP')],
+        default='csv',
+        verbose_name='文件类型'
+    )
     description = models.TextField(blank=True, null=True, verbose_name='描述')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='uploaded', verbose_name='状态')
     uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='上传用户')
@@ -287,6 +292,107 @@ class ClimateAnalysisResult(models.Model):
     
     def __str__(self):
         return f"{self.data_file.name} - {self.analysis_type}"
+
+
+class BusinessLayer(models.Model):
+    """用户上传并发布到GeoServer的业务图层"""
+    LAYER_TYPE_CHOICES = [
+        ('vector', '矢量图层'),
+        ('raster', '栅格图层'),
+    ]
+
+    SOURCE_FORMAT_CHOICES = [
+        ('shapefile', 'Shapefile ZIP'),
+        ('kml', 'KML'),
+        ('geotiff', 'GeoTIFF'),
+        ('wms', '外部WMS服务'),
+        ('wfs', '外部WFS服务'),
+        ('wcs', '外部WCS服务'),
+    ]
+
+    STATUS_CHOICES = [
+        ('uploaded', '已上传'),
+        ('publishing', '发布中'),
+        ('published', '已发布'),
+        ('failed', '发布失败'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=200, verbose_name='图层名称')
+    description = models.TextField(blank=True, null=True, verbose_name='描述')
+    layer_type = models.CharField(max_length=20, choices=LAYER_TYPE_CHOICES, verbose_name='图层类型')
+    source_format = models.CharField(max_length=20, choices=SOURCE_FORMAT_CHOICES, verbose_name='源数据格式')
+    file = models.FileField(upload_to='business_layers/source/', verbose_name='源数据文件', null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='uploaded', verbose_name='发布状态')
+    service_url = models.URLField(max_length=1000, blank=True, null=True, verbose_name='标准服务地址')
+    service_type_name = models.CharField(max_length=255, blank=True, null=True, verbose_name='服务图层名称')
+    service_srs = models.CharField(max_length=64, blank=True, null=True, verbose_name='服务坐标系')
+    style_name = models.CharField(max_length=255, blank=True, null=True, verbose_name='样式名称')
+    style_config = models.JSONField(default=dict, blank=True, verbose_name='样式配置')
+    sld_content = models.TextField(blank=True, null=True, verbose_name='SLD内容')
+    service_health_status = models.CharField(max_length=20, default='unknown', verbose_name='服务可用性状态')
+    service_health_message = models.CharField(max_length=500, blank=True, null=True, verbose_name='服务可用性说明')
+    service_checked_at = models.DateTimeField(blank=True, null=True, verbose_name='服务检测时间')
+
+    geoserver_workspace = models.CharField(max_length=100, blank=True, null=True, verbose_name='GeoServer工作空间')
+    geoserver_store_name = models.CharField(max_length=200, blank=True, null=True, verbose_name='GeoServer数据存储')
+    geoserver_layer_name = models.CharField(max_length=200, blank=True, null=True, verbose_name='GeoServer图层名')
+    wms_url = models.URLField(max_length=1000, blank=True, null=True, verbose_name='WMS地址')
+    wfs_url = models.URLField(max_length=1000, blank=True, null=True, verbose_name='WFS地址')
+    wcs_url = models.URLField(max_length=1000, blank=True, null=True, verbose_name='WCS地址')
+
+    metadata = models.JSONField(default=dict, blank=True, verbose_name='图层元数据')
+    error_message = models.TextField(blank=True, null=True, verbose_name='错误信息')
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='上传用户')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+    published_at = models.DateTimeField(blank=True, null=True, verbose_name='发布时间')
+
+    class Meta:
+        verbose_name = '业务图层'
+        verbose_name_plural = '业务图层'
+        db_table = 'business_layers'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.name} ({self.get_status_display()})"
+
+
+class BusinessLayerAuditLog(models.Model):
+    """业务图层发布、删除、样式配置等操作日志"""
+    ACTION_CHOICES = [
+        ('upload', '上传'),
+        ('publish', '发布'),
+        ('unpublish', '撤销发布'),
+        ('delete', '删除'),
+        ('style_update', '样式更新'),
+        ('health_check', '服务检测'),
+    ]
+
+    STATUS_CHOICES = [
+        ('success', '成功'),
+        ('failed', '失败'),
+        ('info', '信息'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    business_layer = models.ForeignKey(BusinessLayer, on_delete=models.CASCADE, related_name='audit_logs', verbose_name='业务图层')
+    action = models.CharField(max_length=30, choices=ACTION_CHOICES, verbose_name='操作类型')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='info', verbose_name='操作结果')
+    operator = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='操作人')
+    operator_name = models.CharField(max_length=150, blank=True, null=True, verbose_name='操作人名称')
+    message = models.CharField(max_length=500, blank=True, null=True, verbose_name='说明')
+    details = models.JSONField(default=dict, blank=True, verbose_name='日志详情')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        verbose_name = '业务图层审计日志'
+        verbose_name_plural = '业务图层审计日志'
+        db_table = 'business_layer_audit_logs'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.business_layer.name} - {self.get_action_display()} - {self.get_status_display()}"
 
 
 class EcologicalIndexFile(models.Model):

@@ -138,7 +138,13 @@ const handleLayerToggle = (layerType) => {
 }
 
 // 处理地图刷新
-const handleRefreshMap = () => {
+const handleRefreshMap = (payload = {}) => {
+  if (payload.action === 'deleted' && payload.type && layerVisibility[payload.type] !== undefined) {
+    layerVisibility[payload.type] = false
+  }
+  if (payload.action === 'updated' && payload.type && layerVisibility[payload.type] !== undefined) {
+    layerVisibility[payload.type] = true
+  }
   if (mapContainerRef.value) {
     mapContainerRef.value.refreshMap()
   }
@@ -151,6 +157,7 @@ const handleRefreshMap = () => {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  background: #f4f7fa;
 }
 
 .main-container {
@@ -162,12 +169,12 @@ const handleRefreshMap = () => {
 
 /* 左侧控制面板 */
 .left-panel {
-  width: 350px;
-  background: white;
-  border-right: 1px solid #e8e8e8;
+  width: 360px;
+  background: #ffffff;
+  border-right: 1px solid #dbe6f0;
   display: flex;
   flex-direction: column;
-  box-shadow: 2px 0 12px rgba(0,0,0,0.08);
+  box-shadow: 2px 0 12px rgba(15, 23, 42, 0.06);
   overflow-y: auto;
 }
 
@@ -192,31 +199,55 @@ const handleRefreshMap = () => {
 }
 
 .panel-header {
-  background: linear-gradient(135deg, #1890ff 0%, #40a9ff 100%);
+  background: linear-gradient(135deg, #1f78d1 0%, #4a9ae6 100%);
   color: white;
-  padding: 20px 16px;
-  text-align: center;
-  box-shadow: 0 2px 8px rgba(24, 144, 255, 0.2);
+  padding: 22px 18px;
+  text-align: left;
+  box-shadow: 0 2px 10px rgba(31, 120, 209, 0.18);
+}
+
+.back-home-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.14);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.back-home-link:hover {
+  background: rgba(255, 255, 255, 0.22);
+  transform: translateY(-1px);
+}
+
+.back-home-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .panel-header h1 {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
+  font-size: 17px;
+  font-weight: 700;
 }
 
 .panel-header p {
-  margin: 8px 0 0 0;
+  margin: 10px 0 0 0;
   font-size: 12px;
-  opacity: 0.9;
-  line-height: 1.4;
+  opacity: 0.92;
+  line-height: 1.6;
 }
 
 /* 功能区块 */
 .section {
-  padding: 20px 16px;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 18px 16px;
+  border-bottom: 1px solid #edf2f7;
 }
 
 .section:last-child {
@@ -227,9 +258,9 @@ const handleRefreshMap = () => {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
   font-weight: 600;
-  color: #333;
+  color: #2f455c;
   font-size: 15px;
 }
 
@@ -256,14 +287,18 @@ const handleRefreshMap = () => {
 .layer-control {
   display: flex;
   flex-direction: column;
+  border: 1px solid #dbe6f0;
+  border-radius: 10px;
+  background: #f8fbfd;
+  padding: 0 12px;
 }
 
 .layer-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 0;
-  border-bottom: 1px solid #f5f5f5;
+  padding: 14px 0;
+  border-bottom: 1px solid #edf2f7;
   gap: 8px;
 }
 
@@ -276,7 +311,7 @@ const handleRefreshMap = () => {
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: #333;
+  color: #44515f;
   flex: 1;
   min-width: 0;
 }
@@ -331,7 +366,7 @@ const handleRefreshMap = () => {
 }
 
 input:checked + .slider {
-  background-color: #1890ff;
+  background-color: #1f78d1;
 }
 
 input:checked + .slider:before {
@@ -341,8 +376,12 @@ input:checked + .slider:before {
 /* 使用说明 */
 .usage-info {
   font-size: 13px;
-  color: #666;
-  line-height: 1.8;
+  color: #667789;
+  line-height: 1.75;
+  padding: 14px 14px 14px 16px;
+  border: 1px solid #dbe6f0;
+  border-radius: 10px;
+  background: #f8fbfd;
 }
 
 .usage-info p {
@@ -363,7 +402,7 @@ input:checked + .slider:before {
 .map-area {
   flex: 1;
   position: relative;
-  background: #f5f5f5;
+  background: #f4f7fa;
   min-width: 0;
   overflow: hidden;
 }

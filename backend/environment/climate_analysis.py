@@ -8,14 +8,21 @@ import numpy as np
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from django.core.files.base import ContentFile
 from io import StringIO, BytesIO
 import matplotlib
 matplotlib.use('Agg')  # 使用非交互式后端
 import matplotlib.pyplot as plt
-import seaborn as sns
 from datetime import datetime
+import rasterio
+try:
+    import seaborn as sns
+except ImportError:
+    sns = None
+
+from .raster_processing import prepare_raster_upload, raster_band_statistics, preview_array, remove_tree
 
 logger = logging.getLogger(__name__)
 
@@ -462,5 +469,75 @@ def analyze_climate_data(file_path: str, file_type: str) -> Dict:
     Returns:
         Dict: 分析结果
     """
+    if file_type.lower() in ['tif', 'tiff', 'zip']:
+        return analyze_climate_raster(file_path, file_type)
+
     analyzer = ClimateDataAnalyzer(file_path, file_type)
     return analyzer.analyze()
+
+
+def _infer_climate_metric(file_path):
+    name = os.path.basename(file_path).lower()
+    if any(key in name for key in ['降水', 'precip', 'rain']):
+        return 'precipitation'
+    if any(key in name for key in ['湿度', 'humidity', 'wet']):
+        return 'humidity'
+    if any(key in name for key in ['风速', 'wind']):
+        return 'wind_speed'
+    if any(key in name for key in ['温度', '地温', 'lst', 'temp']):
+        return 'temperature'
+    return 'temperature'
+
+
+def _sample_raster_values(path, max_points=240):
+    data = preview_array(path, max_size=700)
+    valid = data[np.isfinite(data)]
+    if valid.size == 0:
+        return []
+    if valid.size > max_points:
+        indices = np.linspace(0, valid.size - 1, max_points).astype(int)
+        valid = valid[indices]
+    return [round(float(value), 4) for value in valid]
+
+
+def analyze_climate_raster(file_path: str, file_type: str) -> Dict:
+    cleanup_dirs = []
+    raster_path = file_path
+    try:
+        if file_type.lower() == 'zip':
+            result_dir = os.path.join(os.path.dirname(file_path), f'{Path(file_path).stem}_converted')
+            os.makedirs(result_dir, exist_ok=True)
+            raster_path, cleanup_dirs = prepare_raster_upload(file_path, result_dir)
+
+        with rasterio.open(raster_path) as dataset:
+            band_count = dataset.count
+            width = dataset.width
+            height = dataset.height
+            crs = str(dataset.crs) if dataset.crs else None
+
+        stats = raster_band_statistics(raster_path, include_classes=False)
+        metric = _infer_climate_metric(file_path)
+        metric_stats = {
+            'avg': round(stats['mean_value'], 4),
+            'max': round(stats['max_value'], 4),
+            'min': round(stats['min_value'], 4),
+            'std': round(stats['std_value'], 4),
+        }
+        statistics = {metric: metric_stats}
+        chart_data = {metric: _sample_raster_values(raster_path)}
+        chart_data['raster_metadata'] = {
+            'filename': os.path.basename(file_path),
+            'bands_count': band_count,
+            'width': width,
+            'height': height,
+            'crs': crs,
+        }
+        return {
+            'statistics': statistics,
+            'chart_data': chart_data,
+            'charts': {},
+            'data_count': width * height,
+        }
+    finally:
+        for cleanup_dir in cleanup_dirs:
+            remove_tree(cleanup_dir)

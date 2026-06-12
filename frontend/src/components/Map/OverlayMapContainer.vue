@@ -38,6 +38,7 @@ import XYZ from 'ol/source/XYZ'
 import TileWMS from 'ol/source/TileWMS'
 // 不再需要坐标转换，直接使用 EPSG:4326
 import { MapUtils } from '../../utils/mapUtils'
+import { API_CONFIG } from '../../config/api.js'
 import OverlayAnalysisPopup from './OverlayAnalysisPopup.vue'
 
 // Props
@@ -54,8 +55,8 @@ const props = defineProps({
 
 // 地图配置
 const TDT_TOKEN = '69874af7f35c741d7132c50f80acad29'
-const GEOSERVER_URL = 'http://localhost:8080/geoserver'
 const GEOSERVER_WORKSPACE = 'tianshuipy'
+const GEOSERVER_OWS_PROXY = `${API_CONFIG.BASE_URL}/${API_CONFIG.VERSION}/environment/geoserver/ows/`
 const TIANSHUI_CENTER = [105.7, 34.6] // 天水市中心坐标
 
 // 地图实例
@@ -103,7 +104,7 @@ const createBaseMap = () => {
 
 // 创建三个WMS图层
 const createWMSLayers = () => {
-  const wmsBaseUrl = `${GEOSERVER_URL}/${GEOSERVER_WORKSPACE}/wms`
+  const wmsBaseUrl = GEOSERVER_OWS_PROXY
   
   // WMS 通用参数（使用 1.1.0 版本，更兼容）
   const wmsCommonParams = {

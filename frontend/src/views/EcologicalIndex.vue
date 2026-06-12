@@ -34,7 +34,7 @@
                 </div>
                 <div class="upload-text">上传土地利用数据文件</div>
                 <div class="upload-hint">拖放文件到此处或点击选择文件</div>
-                <div class="upload-types">支持的文件类型: .tif, .tiff, .zip</div>
+                <div class="upload-types">支持 .tif/.tiff 土地利用分类栅格或 Shapefile ZIP；ADF需先转GeoTIFF</div>
               </div>
               <div class="file-status">
                 {{ fileList.length === 0 ? '未选择文件' : `已选择: ${fileList[0].name}` }}
@@ -123,6 +123,11 @@
         <div class="results-area">
           <!-- 有结果时显示 -->
           <div v-if="hasResults" class="results-content">
+            <div v-if="landuseVisualizationUrl" class="visualization-card">
+              <div class="values-title">土地利用分布与面积比例</div>
+              <img :src="landuseVisualizationUrl" alt="土地利用分布图" class="landuse-visualization" />
+            </div>
+
             <!-- 指数值展示 -->
             <div class="index-values">
               <div class="values-title">计算结果</div>
@@ -138,6 +143,24 @@
                     {{ getStatusText(key, value) }}
                   </div>
                   <div class="value-unit">{{ getIndexUnit(key) }}</div>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="landuseClasses.length > 0" class="landuse-table-card">
+              <div class="chart-title">土地利用分类统计</div>
+              <div class="landuse-table">
+                <div class="table-row table-head">
+                  <span>类型</span>
+                  <span>面积(km²)</span>
+                  <span>比例</span>
+                  <span>像元数</span>
+                </div>
+                <div v-for="item in landuseClasses" :key="item.id" class="table-row">
+                  <span>{{ item.name }}</span>
+                  <span>{{ item.area_km2.toFixed(3) }}</span>
+                  <span>{{ item.ratio_percent.toFixed(2) }}%</span>
+                  <span>{{ item.pixels }}</span>
                 </div>
               </div>
             </div>
@@ -197,6 +220,8 @@ export default {
     const fileList = ref([])
     const globalLoading = ref(false)
     const uploadLoading = ref(false)
+    const landuseVisualizationUrl = ref('')
+    const landuseStatistics = ref(null)
     
     // 监听 globalLoading 的变化
     watch(globalLoading, (newVal, oldVal) => {
@@ -228,6 +253,13 @@ export default {
     
     // 计算属性
     const hasResults = computed(() => Object.keys(indexResults).length > 0)
+    const landuseClasses = computed(() => {
+      const classes = landuseStatistics.value?.classes || {}
+      return Object.entries(classes)
+        .map(([id, item]) => ({ id, ...item }))
+        .filter(item => item.pixels > 0)
+        .sort((a, b) => b.area_km2 - a.area_km2)
+    })
     
     // 方法
     const triggerFileUpload = () => {
@@ -271,7 +303,13 @@ export default {
     const beforeUpload = (file) => {
       const isValidFormat = /\.(tif|tiff|zip)$/i.test(file.name)
       if (!isValidFormat) {
-        ElMessage.error('只支持 GeoTIFF(.tif/.tiff) 或 Shapefile 压缩包(.zip)')
+        ElMessage.error('只支持 GeoTIFF(.tif/.tiff) 或 Shapefile 压缩包(.zip)，ADF请先转为GeoTIFF')
+        return false
+      }
+
+      const maxSize = 10 * 1024 * 1024 * 1024
+      if (file.size > maxSize) {
+        ElMessage.error('当前演示上传限制为10GB；更大的栅格请先裁剪或走后台分块处理')
         return false
       }
       
@@ -311,6 +349,8 @@ export default {
       Object.keys(indexResults).forEach(key => {
         delete indexResults[key]
       })
+      landuseVisualizationUrl.value = ''
+      landuseStatistics.value = null
       // 重置指数状态
       structureIndices.forEach(index => {
         index.calculated = false
@@ -341,29 +381,37 @@ export default {
       globalLoading.value = true
       try {
         const file = fileList.value[0]
-        const formData = new FormData()
-        formData.append('landuse_file', file)
+        const structureFormData = new FormData()
+        structureFormData.append('landuse_file', file)
         
         // 计算生态环境结构指数
         ElMessage.info('正在计算生态环境结构指数...')
-        const structureResponse = await http.post(buildApiUrl(API_ENDPOINTS.ECOLOGICAL_INDICES.STRUCTURE_INDICES), formData, {
+        const structureResponse = await http.post(buildApiUrl(API_ENDPOINTS.ECOLOGICAL_INDICES.STRUCTURE_INDICES), structureFormData, {
           headers: {
             'Content-Type': 'multipart/form-data'
-          }
+          },
+          skipAuth: true
         })
+
+        const stressFormData = new FormData()
+        stressFormData.append('landuse_file', file)
         
         // 计算生态环境胁迫指数
         ElMessage.info('正在计算生态环境胁迫指数...')
-        const stressResponse = await http.post(buildApiUrl(API_ENDPOINTS.ECOLOGICAL_INDICES.STRESS_INDICES), formData, {
+        const stressResponse = await http.post(buildApiUrl(API_ENDPOINTS.ECOLOGICAL_INDICES.STRESS_INDICES), stressFormData, {
           headers: {
             'Content-Type': 'multipart/form-data'
-          }
+          },
+          skipAuth: true
         })
         
         // 处理结果
         if (structureResponse.summary && stressResponse.summary) {
           // 合并所有指数结果
           Object.assign(indexResults, structureResponse.summary, stressResponse.summary)
+          const visualization = structureResponse.visualization || stressResponse.visualization
+          landuseVisualizationUrl.value = visualization?.visualization_file_url || ''
+          landuseStatistics.value = visualization?.landuse_statistics || null
           
           // 更新指数状态
           const allIndices = [...structureIndices, ...stressIndices]
@@ -434,12 +482,17 @@ export default {
         response = await http.post(apiEndpoint, formData, {
           headers: {
             'Content-Type': 'multipart/form-data'
-          }
+          },
+          skipAuth: true
         })
         
         // 处理结果
         if (response.summary && response.summary[index.apiKey] !== undefined) {
           indexResults[index.apiKey] = response.summary[index.apiKey]
+          if (response.visualization) {
+            landuseVisualizationUrl.value = response.visualization.visualization_file_url || landuseVisualizationUrl.value
+            landuseStatistics.value = response.visualization.landuse_statistics || landuseStatistics.value
+          }
           index.calculated = true
           
           ElMessage.success(`${index.name} 计算完成`)
@@ -779,6 +832,8 @@ export default {
       stressIndices,
       indexResults,
       hasResults,
+      landuseVisualizationUrl,
+      landuseClasses,
       radarChart,
       barChart,
       triggerFileUpload,
@@ -803,22 +858,25 @@ export default {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  background: #f4f7fa;
 }
 
 .ecological-container {
   display: flex;
   width: 100%;
   height: 100%;
+  min-width: 1200px;
 }
 
 /* 左侧控制面板 */
 .left-panel {
-  width: 350px;
-  background: #fafafa;
-  border-right: 1px solid #e8e8e8;
+  width: 360px;
+  background: #ffffff;
+  border-right: 1px solid #dbe6f0;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  box-shadow: 2px 0 12px rgba(15, 23, 42, 0.06);
 }
 
 /* 自定义滚动条样式 */
@@ -842,31 +900,55 @@ export default {
 }
 
 .panel-header {
-  background: linear-gradient(135deg, #1890ff 0%, #40a9ff 100%);
+  background: linear-gradient(135deg, #1f78d1 0%, #4a9ae6 100%);
   color: white;
-  padding: 20px 16px;
-  text-align: center;
-  box-shadow: 0 2px 8px rgba(24, 144, 255, 0.2);
+  padding: 22px 18px;
+  text-align: left;
+  box-shadow: 0 2px 10px rgba(31, 120, 209, 0.18);
+}
+
+.back-home-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.14);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.back-home-link:hover {
+  background: rgba(255, 255, 255, 0.22);
+  transform: translateY(-1px);
+}
+
+.back-home-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .panel-header h1 {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
+  font-size: 17px;
+  font-weight: 700;
 }
 
 .panel-header p {
-  margin: 8px 0 0 0;
+  margin: 10px 0 0 0;
   font-size: 12px;
-  opacity: 0.9;
-  line-height: 1.4;
+  opacity: 0.92;
+  line-height: 1.6;
 }
 
 /* 功能区块 */
 .section {
-  padding: 20px 16px;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 18px 16px;
+  border-bottom: 1px solid #edf2f7;
 }
 
 .section:last-child {
@@ -877,9 +959,9 @@ export default {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
   font-weight: 600;
-  color: #333;
+  color: #2f455c;
   font-size: 15px;
 }
 
@@ -931,9 +1013,9 @@ export default {
 
 .upload-zone {
   width: 100%;
-  background: #f8f9fa;
-  border: 2px dashed #d9d9d9;
-  border-radius: 8px;
+  background: #f8fbfd;
+  border: 1px dashed #cfddea;
+  border-radius: 10px;
   padding: 24px 16px;
   text-align: center;
   cursor: pointer;
@@ -945,8 +1027,8 @@ export default {
 }
 
 .upload-zone:hover {
-  border-color: #1890ff;
-  background: #f0f8ff;
+  border-color: #4a9ae6;
+  background: #f2f8fd;
 }
 
 .upload-icon {
@@ -965,35 +1047,35 @@ export default {
 
 .upload-text {
   font-size: 14px;
-  font-weight: 500;
-  color: #333;
+  font-weight: 600;
+  color: #2f455c;
 }
 
 .upload-hint {
   font-size: 12px;
-  color: #666;
+  color: #667789;
 }
 
 .upload-types {
   font-size: 11px;
-  color: #999;
+  color: #8a98a8;
 }
 
 .re-upload-btn {
   width: 100%;
-  height: 32px;
-  background: #f5f5f5;
-  border: 1px solid #d9d9d9;
-  color: #666;
-  font-weight: 500;
-  border-radius: 6px;
+  height: 34px;
+  background: #f7fafc;
+  border: 1px solid #dbe6f0;
+  color: #5f7184;
+  font-weight: 600;
+  border-radius: 8px;
   transition: all 0.2s ease;
 }
 
 .re-upload-btn:hover {
-  background: #e6f7ff;
-  border-color: #1890ff;
-  color: #1890ff;
+  background: #eef5fb;
+  border-color: #bfd5e8;
+  color: #315f8c;
   transform: translateY(-1px);
 }
 
@@ -1052,26 +1134,27 @@ export default {
 
 .file-status {
   font-size: 12px;
-  color: #666;
+  color: #5f7184;
   text-align: center;
-  padding: 8px 12px;
-  background: #f8f9fa;
-  border-radius: 4px;
-  border-left: 3px solid #1890ff;
+  padding: 9px 12px;
+  background: #f7fafc;
+  border-radius: 8px;
+  border: 1px solid #dbe6f0;
 }
 
 .start-analysis-btn {
   width: 100%;
-  background: #1890ff;
+  height: 42px;
+  background: #1f78d1;
   color: white;
   border: none;
-  padding: 14px 16px;
+  padding: 0 16px;
   border-radius: 8px;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: 0 2px 4px rgba(24, 144, 255, 0.2);
+  box-shadow: 0 4px 10px rgba(31, 120, 209, 0.18);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1079,9 +1162,9 @@ export default {
 }
 
 .start-analysis-btn:hover:not(:disabled) {
-  background: #40a9ff;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(24, 144, 255, 0.3);
+  background: #3389dd;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(31, 120, 209, 0.2);
 }
 
 .start-analysis-btn:disabled {
@@ -1108,9 +1191,9 @@ export default {
 }
 
 .group-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: #555;
+  font-size: 13px;
+  font-weight: 700;
+  color: #4c6278;
   margin: 0 0 8px 0;
 }
 
@@ -1127,14 +1210,14 @@ export default {
   width: 100% !important;
   min-width: 100% !important;
   max-width: 100% !important;
-  height: 40px !important;
+  height: 42px !important;
   text-align: center !important;
   padding: 0 16px !important;
-  border-radius: 6px;
+  border-radius: 8px;
   transition: all 0.2s ease;
-  background: #f8f9fa !important;
-  border: 1px solid #e9ecef !important;
-  color: #333 !important;
+  background: #f8fbfd !important;
+  border: 1px solid #dbe6f0 !important;
+  color: #2f455c !important;
   margin: 0 !important;
   box-sizing: border-box !important;
   display: flex !important;
@@ -1143,10 +1226,11 @@ export default {
 }
 
 .index-btn:hover:not(:disabled) {
-  transform: translateX(4px);
-  background: #e6f7ff !important;
-  border-color: #1890ff !important;
-  color: #1890ff !important;
+  transform: translateY(-1px);
+  background: #eef5fb !important;
+  border-color: #bfd5e8 !important;
+  color: #315f8c !important;
+  box-shadow: 0 6px 16px rgba(49, 95, 140, 0.08);
 }
 
 .index-btn:disabled {
@@ -1173,7 +1257,7 @@ export default {
 .right-panel {
   flex: 1;
   position: relative;
-  background: #f5f5f5;
+  background: #f4f7fa;
   min-height: 500px;
   height: 100vh;
   display: flex;
@@ -1213,10 +1297,10 @@ export default {
 
 .results-content {
   flex: 1;
-  padding: 24px;
+  padding: 20px;
   overflow-y: auto;
   width: 100%;
-  max-width: 1400px;
+  max-width: 1320px;
   margin: 0 auto;
 }
 
@@ -1248,8 +1332,13 @@ export default {
 }
 
 .placeholder-text {
-  color: #9ca3af;
-  font-size: 1.1rem;
+  padding: 28px 32px;
+  border: 1px dashed #dbe6f0;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #8a98a8;
+  font-size: 14px;
+  box-shadow: 0 8px 20px rgba(30, 50, 70, 0.05);
 }
 
 /* 结果展示样式 */
@@ -1258,11 +1347,59 @@ export default {
   width: 100%;
 }
 
+.visualization-card,
+.landuse-table-card {
+  margin-bottom: 24px;
+  padding: 20px;
+  border: 1px solid #dbe6f0;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(30, 50, 70, 0.06);
+}
+
+.landuse-visualization {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.landuse-table {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.table-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr 1fr;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #eef2f7;
+  color: #374151;
+  font-size: 13px;
+}
+
+.table-row:last-child {
+  border-bottom: none;
+}
+
+.table-head {
+  color: #26384a;
+  font-weight: 700;
+  background: #f3f8fc;
+}
+
 .values-title {
-  font-size: 1.3rem;
-  font-weight: 600;
-  color: #1f2937;
-  margin-bottom: 20px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #26384a;
+  margin-bottom: 18px;
 }
 
 .values-grid {
@@ -1275,29 +1412,30 @@ export default {
 }
 
 .value-item {
-  background: #f9fafb;
+  background: #ffffff;
   padding: 20px;
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  border: 1px solid #dbe6f0;
   text-align: center;
   min-height: 120px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  box-shadow: 0 8px 20px rgba(30, 50, 70, 0.05);
 }
 
 .value-name {
-  font-size: 1rem;
-  color: #6b7280;
+  font-size: 14px;
+  color: #667789;
   margin-bottom: 12px;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.3;
 }
 
 .value-number {
-  font-size: 2.2rem;
+  font-size: 32px;
   font-weight: 700;
-  color: #1f2937;
+  color: #26384a;
   margin-bottom: 12px;
   line-height: 1.2;
 }
@@ -1313,8 +1451,8 @@ export default {
 }
 
 .value-unit {
-  font-size: 0.85rem;
-  color: #9ca3af;
+  font-size: 12px;
+  color: #8a98a8;
   font-weight: 500;
 }
 
@@ -1357,16 +1495,17 @@ export default {
 }
 
 .chart-container {
-  background: #f9fafb;
+  background: #ffffff;
   border-radius: 8px;
   padding: 20px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #dbe6f0;
+  box-shadow: 0 10px 24px rgba(30, 50, 70, 0.06);
 }
 
 .chart-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #374151;
+  font-size: 16px;
+  font-weight: 700;
+  color: #26384a;
   margin-bottom: 16px;
   text-align: center;
 }
@@ -1380,25 +1519,27 @@ export default {
 .download-section {
   text-align: center;
   padding-top: 20px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid #dbe6f0;
 }
 
 /* 移除不再需要的loading-container样式 */
 
 .download-btn {
-  height: 44px;
+  height: 42px;
   padding: 0 24px;
-  background: #10b981;
+  background: #1f78d1;
   border: none;
   color: white;
-  font-weight: 500;
+  font-weight: 600;
   border-radius: 8px;
   transition: all 0.2s ease;
+  box-shadow: 0 4px 10px rgba(31, 120, 209, 0.18);
 }
 
 .download-btn:hover {
-  background: #059669;
+  background: #3389dd;
   transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(31, 120, 209, 0.2);
 }
 
 /* 响应式设计 */

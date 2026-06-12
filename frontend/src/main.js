@@ -9,6 +9,9 @@ import './styles/business-theme.css'
 
 import App from './App.vue'
 import router from './router'
+import { installProductionLogGuard } from './utils/logGuard.js'
+
+installProductionLogGuard()
 
 const app = createApp(App)
 const pinia = createPinia()

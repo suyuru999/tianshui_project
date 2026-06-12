@@ -80,6 +80,19 @@
         <div v-if="uploadStatus[selectedType]" :class="['status-message', uploadStatus[selectedType].type]">
           {{ uploadStatus[selectedType].message }}
         </div>
+        <div v-if="publishedLayers[selectedType]" class="published-row">
+          <div>
+            <strong>{{ currentDataType.label }}</strong>
+            <span>已发布到地图</span>
+          </div>
+          <button
+            class="delete-layer-btn"
+            :disabled="deleting[selectedType]"
+            @click="deleteUploadedLayer(selectedType)"
+          >
+            {{ deleting[selectedType] ? '删除中...' : '删除图层' }}
+          </button>
+        </div>
       </div>
 
       <!-- 数据说明 -->
@@ -99,7 +112,8 @@
 
 <script setup>
 import { ref, reactive, computed } from 'vue'
-import axios from 'axios'
+import request from '../../utils/http.js'
+import { API_ENDPOINTS, buildApiUrl } from '../../config/api.js'
 
 // Props
 defineProps({
@@ -186,6 +200,18 @@ const uploadStatus = reactive({
   engineering: null
 })
 
+const publishedLayers = reactive({
+  ecology: true,
+  economy: true,
+  engineering: true
+})
+
+const deleting = reactive({
+  ecology: false,
+  economy: false,
+  engineering: false
+})
+
 // 触发文件选择
 const triggerFileInput = (type) => {
   if (type === 'ecology' && ecologyInput.value) {
@@ -249,27 +275,26 @@ const uploadFile = async (type) => {
     // 根据类型确定上传端点（注意：URL必须以斜杠结尾）
     let endpoint = ''
     if (type === 'ecology') {
-      endpoint = '/api/v1/environment/overlay-analysis-tasks/upload-ecology-raster/'
+      endpoint = buildApiUrl(API_ENDPOINTS.OVERLAY_ANALYSIS.UPLOAD_ECOLOGY_RASTER)
     } else if (type === 'economy') {
-      endpoint = '/api/v1/environment/overlay-analysis-tasks/upload-economy-vector/'
+      endpoint = buildApiUrl(API_ENDPOINTS.OVERLAY_ANALYSIS.UPLOAD_ECONOMY_VECTOR)
     } else if (type === 'engineering') {
-      endpoint = '/api/v1/environment/overlay-analysis-tasks/upload-engineering-vector/'
+      endpoint = buildApiUrl(API_ENDPOINTS.OVERLAY_ANALYSIS.UPLOAD_ENGINEERING_VECTOR)
     }
     
-    const response = await axios.post(endpoint, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      },
+    const response = await request.upload(endpoint, formData, {
+      skipAuth: true,
       onUploadProgress: (progressEvent) => {
         const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
         uploadProgress[type] = percentCompleted
       }
     })
     
-    if (response.data.success) {
+    if (response.success) {
+      publishedLayers[type] = true
       uploadStatus[type] = {
         type: 'success',
-        message: response.data.message || '上传成功！数据已发布到GeoServer'
+        message: response.message || '上传成功！数据已发布到GeoServer'
       }
       
       // 3秒后清空文件选择
@@ -279,11 +304,11 @@ const uploadFile = async (type) => {
       }, 3000)
       
       // 触发地图刷新事件
-      emitRefreshMap()
+      emitRefreshMap(type, 'updated')
     } else {
       uploadStatus[type] = {
         type: 'error',
-        message: response.data.message || '上传失败'
+        message: response.message || '上传失败'
       }
     }
   } catch (error) {
@@ -317,12 +342,41 @@ const uploadFile = async (type) => {
   }
 }
 
+const deleteUploadedLayer = async (type) => {
+  deleting[type] = true
+  uploadStatus[type] = { type: 'info', message: '正在删除图层...' }
+  try {
+    const endpoint = buildApiUrl(API_ENDPOINTS.OVERLAY_ANALYSIS.DELETE_UPLOADED_LAYER)
+    const response = await request.delete(endpoint, {
+      skipAuth: true,
+      params: { data_type: type }
+    })
+
+    publishedLayers[type] = false
+    files[type] = null
+    uploadProgress[type] = 0
+    uploadStatus[type] = {
+      type: response.success ? 'success' : 'error',
+      message: response.message || '图层已删除'
+    }
+    emitRefreshMap(type, 'deleted')
+  } catch (error) {
+    console.error('删除图层失败:', error)
+    uploadStatus[type] = {
+      type: 'error',
+      message: error.response?.data?.message || error.response?.data?.error || '删除图层失败'
+    }
+  } finally {
+    deleting[type] = false
+  }
+}
+
 // 定义事件
 const emit = defineEmits(['close', 'refresh-map'])
 
 // 触发地图刷新
-const emitRefreshMap = () => {
-  emit('refresh-map')
+const emitRefreshMap = (type = selectedType.value, action = 'updated') => {
+  emit('refresh-map', { type, action })
 }
 </script>
 
@@ -613,6 +667,53 @@ const emitRefreshMap = () => {
   background: #f0f5ff;
   color: #1890ff;
   border: 1px solid #adc6ff;
+}
+
+.published-row {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #d6e8fa;
+  border-radius: 7px;
+  background: #f7fbff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #315f8c;
+  font-size: 13px;
+}
+
+.published-row div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.published-row span {
+  color: #6b7f93;
+  font-size: 12px;
+}
+
+.delete-layer-btn {
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #ffccc7;
+  border-radius: 5px;
+  background: #fff;
+  color: #cf1322;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.delete-layer-btn:hover:not(:disabled) {
+  background: #fff1f0;
+}
+
+.delete-layer-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .data-requirements {

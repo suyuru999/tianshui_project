@@ -175,11 +175,12 @@ import { defaults as defaultControls, ScaleLine } from 'ol/control'
 import { defaults as defaultInteractions, Draw, Modify, Select, Snap } from 'ol/interaction'
 import { createBox } from 'ol/interaction/Draw'
 import { click } from 'ol/events/condition'
-import { fromLonLat, toLonLat } from 'ol/proj'
+import { fromLonLat, toLonLat, transformExtent } from 'ol/proj'
 import VectorLayer from 'ol/layer/Vector'
 import VectorSource from 'ol/source/Vector'
 import GeoJSON from 'ol/format/GeoJSON'
 import KML from 'ol/format/KML'
+import { bbox as bboxStrategy } from 'ol/loadingstrategy'
 import { Circle as CircleStyle, Fill, Icon, Stroke, Style, Text } from 'ol/style'
 import { Circle as CircleGeom, LineString, Point, Polygon } from 'ol/geom'
 import { fromCircle } from 'ol/geom/Polygon'
@@ -187,6 +188,34 @@ import { getArea as getGeodesicArea, getLength as getGeodesicLength } from 'ol/s
 import Feature from 'ol/Feature'
 import shp from 'shpjs'
 import { MapUtils } from '../../utils/mapUtils'
+import { API_CONFIG } from '../../config/api.js'
+
+const REAL_LAYER_DEFINITIONS = [
+  {
+    id: 'watershed-boundary',
+    name: '藉河流域范围',
+    url: '/real-layers/watershed_boundary.geojson',
+    styleType: 'watershed',
+    visible: false
+  },
+  {
+    id: 'watershed-points',
+    name: '藉河流域点数据',
+    url: '/real-layers/watershed_points.geojson',
+    styleType: 'station',
+    visible: false
+  },
+  {
+    id: 'townships',
+    name: '乡镇行政区划',
+    url: '/real-layers/townships.geojson',
+    styleType: 'admin',
+    visible: false
+  }
+]
+
+const parseShapefileZip = (arrayBuffer) => shp(arrayBuffer)
+const geoserverProxyUrl = `${API_CONFIG.BASE_URL}/${API_CONFIG.VERSION}/environment/geoserver/ows/`
 
 const mapEl = ref(null)
 const currentMapType = ref('tdt_vec')
@@ -249,12 +278,6 @@ const drawLayer = new VectorLayer({
   style: feature => getDrawingStyle(feature, isFeatureSelected(feature))
 })
 drawLayer.setZIndex(1000)
-
-const demoOverlayDefinitions = [
-  { id: 'water', name: '水系分布 (示例)', geometry: new LineString([fromLonLat([113.6, 30.2]), fromLonLat([114.2, 30.55]), fromLonLat([115.0, 30.7])]), styleType: 'water' },
-  { id: 'eco', name: '生态保护红线 (示例)', geometry: new Polygon([[fromLonLat([113.95, 30.1]), fromLonLat([114.65, 30.15]), fromLonLat([114.75, 30.75]), fromLonLat([114.05, 30.85]), fromLonLat([113.95, 30.1])]]), styleType: 'eco' },
-  { id: 'station', name: '监测点位 (示例)', geometry: new Point(fromLonLat([114.3162, 30.5810])), styleType: 'station' }
-]
 
 onMounted(() => {
   initMap()
@@ -323,7 +346,7 @@ function initMap() {
   })
   window.addEventListener('keydown', handleKeydown)
 
-  demoOverlayDefinitions.forEach(item => addDemoLayer(item))
+  loadRealBusinessLayers()
   syncLayerZIndexes()
   bindMapEvents()
 }
@@ -410,28 +433,179 @@ function bindBaseLayerLoading(layer) {
   })
 }
 
-function addDemoLayer(definition) {
-  const source = new VectorSource({
-    features: [new Feature({ geometry: definition.geometry, layerType: definition.styleType })]
+async function loadRealBusinessLayers() {
+  for (const definition of REAL_LAYER_DEFINITIONS) {
+    try {
+      const response = await fetch(definition.url)
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      const geojson = definition.url.toLowerCase().endsWith('.zip')
+        ? await parseShapefileZip(await response.arrayBuffer())
+        : await response.json()
+      const source = createVectorSourceFromGeoJson(geojson)
+      if (source.getFeatures().length === 0) {
+        throw new Error('未解析到有效要素')
+      }
+
+      const layer = new VectorLayer({
+        source,
+        visible: definition.visible,
+        style: getBusinessStyle(definition.styleType)
+      })
+      map.addLayer(layer)
+      managedLayers.push({
+        id: definition.id,
+        name: definition.name,
+        group: '业务图层',
+        visible: definition.visible,
+        layer
+      })
+    } catch (error) {
+      console.error(`真实图层加载失败: ${definition.name}`, error)
+      ElMessage.warning(`${definition.name} 加载失败，请检查真实图层文件`)
+    }
+  }
+  syncLayerZIndexes()
+}
+
+function createVectorSourceFromGeoJson(geojson) {
+  const source = new VectorSource()
+  const collections = Array.isArray(geojson) ? geojson : [geojson]
+  collections.forEach(collection => {
+    source.addFeatures(new GeoJSON().readFeatures(collection, {
+      dataProjection: 'EPSG:4326',
+      featureProjection: 'EPSG:3857'
+    }))
   })
+  return source
+}
+
+function addVectorLayerFromSource({ id, name, source, styleType = 'eco', visible = true, temporary = false }) {
   const layer = new VectorLayer({
     source,
-    visible: false,
-    style: getBusinessStyle(definition.styleType)
+    visible,
+    style: getBusinessStyle(styleType)
   })
   map.addLayer(layer)
   managedLayers.push({
-    id: definition.id,
-    name: definition.name,
-    group: '业务图层',
-    visible: false,
+    id,
+    name,
+    group: temporary ? '临时图层' : '业务图层',
+    visible,
+    temporary,
     layer
   })
+  syncLayerZIndexes()
+  return layer
+}
+
+function parseWmsEndpoint(wmsUrl) {
+  const url = new URL(wmsUrl)
+  const layers = url.searchParams.get('layers') || url.searchParams.get('LAYERS')
+  return {
+    baseUrl: `${url.origin}${url.pathname}`,
+    layers
+  }
+}
+
+function parseWfsEndpoint(wfsUrl) {
+  const url = new URL(wfsUrl)
+  const typeName = url.searchParams.get('typeName')
+    || url.searchParams.get('typename')
+    || url.searchParams.get('TYPENAME')
+    || url.searchParams.get('TYPENAMES')
+  return {
+    baseUrl: `${url.origin}${url.pathname}`,
+    typeName
+  }
+}
+
+function addBusinessServiceLayer(serviceLayer, visible = false) {
+  if (!serviceLayer?.id) return false
+  const existing = managedLayers.find(item => item.id === serviceLayer.id)
+  if (existing) {
+    existing.visible = visible
+    existing.serviceLayer = serviceLayer
+    existing.layer.setVisible(visible)
+    if (visible) fitServiceLayer(existing)
+    return true
+  }
+
+  let layer = null
+  const isExternalService = Boolean(serviceLayer?.metadata?.is_external_service)
+  if (serviceLayer.layer_type === 'vector' && serviceLayer.wfs_url && serviceLayer.geoserver_layer_name) {
+    const internalTypeName = serviceLayer.geoserver_workspace
+      ? `${serviceLayer.geoserver_workspace}:${serviceLayer.geoserver_layer_name}`
+      : serviceLayer.geoserver_layer_name
+    const { baseUrl, typeName: externalTypeName } = parseWfsEndpoint(serviceLayer.wfs_url)
+    const wfsUrl = isExternalService ? baseUrl : geoserverProxyUrl
+    const typeName = isExternalService ? (externalTypeName || serviceLayer.geoserver_layer_name) : internalTypeName
+    layer = MapUtils.loadWFS(wfsUrl, typeName, {
+      visible,
+      strategy: bboxStrategy,
+      style: getBusinessStyle('eco')
+    })
+  } else if (serviceLayer.wms_url) {
+    const { baseUrl, layers } = parseWmsEndpoint(serviceLayer.wms_url)
+    if (!layers) return false
+    layer = MapUtils.loadWMS(isExternalService ? baseUrl : geoserverProxyUrl, layers, {
+      visible,
+      opacity: serviceLayer.layer_type === 'raster' ? 0.72 : 0.85
+    })
+  }
+
+  if (!layer) return false
+  map.addLayer(layer)
+  managedLayers.push({
+    id: serviceLayer.id,
+    name: serviceLayer.name,
+    group: '业务图层',
+    visible,
+    layer,
+    serviceLayer
+  })
+  syncLayerZIndexes()
+  if (visible) {
+    fitServiceLayer({ layer, serviceLayer })
+  }
+  return true
+}
+
+function getServiceLayerExtent(serviceLayer) {
+  const bounds = serviceLayer?.metadata?.bounds
+  if (!Array.isArray(bounds) || bounds.length !== 4) return null
+  const extent = bounds.map(Number)
+  if (extent.some(value => !Number.isFinite(value))) return null
+  const crs = serviceLayer.metadata?.crs || 'EPSG:4326'
+  try {
+    return crs === 'EPSG:3857' ? extent : transformExtent(extent, crs, 'EPSG:3857')
+  } catch (error) {
+    console.warn('图层范围坐标转换失败，按经纬度处理:', error)
+    return transformExtent(extent, 'EPSG:4326', 'EPSG:3857')
+  }
+}
+
+function fitServiceLayer(item) {
+  const extent = getServiceLayerExtent(item.serviceLayer)
+  if (extent) {
+    map.getView().fit(extent, { padding: [70, 70, 70, 70], duration: 350, maxZoom: 14 })
+    return
+  }
+  fitLayer(item.layer)
 }
 
 function getBusinessStyle(type) {
   const styles = {
     water: new Style({ stroke: new Stroke({ color: '#1677ff', width: 4 }) }),
+    watershed: new Style({
+      stroke: new Stroke({ color: '#0f766e', width: 3 }),
+      fill: new Fill({ color: 'rgba(15, 118, 110, 0.12)' })
+    }),
+    admin: new Style({
+      stroke: new Stroke({ color: '#8b5cf6', width: 1.4 }),
+      fill: new Fill({ color: 'rgba(139, 92, 246, 0.06)' })
+    }),
     eco: new Style({
       stroke: new Stroke({ color: '#1f8f4d', width: 2 }),
       fill: new Fill({ color: 'rgba(64, 169, 91, 0.18)' })
@@ -763,34 +937,19 @@ async function loadLocalFile(file) {
   if (lowerName.endsWith('.zip')) {
     try {
       const arrayBuffer = await file.arrayBuffer()
-      const geojson = await shp(arrayBuffer)
-      const source = new VectorSource()
-      const collections = Array.isArray(geojson) ? geojson : [geojson]
-      collections.forEach(collection => {
-        source.addFeatures(new GeoJSON().readFeatures(collection, {
-          dataProjection: 'EPSG:4326',
-          featureProjection: 'EPSG:3857'
-        }))
-      })
+      const geojson = await parseShapefileZip(arrayBuffer)
+      const source = createVectorSourceFromGeoJson(geojson)
       if (source.getFeatures().length === 0) {
         ElMessage.warning('Shapefile ZIP 中未解析到有效要素')
         return false
       }
-      const layer = new VectorLayer({
-        source,
-        visible: true,
-        style: getBusinessStyle('eco')
-      })
-      map.addLayer(layer)
-      managedLayers.push({
+      const layer = addVectorLayerFromSource({
         id: `temp-${Date.now()}`,
         name: file.name,
-        group: '临时图层',
-        visible: true,
-        temporary: true,
-        layer
+        source,
+        styleType: 'eco',
+        temporary: true
       })
-      syncLayerZIndexes()
       fitLayer(layer)
       return true
     } catch (error) {
@@ -818,21 +977,13 @@ async function loadLocalFile(file) {
       return false
     }
 
-    const layer = new VectorLayer({
-      source,
-      visible: true,
-      style: getBusinessStyle('eco')
-    })
-    map.addLayer(layer)
-    managedLayers.push({
+    const layer = addVectorLayerFromSource({
       id: `temp-${Date.now()}`,
       name: file.name,
-      group: '临时图层',
-      visible: true,
-      temporary: true,
-      layer
+      source,
+      styleType: 'eco',
+      temporary: true
     })
-    syncLayerZIndexes()
     fitLayer(layer)
     return true
   } catch (error) {
@@ -884,6 +1035,9 @@ async function exportMap(format = 'png') {
 
 function setManagedLayerVisible(item) {
   item.layer.setVisible(item.visible)
+  if (item.visible) {
+    fitServiceLayer(item)
+  }
 }
 
 function setLayerVisibleById(layerId, visible) {
@@ -891,6 +1045,9 @@ function setLayerVisibleById(layerId, visible) {
   if (!item) return false
   item.visible = visible
   item.layer.setVisible(visible)
+  if (visible) {
+    fitLayer(item.layer)
+  }
   return true
 }
 
@@ -920,6 +1077,13 @@ function removeManagedLayer(item) {
   if (index > -1) managedLayers.splice(index, 1)
 }
 
+function removeLayerById(layerId) {
+  const item = managedLayers.find(layer => layer.id === layerId)
+  if (!item) return false
+  removeManagedLayer(item)
+  return true
+}
+
 function syncLayerZIndexes() {
   managedLayers.forEach((item, index) => {
     item.layer.setZIndex(index + 10)
@@ -930,8 +1094,10 @@ function syncLayerZIndexes() {
 defineExpose({
   locateCoordinate,
   loadLocalFile,
+  addBusinessServiceLayer,
   exportMap,
   resetView,
+  removeLayerById,
   setLayerVisibleById
 })
 </script>

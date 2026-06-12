@@ -19,6 +19,10 @@
           </el-button>
         </div>
 
+        <div v-if="primaryVisualizationUrl" class="visualization-section">
+          <img :src="primaryVisualizationUrl" alt="指数可视化结果" class="visualization-image" />
+        </div>
+
         <!-- 加载中 -->
         <div v-if="loading" class="loading-data-apple">
           <el-icon class="loading-icon-small"><Loading /></el-icon>
@@ -136,8 +140,15 @@ const indexLabelMap = computed(() => ({
   ndwi: '湿度指数 (NDWI)',
   dryness: '干度指数 (NDBSI)',
   wetness: '湿度指数',
-  greenness: '绿度指数'
+  greenness: '绿度指数',
+  rsei: 'RSEI',
+  uploaded_raster: '上传成果栅格'
 }));
+
+const primaryVisualizationUrl = computed(() => {
+  const first = indicesData.value[0];
+  return first?.visualization_file_url || first?.visualization_file || null;
+});
 
 // 监听状态变化，当完成时加载数据
 watch(() => props.status, async (newStatus) => {
@@ -156,6 +167,13 @@ async function loadIndicesData() {
   loading.value = true;
 
   try {
+    if (Array.isArray(props.resultData.indices)) {
+      indicesData.value = props.resultData.indices;
+      await nextTick();
+      initCharts();
+      return;
+    }
+
     // 尝试多种方式获取影像ID
     let imageId = null;
 
@@ -624,6 +642,22 @@ onUnmounted(() => {
   border-radius: 12px;
   padding: 10px 20px;
   font-weight: 500;
+}
+
+.visualization-section {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(229, 231, 235, 0.8);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.visualization-image {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #f8fafc;
 }
 
 .loading-data-apple {

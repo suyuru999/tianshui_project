@@ -161,11 +161,22 @@ REST_FRAMEWORK = {
 # CORS 配置
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+]
 
 # 文件上传配置
-FILE_UPLOAD_MAX_MEMORY_SIZE = 943718400  # 900MB
-DATA_UPLOAD_MAX_MEMORY_SIZE = 943718400  # 900MB
-MAX_UPLOAD_SIZE = 943718400  # 900MB
+# 大遥感栅格不能放进内存处理；超过 10MB 的上传交给 Django 临时文件处理器落盘。
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
+DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024 * 1024
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024 * 1024
+FILE_UPLOAD_HANDLERS = [
+    'django.core.files.uploadhandler.MemoryFileUploadHandler',
+    'django.core.files.uploadhandler.TemporaryFileUploadHandler',
+]
 
 # Celery 配置
 # 开发演示环境默认同步执行任务，避免未启动 Redis/RabbitMQ 时接口直接报错。

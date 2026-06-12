@@ -81,6 +81,7 @@ config/production.py
 # ============================================
 # 媒体文件和上传目录
 # ============================================
+/DATA/
 /backend/media/
 /backend/uploads/
 /backend/user_uploads/

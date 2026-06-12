@@ -151,6 +151,54 @@ class GeoServerManager:
                 logger.error(f"栅格文件不存在: {file_path}")
                 return False
             
+            # 对于用户上传的GeoTIFF，优先使用REST文件上传方式。
+            # 这比让GeoServer读取Django本地路径更稳，尤其是在Windows、中文文件名或服务权限受限时。
+            try:
+                self.delete_coveragestore(coverage_store_name, recurse=True)
+                upload_url = (
+                    f"{self.base_url}/rest/workspaces/{self.workspace}/coveragestores/"
+                    f"{coverage_store_name}/file.geotiff"
+                )
+                logger.info(f"直接上传GeoTIFF到GeoServer: {upload_url}")
+                with open(file_path, 'rb') as raster_file:
+                    response = requests.put(
+                        upload_url,
+                        auth=self.auth,
+                        params={
+                            'coverageName': layer_name,
+                            'configure': 'all',
+                            'update': 'overwrite',
+                        },
+                        data=raster_file,
+                        headers={'Content-Type': 'image/tiff'},
+                        timeout=600
+                    )
+
+                logger.info(f"GeoTIFF上传响应: HTTP {response.status_code}")
+                if response.status_code in [200, 201, 202]:
+                    import time
+                    time.sleep(2)
+                    layer_check = self._make_request('GET', f'layers/{self.workspace}:{layer_name}.json')
+                    if layer_check:
+                        logger.info(f"✅ 栅格图层 {layer_name} 上传并发布成功")
+                        try:
+                            min_val, max_val = self._get_raster_statistics(file_path)
+                        except Exception as stats_error:
+                            logger.warning(f"读取栅格统计信息失败: {stats_error}，使用默认值域")
+                            min_val, max_val = (0.0, 5.0)
+                        style_name = f"{layer_name}_style"
+                        sld_content = self._create_default_raster_sld(min_val, max_val)
+                        if self.create_style(style_name, sld_content):
+                            self.apply_style_to_layer(layer_name, style_name)
+                        return True
+                    logger.warning(f"GeoTIFF已上传，但图层 {layer_name} 暂未查询到")
+                    return True
+
+                logger.warning(f"直接上传GeoTIFF失败: HTTP {response.status_code}")
+                logger.warning(f"响应内容: {response.text[:1000]}")
+            except Exception as direct_upload_error:
+                logger.warning(f"直接上传GeoTIFF异常，回退到路径引用方式: {direct_upload_error}")
+
             # 对于GeoTIFF，使用CoverageStore而不是DataStore
             # 方法1: 检查并删除旧的CoverageStore（如果存在但类型不对）
             coverage_store_check = self._make_request('GET', f'workspaces/{self.workspace}/coveragestores/{coverage_store_name}.json')
@@ -604,6 +652,28 @@ class GeoServerManager:
             logger.warning(f"检查/删除DataStore异常: {e}")
         
         return success
+
+    def delete_datastore(self, datastore_name: str, recurse: bool = True) -> bool:
+        """删除DataStore及其发布出的图层"""
+        try:
+            delete_url = (
+                f"{self.base_url}/rest/workspaces/{self.workspace}/datastores/"
+                f"{datastore_name}?recurse={str(recurse).lower()}"
+            )
+            response = requests.delete(delete_url, auth=self.auth, timeout=60)
+
+            if response.status_code in [200, 204]:
+                logger.info(f"DataStore {datastore_name} 删除成功")
+                return True
+            if response.status_code == 404:
+                logger.info(f"DataStore {datastore_name} 不存在，无需删除")
+                return True
+
+            logger.warning(f"删除DataStore失败: HTTP {response.status_code} - {response.text[:500]}")
+            return False
+        except Exception as e:
+            logger.warning(f"删除DataStore异常: {e}")
+            return False
     
     def get_layer_info(self, layer_name: str) -> Optional[Dict[str, Any]]:
         """获取图层信息"""

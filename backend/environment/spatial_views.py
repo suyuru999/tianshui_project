@@ -4,21 +4,25 @@
 """
 
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from django.http import HttpResponse
 from django.conf import settings
+from django.db import connection
+from django.utils import timezone
 import logging
 import json
+import os
 
 from .geoserver_config import get_geoserver_manager
-from .models import RemoteSensingImage, EcologicalIndex
+from .models import BusinessLayer, RemoteSensingImage, EcologicalIndex
 
 logger = logging.getLogger(__name__)
 
 
 @api_view(['GET'])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def wms_capabilities(request):
     """获取WMS服务能力"""
@@ -42,43 +46,24 @@ def wms_capabilities(request):
 
 
 @api_view(['GET'])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def wms_map(request):
     """WMS地图服务"""
     try:
-        # 获取请求参数
-        service = request.GET.get('SERVICE', 'WMS')
-        version = request.GET.get('VERSION', '1.3.0')
-        request_type = request.GET.get('REQUEST', 'GetMap')
-        layers = request.GET.get('LAYERS', '')
-        styles = request.GET.get('STYLES', '')
-        crs = request.GET.get('CRS', 'EPSG:4326')
-        bbox = request.GET.get('BBOX', '')
-        width = request.GET.get('WIDTH', '256')
-        height = request.GET.get('HEIGHT', '256')
-        format = request.GET.get('FORMAT', 'image/png')
-        
-        # 构建GeoServer WMS请求
         geoserver = get_geoserver_manager()
-        wms_url = f"{geoserver.base_url}/ows"
-        
-        # 这里应该转发请求到GeoServer
-        # 由于复杂性，这里只返回参数信息
-        return Response({
-            'message': 'WMS请求参数',
-            'parameters': {
-                'service': service,
-                'version': version,
-                'request': request_type,
-                'layers': layers,
-                'styles': styles,
-                'crs': crs,
-                'bbox': bbox,
-                'width': width,
-                'height': height,
-                'format': format
-            }
-        })
+        import requests
+        upstream = requests.get(
+            f"{geoserver.base_url}/ows",
+            params=request.GET,
+            auth=geoserver.auth,
+            timeout=120,
+        )
+        return HttpResponse(
+            upstream.content,
+            status=upstream.status_code,
+            content_type=upstream.headers.get('Content-Type', 'application/octet-stream')
+        )
         
     except Exception as e:
         logger.error(f"WMS地图服务失败: {e}")
@@ -89,6 +74,7 @@ def wms_map(request):
 
 
 @api_view(['GET'])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def wfs_capabilities(request):
     """获取WFS服务能力"""
@@ -117,6 +103,7 @@ def wfs_capabilities(request):
 
 
 @api_view(['GET'])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def spatial_layers(request):
     """获取可用的空间图层列表"""
@@ -149,7 +136,7 @@ def spatial_layers(request):
 
 
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def publish_to_geoserver(request):
     """发布图层到GeoServer"""
     try:
@@ -222,6 +209,7 @@ def publish_to_geoserver(request):
 
 
 @api_view(['GET'])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def geoserver_status(request):
     """获取GeoServer状态"""
@@ -286,6 +274,67 @@ def geoserver_status(request):
                 ]
             }
         })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def system_health(request):
+    """Return deployment health checks for database, media storage and GeoServer."""
+    checks = {}
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')
+            cursor.fetchone()
+        checks['database'] = {'ok': True, 'message': '数据库连接正常'}
+    except Exception as exc:
+        checks['database'] = {'ok': False, 'message': f'数据库连接失败: {exc}'}
+
+    media_root = str(settings.MEDIA_ROOT)
+    checks['media_root'] = {
+        'ok': os.path.isdir(media_root) and os.access(media_root, os.W_OK),
+        'path': media_root,
+        'message': '媒体目录可写' if os.path.isdir(media_root) and os.access(media_root, os.W_OK) else '媒体目录不存在或不可写',
+    }
+
+    try:
+        geoserver = get_geoserver_manager()
+        capabilities = geoserver.get_wms_capabilities()
+        workspace_ready = False
+        if capabilities:
+            try:
+                workspace_ready = bool(geoserver.create_workspace())
+            except Exception:
+                workspace_ready = False
+        checks['geoserver'] = {
+            'ok': bool(capabilities) and workspace_ready,
+            'connected': bool(capabilities),
+            'workspace_ready': workspace_ready,
+            'workspace': geoserver.workspace,
+            'base_url': geoserver.base_url,
+            'message': 'GeoServer连接和工作空间正常' if capabilities and workspace_ready else 'GeoServer未连接或工作空间未就绪',
+        }
+    except Exception as exc:
+        checks['geoserver'] = {'ok': False, 'message': f'GeoServer检测失败: {exc}'}
+
+    layer_counts = {
+        'total': BusinessLayer.objects.count(),
+        'published': BusinessLayer.objects.filter(status='published').count(),
+        'failed': BusinessLayer.objects.filter(status='failed').count(),
+        'uploaded': BusinessLayer.objects.filter(status='uploaded').count(),
+    }
+    checks['business_layers'] = {
+        'ok': layer_counts['failed'] == 0,
+        'counts': layer_counts,
+        'message': '业务图层状态正常' if layer_counts['failed'] == 0 else f"存在 {layer_counts['failed']} 个发布失败图层",
+    }
+
+    overall_ok = all(item.get('ok') for item in checks.values())
+    return Response({
+        'ok': overall_ok,
+        'checked_at': timezone.now(),
+        'checks': checks,
+    }, status=status.HTTP_200_OK if overall_ok else status.HTTP_503_SERVICE_UNAVAILABLE)
 
 
 

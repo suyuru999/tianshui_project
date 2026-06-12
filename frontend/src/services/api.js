@@ -25,7 +25,7 @@ export const authService = {
   
   // 用户登出
   logout() {
-    return request.post(buildApiUrl(API_ENDPOINTS.AUTH.LOGOUT))
+    return request.post(buildApiUrl(API_ENDPOINTS.AUTH.LOGOUT), {}, { skipAuth: true, silentError: true })
   },
   
   // 刷新token
@@ -54,7 +54,20 @@ export const remoteSensingService = {
     // 确保路径以斜杠开头，避免相对路径问题
     const url = buildApiUrl(API_ENDPOINTS.REMOTE_SENSING.UPLOAD);
     console.log('上传请求URL:', url);
-    return request.upload(url, formData)
+    return request.upload(url, formData, { skipAuth: true })
+  },
+
+  // 上传影像并直接计算指定指数，不要求先保存为系统图层
+  analyzeUpload(file, indexType = 'ndvi', metadata = {}) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('index_type', indexType)
+    Object.keys(metadata).forEach(key => {
+      if (metadata[key] !== null && metadata[key] !== undefined) {
+        formData.append(key, metadata[key])
+      }
+    })
+    return request.upload(buildApiUrl(API_ENDPOINTS.REMOTE_SENSING.ANALYZE_UPLOAD), formData, { skipAuth: true })
   },
   
   // 获取影像详情
@@ -170,6 +183,52 @@ export const spatialService = {
   getSpatialLayers() {
     return request.get(buildApiUrl(API_ENDPOINTS.SPATIAL.SPATIAL_LAYERS))
   },
+
+  // 获取已发布/已上传业务图层
+  getBusinessLayers(params = {}) {
+    return request.get(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYERS), params, { skipAuth: true })
+  },
+
+  // 上传业务图层并发布到GeoServer
+  uploadBusinessLayer(file, metadata = {}) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('name', metadata.name || file.name.replace(/\.[^.]+$/, ''))
+    if (metadata.description) {
+      formData.append('description', metadata.description)
+    }
+    return request.upload(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYERS), formData, { skipAuth: true })
+  },
+
+  // 接入外部标准服务业务图层
+  createBusinessServiceLayer(data) {
+    return request.post(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYERS), data, { skipAuth: true })
+  },
+
+  // 重新发布业务图层
+  publishBusinessLayer(id) {
+    return request.post(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYER_PUBLISH(id)), {}, { skipAuth: true })
+  },
+
+  // 撤销GeoServer发布，保留上传记录
+  unpublishBusinessLayer(id) {
+    return request.post(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYER_UNPUBLISH(id)), {}, { skipAuth: true })
+  },
+
+  // 删除业务图层记录
+  deleteBusinessLayer(id) {
+    return request.delete(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYER_DETAIL(id)), { skipAuth: true })
+  },
+
+  // 更新业务图层样式
+  updateBusinessLayerStyle(id, data) {
+    return request.post(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYER_STYLE(id)), data, { skipAuth: true })
+  },
+
+  // 获取业务图层操作日志
+  getBusinessLayerLogs(id) {
+    return request.get(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYER_LOGS(id)), {}, { skipAuth: true })
+  },
   
   // 发布图层到GeoServer
   publishToGeoServer(data) {
@@ -186,15 +245,23 @@ export const spatialService = {
 export const feedbackService = {
   // 提交反馈
   create(data) {
-    return request.post(buildApiUrl(API_ENDPOINTS.FEEDBACK.CREATE), data)
+    return request.post(buildApiUrl(API_ENDPOINTS.FEEDBACK.CREATE), data, { skipAuth: true })
   },
   // 获取反馈列表（可选：管理员查看）
   getList(params = {}) {
-    return request.get(buildApiUrl(API_ENDPOINTS.FEEDBACK.LIST), params)
+    return request.get(buildApiUrl(API_ENDPOINTS.FEEDBACK.LIST), params, { skipAuth: true })
   },
   // 获取反馈详情
   getDetail(id) {
-    return request.get(buildApiUrl(API_ENDPOINTS.FEEDBACK.DETAIL(id)))
+    return request.get(buildApiUrl(API_ENDPOINTS.FEEDBACK.DETAIL(id)), {}, { skipAuth: true })
+  },
+  // 删除单条反馈
+  delete(id) {
+    return request.delete(buildApiUrl(API_ENDPOINTS.FEEDBACK.DELETE(id)), { skipAuth: true })
+  },
+  // 清空反馈记录
+  clear() {
+    return request.delete(buildApiUrl(API_ENDPOINTS.FEEDBACK.CLEAR), { skipAuth: true })
   }
 }
 
@@ -211,17 +278,17 @@ export const climateMonitoringService = {
       return Promise.reject(new Error('无效的文件对象'))
     }
     
-    // 验证文件大小（50MB限制）
-    const maxSize = 50 * 1024 * 1024
+    // 验证文件大小（栅格数据可能较大）
+    const maxSize = 20 * 1024 * 1024 * 1024
     if (file.size > maxSize) {
-      return Promise.reject(new Error('文件大小不能超过50MB'))
+      return Promise.reject(new Error('文件大小不能超过20GB'))
     }
     
     // 验证文件类型
-    const allowedTypes = ['.csv', '.xlsx', '.xls']
+    const allowedTypes = ['.csv', '.xlsx', '.xls', '.tif', '.tiff', '.zip']
     const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'))
     if (!allowedTypes.includes(fileExtension)) {
-      return Promise.reject(new Error('只支持CSV和Excel格式文件'))
+      return Promise.reject(new Error('只支持CSV、Excel、GeoTIFF或ADF文件夹ZIP'))
     }
     
     const formData = new FormData()
@@ -234,7 +301,7 @@ export const climateMonitoringService = {
       }
     })
     
-    return request.upload(buildApiUrl(API_ENDPOINTS.CLIMATE_MONITORING.UPLOAD), formData)
+    return request.upload(buildApiUrl(API_ENDPOINTS.CLIMATE_MONITORING.UPLOAD), formData, { skipAuth: true })
   },
   
   // 开始气候数据分析
@@ -258,7 +325,7 @@ export const climateMonitoringService = {
     return request.post(buildApiUrl(API_ENDPOINTS.CLIMATE_MONITORING.ANALYZE), {
       file_id: fileId,
       analysis_type: normalizedAnalysisType
-    })
+    }, { skipAuth: true })
   },
   
   // 获取分析结果
@@ -272,7 +339,7 @@ export const climateMonitoringService = {
       return Promise.reject(new Error('任务ID格式无效'))
     }
     
-    return request.get(buildApiUrl(API_ENDPOINTS.CLIMATE_MONITORING.RESULTS(taskId)))
+    return request.get(buildApiUrl(API_ENDPOINTS.CLIMATE_MONITORING.RESULTS(taskId)), {}, { skipAuth: true })
   },
   
   // 获取分析状态
@@ -286,7 +353,7 @@ export const climateMonitoringService = {
       return Promise.reject(new Error('任务ID格式无效'))
     }
     
-    return request.get(buildApiUrl(API_ENDPOINTS.CLIMATE_MONITORING.STATUS(taskId)))
+    return request.get(buildApiUrl(API_ENDPOINTS.CLIMATE_MONITORING.STATUS(taskId)), {}, { skipAuth: true })
   },
   
   // 下载分析报告
