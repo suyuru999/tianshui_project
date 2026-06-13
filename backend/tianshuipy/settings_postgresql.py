@@ -1,6 +1,6 @@
 """
 Django settings for tianshuipy project - PostgreSQL 生产环境配置
-使用 PostgreSQL + PostGIS 数据库
+使用 PostgreSQL 数据库（可选启用 PostGIS）
 """
 
 from pathlib import Path
@@ -141,6 +141,8 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PARSER_CLASSES': [
         'rest_framework.parsers.JSONParser',
+        'rest_framework.parsers.FormParser',
+        'rest_framework.parsers.MultiPartParser',
     ],
 }
 
@@ -221,9 +223,11 @@ SPATIAL_SERVICES = {
     'MAX_FEATURES': 10000,
 }
 
-# Celery 配置（可选）
-CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
-CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+# Celery 配置（本地开发默认同步执行，避免未启动 Redis 时接口直接失败）
+CELERY_TASK_ALWAYS_EAGER = os.getenv('CELERY_TASK_ALWAYS_EAGER', 'true').lower() == 'true'
+CELERY_TASK_EAGER_PROPAGATES = False
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'memory://')
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'cache+memory://')
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'

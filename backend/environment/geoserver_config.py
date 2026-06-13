@@ -67,6 +67,10 @@ class GeoServerManager:
     
     def create_workspace(self) -> bool:
         """创建工作空间"""
+        if self.workspace_exists():
+            logger.info(f"工作空间 {self.workspace} 已存在")
+            return True
+
         workspace_data = {
             "workspace": {
                 "name": self.workspace
@@ -83,6 +87,21 @@ class GeoServerManager:
             logger.info(f"工作空间 {self.workspace} 创建成功")
             return True
         return False
+
+    def workspace_exists(self) -> bool:
+        """检查工作空间是否存在"""
+        try:
+            url = f"{self.base_url}/rest/workspaces/{self.workspace}.json"
+            response = requests.get(
+                url,
+                auth=self.auth,
+                headers={'Accept': 'application/json'},
+                timeout=30,
+            )
+            return response.status_code == 200
+        except Exception as e:
+            logger.warning(f"检查工作空间 {self.workspace} 失败: {e}")
+            return False
     
     def create_datastore(self, datastore_name: str, datastore_type: str = 'GeoTIFF') -> bool:
         """创建数据存储"""
@@ -696,61 +715,75 @@ class GeoServerManager:
             return None
     
     def create_style(self, style_name: str, sld_content: str) -> bool:
-        """创建样式"""
-        style_data = {
-            "style": {
-                "name": style_name,
-                "filename": f"{style_name}.sld"
-            }
+        """创建或更新 SLD 样式。
+
+        GeoServer 的样式内容上传接口需要直接接收 SLD XML。先尝试更新已有样式，
+        不存在时再用 raw=true 创建，避免部分 GeoServer 版本把 JSON 样式声明误判为样式内容。
+        """
+        headers = {
+            'Content-Type': 'application/vnd.ogc.sld+xml',
+            'Accept': 'application/json',
         }
-        
-        # 先创建样式
-        result = self._make_request(
-            'POST',
-            'styles',
-            json=style_data
-        )
-        
-        if result is not None:
-            # 上传SLD文件
-            sld_url = f"{self.base_url}/rest/styles/{style_name}"
-            try:
-                response = requests.put(
-                    sld_url,
-                    auth=self.auth,
-                    data=sld_content,
-                    headers={'Content-Type': 'application/vnd.ogc.sld+xml'}
+
+        try:
+            update_url = f"{self.base_url}/rest/styles/{style_name}"
+            update_response = requests.put(
+                update_url,
+                auth=self.auth,
+                data=sld_content.encode('utf-8'),
+                headers=headers,
+                timeout=60,
+            )
+
+            if update_response.status_code in [200, 201]:
+                logger.info(f"样式 {style_name} 更新成功")
+                return True
+
+            if update_response.status_code not in [404, 405]:
+                logger.debug(
+                    f"样式 {style_name} 更新返回 {update_response.status_code}: "
+                    f"{update_response.text[:500]}"
                 )
-                
-                if response.status_code in [200, 201]:
-                    logger.info(f"样式 {style_name} 创建成功")
-                    return True
-                    
-            except Exception as e:
-                logger.error(f"上传SLD文件失败: {e}")
-        else:
-            # 如果样式已存在，尝试更新
-            logger.info(f"样式 {style_name} 可能已存在，尝试更新")
-            sld_url = f"{self.base_url}/rest/styles/{style_name}"
-            try:
-                response = requests.put(
-                    sld_url,
+
+            create_url = f"{self.base_url}/rest/styles?name={style_name}&raw=true"
+            create_response = requests.post(
+                create_url,
+                auth=self.auth,
+                data=sld_content.encode('utf-8'),
+                headers=headers,
+                timeout=60,
+            )
+
+            if create_response.status_code in [200, 201]:
+                logger.info(f"样式 {style_name} 创建成功")
+                return True
+
+            if create_response.status_code == 409:
+                retry_response = requests.put(
+                    update_url,
                     auth=self.auth,
-                    data=sld_content,
-                    headers={'Content-Type': 'application/vnd.ogc.sld+xml'}
+                    data=sld_content.encode('utf-8'),
+                    headers=headers,
+                    timeout=60,
                 )
-                
-                if response.status_code in [200, 201]:
-                    logger.info(f"样式 {style_name} 更新成功")
+                if retry_response.status_code in [200, 201]:
+                    logger.info(f"样式 {style_name} 冲突后更新成功")
                     return True
-                else:
-                    # 如果更新失败，尝试先删除再创建
-                    logger.debug(f"样式更新返回 {response.status_code}，尝试删除后重新创建")
-                    # 不记录错误，因为可能是GeoServer的内部问题，但最终会成功
-            except Exception as e:
-                logger.debug(f"更新SLD文件异常: {e}，但可能不影响最终结果")
-                
-        return False
+                logger.error(
+                    f"样式 {style_name} 冲突后更新失败: "
+                    f"{retry_response.status_code} - {retry_response.text[:500]}"
+                )
+                return False
+
+            logger.error(
+                f"样式 {style_name} 创建失败: "
+                f"{create_response.status_code} - {create_response.text[:500]}"
+            )
+            return False
+
+        except Exception as e:
+            logger.error(f"创建或更新样式 {style_name} 失败: {e}")
+            return False
     
     def delete_style(self, style_name: str, purge: bool = True) -> bool:
         """删除样式"""

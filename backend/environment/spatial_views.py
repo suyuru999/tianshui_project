@@ -303,7 +303,7 @@ def system_health(request):
         workspace_ready = False
         if capabilities:
             try:
-                workspace_ready = bool(geoserver.create_workspace())
+                workspace_ready = bool(geoserver.workspace_exists() or geoserver.create_workspace())
             except Exception:
                 workspace_ready = False
         checks['geoserver'] = {

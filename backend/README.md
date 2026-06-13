@@ -31,7 +31,8 @@
 ### 后端技术
 - **Django 5.2.4** - Web框架
 - **Django REST Framework** - API开发
-- **PostgreSQL + PostGIS** - 空间数据库
+- **PostgreSQL** - 主数据库
+- **PostGIS（可选）** - PostgreSQL 空间扩展
 - **Celery + Redis** - 异步任务处理
 - **GeoServer** - 地理空间数据服务
 
@@ -51,7 +52,8 @@
 
 ### 环境要求
 - Python 3.8+
-- PostgreSQL 12+ with PostGIS
+- PostgreSQL 12+
+- PostGIS（可选，启用空间数据库能力时安装）
 - Redis 6+
 - GDAL 3.6+
 
@@ -81,7 +83,7 @@ pip install -r requirements.txt
 # 创建PostgreSQL数据库
 createdb tianshuipy_db
 
-# 启用PostGIS扩展
+# 如果需要空间扩展，再启用PostGIS
 psql -d tianshuipy_db -c "CREATE EXTENSION postgis;"
 ```
 
