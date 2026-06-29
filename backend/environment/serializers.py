@@ -246,11 +246,12 @@ class ClimateDataFileUploadSerializer(serializers.ModelSerializer):
 class ClimateAnalysisResultSerializer(serializers.ModelSerializer):
     """气候分析结果序列化器"""
     data_file_name = serializers.CharField(source='data_file.name', read_only=True)
+    processing_task = serializers.UUIDField(source='processing_task_id', read_only=True)
     
     class Meta:
         model = ClimateAnalysisResult
         fields = [
-            'id', 'data_file', 'data_file_name', 'analysis_type',
+            'id', 'data_file', 'data_file_name', 'processing_task', 'analysis_type',
             'temperature_avg', 'temperature_max', 'temperature_min', 'temperature_std',
             'precipitation_avg', 'precipitation_max', 'precipitation_min', 'precipitation_std',
             'humidity_avg', 'humidity_max', 'humidity_min', 'humidity_std',
@@ -422,7 +423,13 @@ class ClimateAnalysisRequestSerializer(serializers.Serializer):
     """气候分析请求序列化器"""
     file_id = serializers.UUIDField()
     analysis_type = serializers.ChoiceField(
-        choices=[('comprehensive', '综合分析'), ('temperature', '温度分析'), ('precipitation', '降水分析')],
+        choices=[
+            ('comprehensive', '综合分析'),
+            ('temperature', '温度分析'),
+            ('precipitation', '降水分析'),
+            ('humidity', '湿度分析'),
+            ('wind', '风速分析'),
+        ],
         default='comprehensive'
     )
 

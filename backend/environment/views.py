@@ -21,6 +21,7 @@ import re
 import zipfile
 import numpy as np
 import rasterio
+from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 # 取消注释必要的导入
@@ -83,6 +84,13 @@ except ImportError as exc:
     LandUseAnalyzer = None
     rasterize_shapefile_to_tiff = None
     GDAL_IMPORT_ERROR = exc
+
+try:
+    import shapefile
+    SHAPEFILE_IMPORT_ERROR = None
+except ImportError as exc:
+    shapefile = None
+    SHAPEFILE_IMPORT_ERROR = exc
 from .file_utils import safe_file_cleanup, get_cleanup_files
 
 logger = logging.getLogger(__name__)
@@ -455,6 +463,332 @@ def _save_uploaded_file(uploaded_file, subdir):
     return relative_path.replace('\\', '/'), absolute_path
 
 
+def _remove_file_if_exists(path):
+    if not path:
+        return
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except PermissionError:
+        logger.warning(f"无法删除文件 {path}，可能仍被占用")
+    except Exception as exc:
+        logger.warning(f"删除临时文件失败 {path}: {exc}")
+
+
+def _cleanup_temp_paths(files=None, dirs=None):
+    for path in files or []:
+        _remove_file_if_exists(path)
+    for path in dirs or []:
+        try:
+            remove_tree(path)
+        except Exception as exc:
+            logger.warning(f"删除临时目录失败 {path}: {exc}")
+
+
+def _landuse_attribute_candidates(requested_attr=None):
+    candidates = []
+    for field in [requested_attr, 'class', 'landuse', 'code', 'class_id', 'dlbm', 'type', 'value']:
+        field_name = str(field or '').strip()
+        if field_name and field_name not in candidates:
+            candidates.append(field_name)
+    return candidates
+
+
+def _rasterize_shapefile_with_rasterio(shp_path, output_tif, attribute_field, nodata_value=-9999):
+    if shapefile is None:
+        raise RuntimeError(f'Shapefile兼容栅格化依赖缺失: {SHAPEFILE_IMPORT_ERROR}')
+
+    reader = shapefile.Reader(shp_path)
+    fields = reader.fields[1:]
+    field_names = [field[0] for field in fields]
+    if attribute_field not in field_names:
+        raise ValueError(f'属性字段不存在: {attribute_field}，可用字段: {", ".join(field_names)}')
+
+    field_index = field_names.index(attribute_field)
+    field_type = fields[field_index][1]
+    if field_type not in ['N', 'F']:
+        raise ValueError(f'属性字段 {attribute_field} 不是数值字段')
+
+    shapes = reader.shapes()
+    records = reader.records()
+    if not shapes:
+        raise ValueError('Shapefile中没有可用要素')
+
+    bbox = reader.bbox
+    min_x, min_y, max_x, max_y = bbox
+    width = max_x - min_x
+    height = max_y - min_y
+    if width <= 0 or height <= 0:
+        raise ValueError('Shapefile空间范围无效')
+
+    target_size = 2500
+    longest_side = max(width, height)
+    pixel_size = longest_side / target_size if longest_side > 0 else 1.0
+    if not np.isfinite(pixel_size) or pixel_size <= 0:
+        pixel_size = 1.0
+
+    x_res = max(1, int(np.ceil(width / pixel_size)))
+    y_res = max(1, int(np.ceil(height / pixel_size)))
+    transform = rasterio.transform.from_bounds(min_x, min_y, max_x, max_y, x_res, y_res)
+
+    geometries = []
+    for shp, record in zip(shapes, records):
+        value = record[field_index]
+        if value in [None, '']:
+            continue
+        try:
+            burn_value = int(round(float(value)))
+        except (TypeError, ValueError):
+            continue
+        if shp.shapeTypeName not in ['POLYGON', 'POLYGONZ', 'POLYGONM']:
+            continue
+        points = shp.points
+        parts = list(shp.parts) + [len(points)]
+        rings = [points[parts[i]:parts[i + 1]] for i in range(len(parts) - 1)]
+        if not rings or len(rings[0]) < 3:
+            continue
+        shell = rings[0]
+        holes = [ring for ring in rings[1:] if len(ring) >= 3]
+        geometry = {
+            'type': 'Polygon',
+            'coordinates': [shell, *holes]
+        }
+        geometries.append((geometry, burn_value))
+
+    if not geometries:
+        raise ValueError('未找到可用于栅格化的面要素或数值属性')
+
+    raster = rasterio.features.rasterize(
+        geometries,
+        out_shape=(y_res, x_res),
+        fill=nodata_value,
+        transform=transform,
+        dtype=np.int32,
+    )
+
+    prj_path = os.path.splitext(shp_path)[0] + '.prj'
+    crs = None
+    if os.path.exists(prj_path):
+        try:
+            crs_text = Path(prj_path).read_text(encoding='utf-8', errors='ignore').strip()
+            if crs_text:
+                crs = rasterio.crs.CRS.from_wkt(crs_text)
+        except Exception as exc:
+            logger.warning(f'读取Shapefile投影失败，将继续写出无CRS栅格: {exc}')
+
+    os.makedirs(os.path.dirname(output_tif), exist_ok=True)
+    with rasterio.open(
+        output_tif,
+        'w',
+        driver='GTiff',
+        height=y_res,
+        width=x_res,
+        count=1,
+        dtype=raster.dtype,
+        transform=transform,
+        crs=crs,
+        nodata=nodata_value,
+        compress='lzw',
+    ) as dst:
+        dst.write(raster, 1)
+
+
+def _prepare_landuse_analysis_input(uploaded_file, requested_attr=None):
+    upload_rel, upload_abs = _save_uploaded_file(uploaded_file, 'landuse_analysis')
+    cleanup_files = [upload_abs]
+    cleanup_dirs = []
+    raster_input = upload_abs
+    used_attr = None
+    extension = os.path.splitext(uploaded_file.name.lower())[1]
+
+    if extension == '.zip':
+        extract_dir = os.path.join(os.path.dirname(upload_abs), f'{Path(upload_abs).stem}_extracted')
+        shp_path = _extract_shapefile_zip(upload_abs, extract_dir)
+        cleanup_dirs.append(extract_dir)
+
+        raster_input = os.path.join(os.path.dirname(upload_abs), f'{Path(upload_abs).stem}_rasterized.tif')
+        last_error = None
+        rasterizer = rasterize_shapefile_to_tiff if rasterize_shapefile_to_tiff is not None else _rasterize_shapefile_with_rasterio
+        for field_name in _landuse_attribute_candidates(requested_attr):
+            try:
+                rasterizer(shp_path, raster_input, attribute_field=field_name)
+                used_attr = field_name
+                cleanup_files.append(raster_input)
+                break
+            except Exception as exc:
+                last_error = exc
+        if used_attr is None:
+            detail = f'；最近一次错误：{last_error}' if last_error else ''
+            raise ValueError(
+                'Shapefile 栅格化失败，未找到可用的土地利用分类字段。'
+                f'请检查属性表是否包含 {", ".join(_landuse_attribute_candidates(requested_attr))}{detail}'
+            )
+    elif extension not in ['.tif', '.tiff']:
+        raise ValueError('只支持 GeoTIFF(.tif/.tiff) 或包含完整 Shapefile 的 ZIP 压缩包')
+
+    return {
+        'upload_rel': upload_rel,
+        'upload_abs': upload_abs,
+        'raster_input': raster_input,
+        'cleanup_files': cleanup_files,
+        'cleanup_dirs': cleanup_dirs,
+        'used_attr': used_attr,
+    }
+
+
+def _normalize_shapefile_dataset(source_shp_path, target_dir, fixed_name):
+    source_dir = os.path.dirname(source_shp_path)
+    source_stem = Path(source_shp_path).stem.lower()
+    supported_extensions = {
+        '.shp', '.shx', '.dbf', '.prj', '.cpg', '.sbn', '.sbx', '.qix', '.fix'
+    }
+
+    for file_name in os.listdir(source_dir):
+        file_path = os.path.join(source_dir, file_name)
+        if not os.path.isfile(file_path):
+            continue
+        file_ext = Path(file_name).suffix.lower()
+        if file_ext not in supported_extensions:
+            continue
+        if Path(file_name).stem.lower() != source_stem:
+            continue
+        target_path = os.path.join(target_dir, f'{fixed_name}{file_ext}')
+        if os.path.abspath(file_path) == os.path.abspath(target_path):
+            continue
+        if os.path.exists(target_path):
+            os.remove(target_path)
+        os.replace(file_path, target_path)
+
+    normalized_shp = os.path.join(target_dir, f'{fixed_name}.shp')
+    if not os.path.exists(normalized_shp):
+        raise ValueError('Shapefile 组件整理失败，未生成标准 .shp 文件')
+
+    cpg_path = os.path.join(target_dir, f'{fixed_name}.cpg')
+    encoding = 'GBK'
+    if os.path.exists(cpg_path):
+        try:
+            with open(cpg_path, 'r', encoding='utf-8', errors='ignore') as cpg_file:
+                detected = cpg_file.read().strip()
+            if detected:
+                encoding = detected
+        except Exception as exc:
+            logger.warning(f"读取 {cpg_path} 编码失败，回退到 GBK: {exc}")
+    else:
+        with open(cpg_path, 'w', encoding='utf-8') as cpg_file:
+            cpg_file.write(encoding)
+
+    return normalized_shp, encoding
+
+
+def _prepare_overlay_vector_dataset(uploaded_file, dataset_folder, fixed_name):
+    upload_dir = os.path.join(settings.MEDIA_ROOT, 'ecological_projects', dataset_folder)
+    if os.path.exists(upload_dir):
+        remove_tree(upload_dir)
+    os.makedirs(upload_dir, exist_ok=True)
+
+    zip_path = os.path.join(upload_dir, f'{fixed_name}.zip')
+    with open(zip_path, 'wb+') as destination:
+        for chunk in uploaded_file.chunks():
+            destination.write(chunk)
+
+    is_valid_zip, zip_message = validate_shapefile_zip(zip_path)
+    if not is_valid_zip:
+        raise ValueError(zip_message)
+
+    source_shp = _extract_shapefile_zip(zip_path, upload_dir)
+    shp_path, encoding = _normalize_shapefile_dataset(source_shp, upload_dir, fixed_name)
+    return {
+        'upload_dir': upload_dir,
+        'zip_path': zip_path,
+        'shp_path': shp_path,
+        'encoding': encoding,
+    }
+
+
+def _run_landuse_index_analysis(request, uploaded_file, analysis_type):
+    prepared = None
+    analyzer = None
+    try:
+        prepared = _prepare_landuse_analysis_input(
+            uploaded_file,
+            requested_attr=request.data.get('landuse_attr'),
+        )
+        analyzer_cls = LandUseAnalyzer if LandUseAnalyzer is not None else RasterioLandUseAnalyzer
+        analyzer = analyzer_cls(prepared['raster_input'])
+        is_gdal_engine = analyzer_cls is LandUseAnalyzer
+
+        analysis_meta = {
+            'analysis_engine': 'gdal' if is_gdal_engine else 'rasterio_fallback',
+            'analysis_engine_label': 'GDAL精确计算' if is_gdal_engine else 'Rasterio兼容计算',
+            'analysis_precision': 'full_resolution' if is_gdal_engine else 'mixed_resolution',
+            'analysis_notes': (
+                [
+                    '当前结果基于全量栅格像元进行计算，适合直接用于正式分析。'
+                ]
+                if is_gdal_engine else
+                [
+                    '当前环境未启用GDAL，系统已自动切换为兼容计算模式。',
+                    '面积占比、脆弱度、土壤侵蚀、开发比例、退化指数基于全量像元统计。',
+                    '破碎度和内聚力在兼容模式下基于降采样预览估算，适合快速研判，正式成果建议在GDAL环境复核。'
+                ]
+            )
+        }
+
+        if not analyzer.load_landuse_data():
+            return Response({'error': '土地利用数据加载失败'}, status=400)
+
+        if analysis_type == 'structure':
+            results = {
+                'fragmentation': analyzer.calculate_fragmentation_index() or {'error': '破碎度指数计算失败'},
+                'cohesion': analyzer.calculate_cohesion_index() or {'error': '内聚力指数计算失败'},
+                'diversity': analyzer.calculate_diversity_index() or {'error': '多样性指数计算失败'},
+                'fragility': analyzer.calculate_fragility_index() or {'error': '脆弱度指数计算失败'},
+            }
+            summary = {
+                'fragmentation_index': results.get('fragmentation', {}).get('overall_fragmentation', 0),
+                'cohesion_index': results.get('cohesion', {}).get('cohesion_index', 0),
+                'shannon_diversity': results.get('diversity', {}).get('shannon_diversity', 0),
+                'fragility_index': results.get('fragility', {}).get('fragility_index', 0),
+            }
+            message = '生态环境结构指数计算完成'
+        else:
+            results = {
+                'soil_erosion': analyzer.calculate_soil_erosion_index() or {'error': '土壤侵蚀指数计算失败'},
+                'unused_land': analyzer.calculate_unused_land_ratio() or {'error': '未利用地面积比例计算失败'},
+                'cultivated_construction': analyzer.calculate_development_ratio() or {'error': '耕地建设用地面积比例计算失败'},
+                'land_degradation': analyzer.calculate_land_degradation_index() or {'error': '土地退化指数计算失败'},
+            }
+            summary = {
+                'soil_erosion_index': results.get('soil_erosion', {}).get('soil_erosion_index', 0),
+                'unused_land_proportion': results.get('unused_land', {}).get('unused_land_ratio', 0),
+                'cultivated_construction_proportion': results.get('cultivated_construction', {}).get('development_ratio', 0),
+                'land_degradation_index': results.get('land_degradation', {}).get('land_degradation_index', 0),
+            }
+            message = '生态环境胁迫指数计算完成'
+
+        visualization = _landuse_visualization_payload(request, analyzer, uploaded_file.name)
+        return Response({
+            'message': message,
+            'results': results,
+            'visualization': visualization,
+            'summary': summary,
+            'meta': analysis_meta,
+        })
+    except ValueError as exc:
+        return Response({'error': str(exc)}, status=400)
+    except RuntimeError as exc:
+        status_code = 503 if 'gdal' in str(exc).lower() or 'osgeo' in str(exc).lower() else 500
+        return Response({'error': str(exc)}, status=status_code)
+    except Exception as exc:
+        logger.exception(f'计算土地利用指数失败: {analysis_type}')
+        return Response({'error': f'计算失败: {exc}'}, status=500)
+    finally:
+        if analyzer is not None:
+            analyzer.close()
+        if prepared:
+            _cleanup_temp_paths(prepared.get('cleanup_files'), prepared.get('cleanup_dirs'))
+
+
 def _media_url(request, relative_path):
     if not relative_path:
         return None
@@ -478,6 +812,64 @@ def _statistics_payload(stats):
 
 def _single_band_statistics(path):
     return preview_array(path), raster_band_statistics(path)
+
+
+def _remote_preview_thresholds():
+    max_preview_pixels = getattr(settings, 'REMOTE_ANALYSIS_PREVIEW_MAX_PIXELS', 16000000)
+    max_preview_side = getattr(settings, 'REMOTE_ANALYSIS_PREVIEW_MAX_SIDE', 2500)
+    return int(max_preview_pixels), int(max_preview_side)
+
+
+def _should_use_remote_preview(dataset):
+    max_pixels, max_side = _remote_preview_thresholds()
+    total_pixels = int(dataset.width) * int(dataset.height)
+    return total_pixels > max_pixels or dataset.width > max_side or dataset.height > max_side
+
+
+def _remote_preview_scale(width, height):
+    _, max_side = _remote_preview_thresholds()
+    return max(1, int(np.ceil(max(width, height) / max_side)))
+
+
+def _preview_multiband_index(raster_path, index_type):
+    with rasterio.open(raster_path) as dataset:
+        band_count = int(dataset.count)
+        scale = _remote_preview_scale(dataset.width, dataset.height)
+        out_height = max(1, dataset.height // scale)
+        out_width = max(1, dataset.width // scale)
+
+        if index_type == 'ndbi':
+            if band_count >= 11:
+                swir_band = dataset.read(11, out_shape=(out_height, out_width), resampling=rasterio.enums.Resampling.bilinear).astype('float32')
+                nir_band = dataset.read(8, out_shape=(out_height, out_width), resampling=rasterio.enums.Resampling.bilinear).astype('float32')
+            elif band_count >= 6:
+                swir_band = dataset.read(6, out_shape=(out_height, out_width), resampling=rasterio.enums.Resampling.bilinear).astype('float32')
+                nir_band = dataset.read(5, out_shape=(out_height, out_width), resampling=rasterio.enums.Resampling.bilinear).astype('float32')
+            elif band_count == 3:
+                swir_band = dataset.read(3, out_shape=(out_height, out_width), resampling=rasterio.enums.Resampling.bilinear).astype('float32')
+                nir_band = dataset.read(1, out_shape=(out_height, out_width), resampling=rasterio.enums.Resampling.bilinear).astype('float32')
+            else:
+                raise ValueError(f'当前波段配置不支持 {index_type.upper()} 预览计算')
+            denominator = swir_band + nir_band
+            index_data = np.full_like(swir_band, np.nan, dtype=np.float32)
+            valid_mask = denominator != 0
+            index_data[valid_mask] = (swir_band[valid_mask] - nir_band[valid_mask]) / denominator[valid_mask]
+        else:
+            numerator_band, denominator_band = {
+                'ndvi': (8, 4) if band_count >= 8 else (5, 4) if band_count >= 5 else (4, 3) if band_count == 4 else (2, 1),
+                'ndwi': (3, 8) if band_count >= 8 else (3, 5) if band_count >= 5 else (2, 4) if band_count == 4 else (2, 1),
+            }[index_type]
+            numerator = dataset.read(numerator_band, out_shape=(out_height, out_width), resampling=rasterio.enums.Resampling.bilinear).astype('float32')
+            denominator = dataset.read(denominator_band, out_shape=(out_height, out_width), resampling=rasterio.enums.Resampling.bilinear).astype('float32')
+            base = numerator + denominator
+            index_data = np.full_like(numerator, np.nan, dtype=np.float32)
+            valid_mask = base != 0
+            index_data[valid_mask] = (numerator[valid_mask] - denominator[valid_mask]) / base[valid_mask]
+
+        nodata = dataset.nodata
+        if nodata is not None:
+            index_data[index_data == nodata] = np.nan
+        return np.clip(index_data, -1.0, 1.0)
 
 
 def _safe_layer_name(name):
@@ -519,6 +911,7 @@ def _raster_layer_metadata(path):
     try:
         with rasterio.open(path) as dataset:
             bounds = dataset.bounds
+            rgb_bands = _infer_raster_rgb_bands(dataset)
             metadata.update({
                 'bounds': [bounds.left, bounds.bottom, bounds.right, bounds.top],
                 'crs': dataset.crs.to_string() if dataset.crs else None,
@@ -526,10 +919,49 @@ def _raster_layer_metadata(path):
                 'height': dataset.height,
                 'band_count': dataset.count,
                 'dtype': dataset.dtypes[0] if dataset.dtypes else None,
+                'band_descriptions': [desc for desc in (dataset.descriptions or ()) if desc],
+                'colorinterp': [str(item) for item in getattr(dataset, 'colorinterp', ())],
+                'rgb_bands': rgb_bands,
             })
     except Exception as exc:
         logger.warning(f"读取栅格元数据失败: {exc}")
     return metadata
+
+
+def _infer_raster_rgb_bands(dataset):
+    """尽量推断栅格影像的 RGB 波段顺序。"""
+    band_count = int(getattr(dataset, 'count', 0) or 0)
+    if band_count < 3:
+        return None
+
+    colorinterp = [str(item).lower() for item in getattr(dataset, 'colorinterp', ()) or ()]
+    if colorinterp:
+        rgb_mapping = {}
+        for index, name in enumerate(colorinterp, start=1):
+            if 'red' in name:
+                rgb_mapping['red_band'] = index
+            elif 'green' in name:
+                rgb_mapping['green_band'] = index
+            elif 'blue' in name:
+                rgb_mapping['blue_band'] = index
+        if len(rgb_mapping) == 3:
+            return rgb_mapping
+
+    descriptions = [((desc or '').strip().lower()) for desc in (getattr(dataset, 'descriptions', None) or ())]
+    if descriptions:
+        rgb_mapping = {}
+        for index, desc in enumerate(descriptions, start=1):
+            if desc in {'r', 'red', 'band_r', 'band_red'} or 'red' in desc:
+                rgb_mapping['red_band'] = index
+            elif desc in {'g', 'green', 'band_g', 'band_green'} or 'green' in desc:
+                rgb_mapping['green_band'] = index
+            elif desc in {'b', 'blue', 'band_b', 'band_blue'} or 'blue' in desc:
+                rgb_mapping['blue_band'] = index
+        if len(rgb_mapping) == 3:
+            return rgb_mapping
+
+    # 常见遥感多光谱影像通常按 B,G,R,(NIR) 存储，默认回退为 3,2,1 真彩色。
+    return {'red_band': 3, 'green_band': 2, 'blue_band': 1}
 
 
 def _vector_layer_metadata(path):
@@ -817,6 +1249,43 @@ def _vector_style_sld(layer_name, style_config):
 
 def _raster_style_sld(layer_name, style_config):
     opacity = style_config.get('raster_opacity', 0.72)
+    band_count = int(style_config.get('band_count') or 1)
+    if band_count >= 3:
+        red_band = int(style_config.get('red_band') or 1)
+        green_band = int(style_config.get('green_band') or 2)
+        blue_band = int(style_config.get('blue_band') or 3)
+        return f'''<?xml version="1.0" encoding="UTF-8"?>
+<StyledLayerDescriptor version="1.0.0"
+  xmlns="http://www.opengis.net/sld"
+  xmlns:xlink="http://www.w3.org/1999/xlink"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.opengis.net/sld http://schemas.opengis.net/sld/1.0.0/StyledLayerDescriptor.xsd">
+  <NamedLayer>
+    <Name>{layer_name}</Name>
+    <UserStyle>
+      <Title>{layer_name} raster RGB style</Title>
+      <FeatureTypeStyle>
+        <Rule>
+          <RasterSymbolizer>
+            <Opacity>{opacity}</Opacity>
+            <ChannelSelection>
+              <RedChannel>
+                <SourceChannelName>{red_band}</SourceChannelName>
+              </RedChannel>
+              <GreenChannel>
+                <SourceChannelName>{green_band}</SourceChannelName>
+              </GreenChannel>
+              <BlueChannel>
+                <SourceChannelName>{blue_band}</SourceChannelName>
+              </BlueChannel>
+            </ChannelSelection>
+          </RasterSymbolizer>
+        </Rule>
+      </FeatureTypeStyle>
+    </UserStyle>
+  </NamedLayer>
+</StyledLayerDescriptor>'''
+
     min_value = float(style_config.get('min_value', 0))
     max_value = float(style_config.get('max_value', 100))
     if max_value <= min_value:
@@ -858,11 +1327,17 @@ def _raster_style_sld(layer_name, style_config):
 
 def _check_layer_service_availability(layer):
     timeout = 20
+    metadata = layer.metadata or {}
+    geoserver_auth = None
+
+    if layer.geoserver_workspace and not metadata.get('is_external_service'):
+        from .geoserver_config import get_geoserver_manager
+        geoserver_auth = get_geoserver_manager().auth
 
     try:
         if layer.layer_type == 'vector' and layer.wfs_url:
             type_name = layer.service_type_name or layer.geoserver_layer_name
-            if layer.geoserver_workspace and type_name and ':' not in type_name and not layer.metadata.get('is_external_service'):
+            if layer.geoserver_workspace and type_name and ':' not in type_name and not metadata.get('is_external_service'):
                 type_name = f'{layer.geoserver_workspace}:{type_name}'
             probe_url = _update_url_query(
                 layer.wfs_url,
@@ -873,39 +1348,42 @@ def _check_layer_service_availability(layer):
                 outputFormat='application/json',
                 count='1'
             )
-            response = requests.get(probe_url, timeout=timeout)
+            response = requests.get(probe_url, timeout=timeout, auth=geoserver_auth)
             if response.ok:
                 return _service_health_payload('healthy', 'WFS 服务可访问')
             return _service_health_payload('unhealthy', f'WFS 检测失败: HTTP {response.status_code}')
 
         if layer.wms_url:
-            metadata = layer.metadata or {}
             bounds = metadata.get('bounds') or [-180, -90, 180, 90]
             crs = layer.service_srs or metadata.get('crs') or 'EPSG:4326'
             layers = layer.service_type_name or layer.geoserver_layer_name
             if layer.geoserver_workspace and layers and ':' not in layers and not metadata.get('is_external_service'):
                 layers = f'{layer.geoserver_workspace}:{layers}'
+            wms_query = dict(parse_qsl(urlsplit(layer.wms_url).query, keep_blank_values=True))
+            service_version = wms_query.get('version') or wms_query.get('VERSION') or '1.3.0'
+            crs_param = 'crs' if service_version == '1.3.0' else 'srs'
             probe_url = _update_url_query(
                 layer.wms_url,
                 service='WMS',
                 request='GetMap',
-                version='1.1.0',
+                version=service_version,
                 layers=layers,
                 bbox=','.join(str(value) for value in bounds),
                 width='32',
                 height='32',
-                srs=crs,
+                srs=crs if crs_param == 'srs' else None,
+                crs=crs if crs_param == 'crs' else None,
                 format='image/png',
                 transparent='true'
             )
-            response = requests.get(probe_url, timeout=timeout)
+            response = requests.get(probe_url, timeout=timeout, auth=geoserver_auth)
             if response.ok and 'image/' in (response.headers.get('Content-Type') or ''):
                 return _service_health_payload('healthy', 'WMS 服务可访问')
             return _service_health_payload('unhealthy', f'WMS 检测失败: HTTP {response.status_code}')
 
         if layer.wcs_url:
             coverage_id = layer.service_type_name or layer.geoserver_layer_name
-            if layer.geoserver_workspace and coverage_id and ':' not in coverage_id and not (layer.metadata or {}).get('is_external_service'):
+            if layer.geoserver_workspace and coverage_id and ':' not in coverage_id and not metadata.get('is_external_service'):
                 coverage_id = f'{layer.geoserver_workspace}:{coverage_id}'
             probe_url = _update_url_query(
                 layer.wcs_url,
@@ -914,7 +1392,7 @@ def _check_layer_service_availability(layer):
                 version='2.0.1',
                 coverageId=coverage_id
             )
-            response = requests.get(probe_url, timeout=timeout)
+            response = requests.get(probe_url, timeout=timeout, auth=geoserver_auth)
             if response.ok:
                 return _service_health_payload('healthy', 'WCS 服务可访问')
             return _service_health_payload('unhealthy', f'WCS 检测失败: HTTP {response.status_code}')
@@ -934,6 +1412,7 @@ def geoserver_ows_proxy(request):
     from .geoserver_config import get_geoserver_manager
 
     geoserver = get_geoserver_manager()
+    logger.info(f"GeoServer OWS proxy request: params={dict(request.GET)}")
     try:
         upstream = requests.get(
             f'{geoserver.base_url}/ows',
@@ -943,6 +1422,14 @@ def geoserver_ows_proxy(request):
         )
     except requests.RequestException as exc:
         return Response({'error': f'GeoServer代理请求失败: {exc}'}, status=502)
+
+    if upstream.status_code >= 400:
+        logger.warning(
+            "GeoServer OWS proxy upstream error: status=%s content_type=%s body=%s",
+            upstream.status_code,
+            upstream.headers.get('Content-Type'),
+            upstream.text[:500],
+        )
 
     content_type = upstream.headers.get('Content-Type', 'application/octet-stream')
     response = HttpResponse(
@@ -1003,6 +1490,8 @@ def analyze_remote_sensing_upload(request):
     cleanup_dirs = []
     try:
         raster_abs = upload_abs
+        preview_mode = False
+        preview_message = None
         if extension == '.zip':
             raster_abs, cleanup_dirs = prepare_raster_upload(upload_abs, result_dir_abs)
             extension = '.tif'
@@ -1010,22 +1499,38 @@ def analyze_remote_sensing_upload(request):
         if extension in ['.tif', '.tiff']:
             with rasterio.open(raster_abs) as probe_dataset:
                 band_count = int(probe_dataset.count)
+                preview_mode = _should_use_remote_preview(probe_dataset)
         else:
             band_count = None
         results = []
         supported_indices = _supported_remote_indices(band_count)
         if index_type not in supported_indices and band_count != 1:
             return _unsupported_remote_index_response(index_type, band_count)
+        if preview_mode and band_count and band_count > 1 and index_type not in ['ndvi', 'ndwi', 'ndbi']:
+            return Response({
+                'error': '当前影像尺寸过大，已为稳定性限制为预览模式。超大影像暂仅支持 NDVI、NDWI、NDBI 预览分析；如需计算热度、干度、湿度、绿度或 RSEI，请先裁剪研究区域后再上传。',
+                'bands_count': band_count,
+                'requested_index': index_type,
+                'supported_indices': ['ndvi', 'ndwi', 'ndbi'],
+                'supported_index_labels': [REMOTE_INDEX_LABELS[item] for item in ['ndvi', 'ndwi', 'ndbi']],
+            }, status=400)
 
         if band_count == 1 and extension in ['.tif', '.tiff']:
             label = '上传成果栅格'
             index_data, stats = _single_band_statistics(raster_abs)
             index_result_type = 'uploaded_raster'
-        elif extension in ['.tif', '.tiff'] and index_type in ['ndvi', 'ndwi'] and band_count and band_count >= 3:
+        elif extension in ['.tif', '.tiff'] and index_type in ['ndvi', 'ndwi'] and band_count and band_count >= 3 and not preview_mode:
             index_result_type = index_type
             label = REMOTE_INDEX_METHODS[index_type][0]
             index_data, stats = calculate_normalized_index_preview_stats(raster_abs, index_type)
             result_file_url = None
+        elif extension in ['.tif', '.tiff'] and preview_mode and index_type in ['ndvi', 'ndwi', 'ndbi'] and band_count and band_count >= 3:
+            index_result_type = index_type
+            label = REMOTE_INDEX_METHODS[index_type][0]
+            index_data = _preview_multiband_index(raster_abs, index_type)
+            stats = EcologicalIndexCalculator(raster_abs).calculate_statistics(index_data)
+            result_file_url = None
+            preview_message = '检测到超大影像，已自动切换为预览级分析，保证上传与显示稳定。'
         else:
             calculator = EcologicalIndexCalculator(raster_abs)
             if not calculator.load_image():
@@ -1052,6 +1557,9 @@ def analyze_remote_sensing_upload(request):
                     return _unsupported_remote_index_response(index_type, band_count)
                 stats = calculator.calculate_statistics(index_data)
                 index_result_type = index_type
+            if preview_mode:
+                preview_message = '检测到超大影像，本次返回预览级结果；如需完整精度结果，建议裁剪区域后再分析。'
+                result_file_url = None
 
         if not stats:
             return Response({'error': '统计结果生成失败'}, status=500)
@@ -1079,6 +1587,8 @@ def analyze_remote_sensing_upload(request):
 
         return Response({
             'message': '分析完成',
+            'preview_mode': preview_mode,
+            'preview_message': preview_message,
             'source': {
                 'filename': uploaded_file.name,
                 'uploaded_file_url': _media_url(request, upload_rel),
@@ -1111,174 +1621,16 @@ def calculate_ecological_structure_indices(request):
     计算生态环境结构指数
     包括：破碎度指数、内聚力指数、多样性指数、脆弱度指数
     """
-    try:
-        # 获取上传的土地利用数据文件
-        if 'landuse_file' not in request.FILES:
-            return Response({
-                'error': '请上传土地利用数据文件'
-            }, status=400)
-        
-        landuse_file = request.FILES['landuse_file']
-        if landuse_file.name.lower().endswith('.adf'):
-            return Response({
-                'error': 'ADF 是 ArcGIS 栅格目录格式，不能作为单文件上传。请先用 GDAL/ArcGIS 转为 GeoTIFF(.tif) 后再上传。'
-            }, status=400)
-        
-        # 保存文件到临时位置
-        file_path = default_storage.save(
-            f'landuse_analysis/{landuse_file.name}',
-            ContentFile(landuse_file.read())
-        )
-        try:
-            # 转换为绝对路径
-            abs_file_path = default_storage.path(file_path)
-            
-            # 如果是矢量（.zip/.shp），先栅格化为整型GeoTIFF
-            raster_input = abs_file_path
-            lower = file_path.lower()
-            if lower.endswith('.zip') or lower.endswith('.shp'):
-                if GDAL_IMPORT_ERROR or rasterize_shapefile_to_tiff is None:
-                    return Response({
-                        'error': f'Shapefile栅格化需要 GDAL/osgeo。当前环境未安装: {GDAL_IMPORT_ERROR}'
-                    }, status=503)
-                # 选择分类字段：前端可传入 landuse_attr，否则尝试常见字段
-                attr = request.data.get('landuse_attr') or 'class'
-                try_fields = [attr, 'landuse', 'code', 'class_id']
-                tmp_tif = os.path.splitext(abs_file_path)[0] + '.tif'
-                last_err = None
-                for field in try_fields:
-                    try:
-                        rasterize_shapefile_to_tiff(abs_file_path, tmp_tif, attribute_field=field)
-                        raster_input = tmp_tif
-                        break
-                    except Exception as e:
-                        last_err = e
-                        continue
-                else:
-                    raise last_err or ValueError('栅格化失败，未找到有效属性字段')
+    if 'landuse_file' not in request.FILES:
+        return Response({'error': '请上传土地利用数据文件'}, status=400)
 
-            # 创建土地利用分析器
-            analyzer_cls = LandUseAnalyzer if LandUseAnalyzer is not None else RasterioLandUseAnalyzer
-            analyzer = analyzer_cls(raster_input)
-            
-            # 加载土地利用数据
-            if not analyzer.load_landuse_data():
-                return Response({
-                    'error': '土地利用数据加载失败'
-                }, status=400)
-            
-            # 计算各项生态环境结构指数
-            results = {}
-            
-            # 1. 计算破碎度指数
-            fragmentation_result = analyzer.calculate_fragmentation_index()
-            if fragmentation_result:
-                results['fragmentation'] = fragmentation_result
-            else:
-                results['fragmentation'] = {'error': '破碎度指数计算失败'}
-            
-            # 2. 计算内聚力指数
-            cohesion_result = analyzer.calculate_cohesion_index()
-            if cohesion_result:
-                results['cohesion'] = cohesion_result
-            else:
-                results['cohesion'] = {'error': '内聚力指数计算失败'}
-            
-            # 3. 计算多样性指数
-            diversity_result = analyzer.calculate_diversity_index()
-            if diversity_result:
-                results['diversity'] = diversity_result
-            else:
-                results['diversity'] = {'error': '多样性指数计算失败'}
-            
-            # 4. 计算脆弱度指数
-            fragility_result = analyzer.calculate_fragility_index()
-            if fragility_result:
-                results['fragility'] = fragility_result
-            else:
-                results['fragility'] = {'error': '脆弱度指数计算失败'}
-
-            visualization = _landuse_visualization_payload(request, analyzer, landuse_file.name)
-            analyzer.close()
-            
-            # 清理临时文件
-            abs_file_path = default_storage.path(file_path)
-            if os.path.exists(abs_file_path):
-                try:
-                    os.remove(abs_file_path)
-                except PermissionError:
-                    logger.warning(f"无法删除文件 {abs_file_path}，可能仍被占用")
-            # 若生成了临时tif也清理
-            tif_candidate = os.path.splitext(abs_file_path)[0] + '.tif'
-            if os.path.exists(tif_candidate):
-                try:
-                    os.remove(tif_candidate)
-                except PermissionError:
-                    logger.warning(f"无法删除文件 {tif_candidate}，可能仍被占用")
-            
-            return Response({
-                'message': '生态环境结构指数计算完成',
-                'results': results,
-                'visualization': visualization,
-                'summary': {
-                    'fragmentation_index': results.get('fragmentation', {}).get('overall_fragmentation', 0),
-                    'cohesion_index': results.get('cohesion', {}).get('cohesion_index', 0),
-                    'shannon_diversity': results.get('diversity', {}).get('shannon_diversity', 0),
-                    'fragility_index': results.get('fragility', {}).get('fragility_index', 0)
-                }
-            })
-            
-        except Exception as e:
-            # 清理临时文件
-            abs_file_path = default_storage.path(file_path)
-            if os.path.exists(abs_file_path):
-                try:
-
-                    os.remove(abs_file_path)
-
-                except PermissionError:
-
-                    logger.warning(f"无法删除文件 {abs_file_path}，可能仍被占用")
-            tif_candidate = os.path.splitext(abs_file_path)[0] + '.tif'
-            if os.path.exists(tif_candidate):
-                try:
-
-                    os.remove(tif_candidate)
-
-                except PermissionError:
-
-                    logger.warning(f"无法删除文件 {tif_candidate}，可能仍被占用")
-            raise e
-            
-    except Exception as e:
-        # 关闭分析器资源
-        if 'analyzer' in locals():
-            analyzer.close()
-        
-        # 清理临时文件
-        try:
-            abs_file_path = default_storage.path(file_path)
-            if os.path.exists(abs_file_path):
-                try:
-                    os.remove(abs_file_path)
-                except PermissionError:
-                    logger.warning(f"无法删除文件 {abs_file_path}，可能仍被占用")
-            tif_candidate = os.path.splitext(abs_file_path)[0] + '.tif'
-            if os.path.exists(tif_candidate):
-                try:
-                    os.remove(tif_candidate)
-                except PermissionError:
-                    logger.warning(f"无法删除文件 {tif_candidate}，可能仍被占用")
-        except Exception as cleanup_error:
-            logger.warning(f"清理临时文件时出错: {cleanup_error}")
-        
-        logger.error(f"计算生态环境结构指数失败: {e}")
-        import traceback
-        traceback.print_exc()
+    landuse_file = request.FILES['landuse_file']
+    if landuse_file.name.lower().endswith('.adf'):
         return Response({
-            'error': f'计算失败: {str(e)}',
-            'traceback': traceback.format_exc()
-        }, status=500)
+            'error': 'ADF 是 ArcGIS 栅格目录格式，不能作为单文件上传。请先用 GDAL/ArcGIS 转为 GeoTIFF(.tif) 后再上传。'
+        }, status=400)
+
+    return _run_landuse_index_analysis(request, landuse_file, 'structure')
 
 @api_view(['POST'])
 @authentication_classes([])
@@ -1288,178 +1640,16 @@ def calculate_ecological_stress_indices(request):
     计算生态环境胁迫指数
     包括：土壤侵蚀指数、未利用地面积比例、耕地建设用地面积比例、土地退化指数
     """
-    try:
-        # 获取上传的土地利用数据文件
-        if 'landuse_file' not in request.FILES:
-            return Response({
-                'error': '请上传土地利用数据文件'
-            }, status=400)
-        
-        landuse_file = request.FILES['landuse_file']
-        if landuse_file.name.lower().endswith('.adf'):
-            return Response({
-                'error': 'ADF 是 ArcGIS 栅格目录格式，不能作为单文件上传。请先用 GDAL/ArcGIS 转为 GeoTIFF(.tif) 后再上传。'
-            }, status=400)
-        
-        # 保存文件到临时位置
-        file_path = default_storage.save(
-            f'landuse_analysis/{landuse_file.name}',
-            ContentFile(landuse_file.read())
-        )
-        try:
-            # 转换为绝对路径
-            abs_file_path = default_storage.path(file_path)
-            
-            # 如果是矢量（.zip/.shp），先栅格化为整型GeoTIFF
-            raster_input = abs_file_path
-            lower = file_path.lower()
-            if lower.endswith('.zip') or lower.endswith('.shp'):
-                if GDAL_IMPORT_ERROR or rasterize_shapefile_to_tiff is None:
-                    return Response({
-                        'error': f'Shapefile栅格化需要 GDAL/osgeo。当前环境未安装: {GDAL_IMPORT_ERROR}'
-                    }, status=503)
-                attr = request.data.get('landuse_attr') or 'class'
-                try_fields = [attr, 'landuse', 'code', 'class_id']
-                tmp_tif = os.path.splitext(abs_file_path)[0] + '.tif'
-                last_err = None
-                for field in try_fields:
-                    try:
-                        rasterize_shapefile_to_tiff(abs_file_path, tmp_tif, attribute_field=field)
-                        raster_input = tmp_tif
-                        break
-                    except Exception as e:
-                        last_err = e
-                        continue
-                else:
-                    raise last_err or ValueError('栅格化失败，未找到有效属性字段')
+    if 'landuse_file' not in request.FILES:
+        return Response({'error': '请上传土地利用数据文件'}, status=400)
 
-            # 创建土地利用分析器
-            analyzer_cls = LandUseAnalyzer if LandUseAnalyzer is not None else RasterioLandUseAnalyzer
-            analyzer = analyzer_cls(raster_input)
-            
-            # 加载土地利用数据
-            if not analyzer.load_landuse_data():
-                return Response({
-                    'error': '土地利用数据加载失败'
-                }, status=400)
-            
-            # 计算各项生态环境胁迫指数
-            results = {}
-            
-            # 1. 计算土壤侵蚀指数
-            soil_erosion_result = analyzer.calculate_soil_erosion_index()
-            if soil_erosion_result:
-                results['soil_erosion'] = soil_erosion_result
-            else:
-                results['soil_erosion'] = {'error': '土壤侵蚀指数计算失败'}
-            
-            # 2. 计算未利用地面积比例
-            unused_land_result = analyzer.calculate_unused_land_ratio()
-            if unused_land_result:
-                results['unused_land'] = unused_land_result
-            else:
-                results['unused_land'] = {'error': '未利用地面积比例计算失败'}
-            
-            # 3. 计算耕地建设用地面积比例
-            cultivated_construction_result = analyzer.calculate_development_ratio()
-            if cultivated_construction_result:
-                results['cultivated_construction'] = cultivated_construction_result
-            else:
-                results['cultivated_construction'] = {'error': '耕地建设用地面积比例计算失败'}
-            
-            # 4. 计算土地退化指数
-            land_degradation_result = analyzer.calculate_land_degradation_index()
-            if land_degradation_result:
-                results['land_degradation'] = land_degradation_result
-            else:
-                results['land_degradation'] = {'error': '土地退化指数计算失败'}
-
-            visualization = _landuse_visualization_payload(request, analyzer, landuse_file.name)
-            analyzer.close()
-            
-            # 清理临时文件
-            abs_file_path = default_storage.path(file_path)
-            if os.path.exists(abs_file_path):
-                try:
-
-                    os.remove(abs_file_path)
-
-                except PermissionError:
-
-                    logger.warning(f"无法删除文件 {abs_file_path}，可能仍被占用")
-            tif_candidate = os.path.splitext(abs_file_path)[0] + '.tif'
-            if os.path.exists(tif_candidate):
-                try:
-
-                    os.remove(tif_candidate)
-
-                except PermissionError:
-
-                    logger.warning(f"无法删除文件 {tif_candidate}，可能仍被占用")
-            
-            return Response({
-                'message': '生态环境胁迫指数计算完成',
-                'results': results,
-                'visualization': visualization,
-                'summary': {
-                    'soil_erosion_index': results.get('soil_erosion', {}).get('soil_erosion_index', 0),
-                    'unused_land_proportion': results.get('unused_land', {}).get('unused_land_ratio', 0),
-                    'cultivated_construction_proportion': results.get('cultivated_construction', {}).get('development_ratio', 0),
-                    'land_degradation_index': results.get('land_degradation', {}).get('land_degradation_index', 0)
-                }
-            })
-            
-        except Exception as e:
-            # 清理临时文件
-            abs_file_path = default_storage.path(file_path)
-            if os.path.exists(abs_file_path):
-                try:
-
-                    os.remove(abs_file_path)
-
-                except PermissionError:
-
-                    logger.warning(f"无法删除文件 {abs_file_path}，可能仍被占用")
-            tif_candidate = os.path.splitext(abs_file_path)[0] + '.tif'
-            if os.path.exists(tif_candidate):
-                try:
-
-                    os.remove(tif_candidate)
-
-                except PermissionError:
-
-                    logger.warning(f"无法删除文件 {tif_candidate}，可能仍被占用")
-            raise e
-            
-    except Exception as e:
-        # 关闭分析器资源
-        if 'analyzer' in locals():
-            analyzer.close()
-        
-        # 清理临时文件
-        try:
-            abs_file_path = default_storage.path(file_path)
-            if os.path.exists(abs_file_path):
-                try:
-                    os.remove(abs_file_path)
-                except PermissionError:
-                    logger.warning(f"无法删除文件 {abs_file_path}，可能仍被占用")
-            tif_candidate = os.path.splitext(abs_file_path)[0] + '.tif'
-            if os.path.exists(tif_candidate):
-                try:
-                    os.remove(tif_candidate)
-                except PermissionError:
-                    logger.warning(f"无法删除文件 {tif_candidate}，可能仍被占用")
-        except Exception as cleanup_error:
-            logger.warning(f"清理临时文件时出错: {cleanup_error}")
-        
-        logger.error(f"计算生态环境胁迫指数失败: {e}")
-        import traceback
-        traceback.print_exc()
+    landuse_file = request.FILES['landuse_file']
+    if landuse_file.name.lower().endswith('.adf'):
         return Response({
-            'error': f'计算失败: {str(e)}',
-            'traceback': traceback.format_exc()
-        }, status=500)
+            'error': 'ADF 是 ArcGIS 栅格目录格式，不能作为单文件上传。请先用 GDAL/ArcGIS 转为 GeoTIFF(.tif) 后再上传。'
+        }, status=400)
+
+    return _run_landuse_index_analysis(request, landuse_file, 'stress')
 
 
 # 气候监测相关视图
@@ -1591,6 +1781,46 @@ def validate_climate_file(file_obj):
     
     return errors
 
+
+def _detect_climate_file_capabilities(file_obj, file_type):
+    file_name = getattr(file_obj, 'name', '') or ''
+    supported_metrics = ['temperature', 'precipitation', 'humidity', 'wind_speed']
+    detected_mode = 'table'
+    inferred_metric = None
+    unsupported_for_climate = False
+    manual_selection_required = False
+    detected_category = 'climate_table'
+    reason = None
+
+    if file_type in ['tif', 'tiff', 'zip']:
+        from .climate_analysis import detect_climate_raster_capabilities
+        raster_capability = detect_climate_raster_capabilities(file_name)
+        inferred_metric = raster_capability.get('inferred_metric')
+        supported_metrics = raster_capability.get('supported_metrics', [])
+        detected_mode = raster_capability.get('detected_mode', 'single_metric_raster')
+        unsupported_for_climate = raster_capability.get('unsupported_for_climate', False)
+        manual_selection_required = raster_capability.get('manual_selection_required', False)
+        detected_category = raster_capability.get('detected_category', 'single_metric_raster')
+        reason = raster_capability.get('reason')
+
+    metric_labels = {
+        'temperature': '温度',
+        'precipitation': '降水量',
+        'humidity': '湿度',
+        'wind_speed': '风速'
+    }
+
+    return {
+        'detected_mode': detected_mode,
+        'inferred_metric': inferred_metric,
+        'supported_metrics': supported_metrics,
+        'supported_metric_labels': [metric_labels[item] for item in supported_metrics if item in metric_labels],
+        'unsupported_for_climate': unsupported_for_climate,
+        'manual_selection_required': manual_selection_required,
+        'detected_category': detected_category,
+        'reason': reason,
+    }
+
 @api_view(['POST'])
 @authentication_classes([])
 @permission_classes([AllowAny])
@@ -1660,13 +1890,15 @@ def upload_climate_data(request):
                     description=serializer.validated_data.get('description', ''),
                     uploaded_by=request.user if request.user.is_authenticated else None
                 )
+                capabilities = _detect_climate_file_capabilities(file_obj, file_type)
                 
                 logger.info(f"气候数据文件上传成功: {data_file.id} - {data_file.name}")
                 
                 return Response({
                     'success': True,
                     'file_id': data_file.id,
-                    'message': '文件上传成功'
+                    'message': '文件上传成功',
+                    'capabilities': capabilities,
                 })
             except Exception as e:
                 logger.error(f"创建文件记录失败: {str(e)}")
@@ -1760,7 +1992,15 @@ def analyze_climate_data_api(request):
                 return Response({
                     'error': f'文件状态不正确，当前状态: {data_file.get_status_display()}'
                 }, status=400)
-            
+
+            capabilities = _detect_climate_file_capabilities(data_file.file, data_file.file_type)
+            if capabilities.get('unsupported_for_climate'):
+                return Response({
+                    'error': capabilities.get('reason') or '当前文件不适用于气候监测统计',
+                    'capabilities': capabilities,
+                    'suggestion': '请将该文件上传到遥感生态指数分析模块进行处理'
+                }, status=400)
+
             # 检查文件是否真的存在
             if not data_file.file or not data_file.file.name:
                 logger.error(f"文件记录存在但文件不存在: {data_file.id}")
@@ -1859,10 +2099,19 @@ def get_climate_analysis_results(request, task_id):
                 from .models import ClimateAnalysisResult
                 
                 # 查找最近的气候分析结果
-                results = ClimateAnalysisResult.objects.all().order_by('-created_at')[:1]
+                results = ClimateAnalysisResult.objects.filter(processing_task=task).order_by('-created_at')
                 
                 if results.exists():
                     latest_result = results.first()
+                elif ' - ' in task.task_type:
+                    analysis_type = task.task_type.split(' - ', 1)[1]
+                    latest_result = ClimateAnalysisResult.objects.filter(
+                        analysis_type=analysis_type
+                    ).order_by('-created_at').first()
+                else:
+                    latest_result = None
+
+                if latest_result is not None:
                     serializer = ClimateAnalysisResultSerializer(latest_result)
                     
                     return Response({
@@ -1915,8 +2164,8 @@ class BusinessLayerViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.AllowAny]
 
     def get_permissions(self):
-        read_actions = {'list', 'retrieve', 'logs'}
-        if self.action in read_actions:
+        public_actions = {'list', 'retrieve', 'logs', 'create', 'publish', 'unpublish', 'destroy', 'style'}
+        if self.action in public_actions:
             return [permissions.AllowAny()]
         return [permissions.IsAuthenticated()]
 
@@ -2290,16 +2539,29 @@ class BusinessLayerViewSet(viewsets.ModelViewSet):
                             data = dataset.read(1, masked=True)
                             valid_data = data.compressed() if hasattr(data, 'compressed') else data.flatten()
                             if valid_data.size:
+                                inferred_rgb = _infer_raster_rgb_bands(dataset)
                                 raster_meta = {
                                     'min_value': float(np.min(valid_data)),
                                     'max_value': float(np.max(valid_data)),
                                     'nodata': dataset.nodata,
+                                    'band_count': dataset.count,
+                                    'rgb_bands': inferred_rgb,
                                 }
                     except Exception as exc:
                         logger.warning(f'读取栅格样式元数据失败: {exc}')
             next_style_config.setdefault('min_value', raster_meta.get('min_value', 0.0))
             next_style_config.setdefault('max_value', raster_meta.get('max_value', 100.0))
             next_style_config.setdefault('nodata', raster_meta.get('nodata'))
+            next_style_config.setdefault('band_count', raster_meta.get('band_count') or metadata.get('band_count') or 1)
+            if next_style_config.get('band_count', 1) >= 3:
+                rgb_bands = (
+                    raster_meta.get('rgb_bands')
+                    or metadata.get('rgb_bands')
+                    or {'red_band': 3, 'green_band': 2, 'blue_band': 1}
+                )
+                next_style_config.setdefault('red_band', rgb_bands.get('red_band', 3))
+                next_style_config.setdefault('green_band', rgb_bands.get('green_band', 2))
+                next_style_config.setdefault('blue_band', rgb_bands.get('blue_band', 1))
             generated_sld = next_style_config.get('sld_content') or _raster_style_sld(layer.geoserver_layer_name, next_style_config)
 
         style_name = next_style_config.get('style_name') or layer.style_name or f'{layer.geoserver_layer_name}_style'
@@ -3009,21 +3271,21 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                 else:
                     logger.warning("⚠️ GeoServer发布失败")
                     return Response({
-                        'success': True,
-                        'message': '文件上传成功，但GeoServer发布失败。请手动在GeoServer中发布或检查GeoServer连接',
+                        'success': False,
+                        'message': '文件已上传，但GeoServer发布失败。请检查GeoServer服务状态、工作区配置或数据坐标系。',
                         'file_name': file_name,
                         'save_path': save_path
-                    })
+                    }, status=502)
             except Exception as geo_error:
                 logger.error(f"GeoServer发布异常: {str(geo_error)}")
                 import traceback
                 logger.error(traceback.format_exc())
                 return Response({
-                    'success': True,
-                    'message': f'文件上传成功，但GeoServer发布失败: {str(geo_error)}。文件已保存，可稍后手动发布',
+                    'success': False,
+                    'message': f'文件已上传，但GeoServer发布失败: {str(geo_error)}',
                     'file_name': file_name,
                     'save_path': save_path
-                })
+                }, status=502)
                 
         except Exception as e:
             logger.error(f"❌ 上传生态栅格失败: {str(e)}")
@@ -3068,94 +3330,10 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                     'success': False,
                     'message': '文件大小超过1GB限制'
                 }, status=400)
-            
-            # 保存文件
-            import os
-            import zipfile
-            from django.conf import settings
-            
-            upload_dir = os.path.join(settings.MEDIA_ROOT, 'ecological_projects', 'economy_vector')
-            os.makedirs(upload_dir, exist_ok=True)
-            
-            zip_path = os.path.join(upload_dir, 'economy_vector.zip')
-            
-            # 保存ZIP文件
-            with open(zip_path, 'wb+') as destination:
-                for chunk in uploaded_file.chunks():
-                    destination.write(chunk)
 
-            is_valid_zip, zip_message = validate_shapefile_zip(zip_path)
-            if not is_valid_zip:
-                return Response({
-                    'success': False,
-                    'message': zip_message
-                }, status=400)
-            
-            logger.info(f"经济矢量ZIP文件已保存: {zip_path}")
-            
-            # 解压文件
-            try:
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    zip_ref.extractall(upload_dir)
-                logger.info(f"文件已解压到: {upload_dir}")
-            except Exception as e:
-                return Response({
-                    'success': False,
-                    'message': f'解压文件失败: {str(e)}'
-                }, status=400)
-            
-            # 查找.shp文件
-            shp_files = [f for f in os.listdir(upload_dir) if f.endswith('.shp')]
-            if not shp_files:
-                return Response({
-                    'success': False,
-                    'message': 'ZIP文件中未找到.shp文件'
-                }, status=400)
-            
-            original_shp_name = shp_files[0]
-            original_base_name = os.path.splitext(original_shp_name)[0]
-            
-            # 固定文件名
-            fixed_name = 'economy_vector'
-            fixed_shp_path = os.path.join(upload_dir, f'{fixed_name}.shp')
-            
-            # 如果文件名不是固定名称，重命名所有相关文件
-            if original_base_name != fixed_name:
-                logger.info(f"检测到文件名不匹配: {original_base_name} -> {fixed_name}，开始重命名...")
-                
-                # Shapefile需要重命名的文件扩展名
-                shapefile_extensions = ['.shp', '.shx', '.dbf', '.prj', '.cpg']
-                
-                for ext in shapefile_extensions:
-                    old_file = os.path.join(upload_dir, f'{original_base_name}{ext}')
-                    new_file = os.path.join(upload_dir, f'{fixed_name}{ext}')
-                    
-                    if os.path.exists(old_file):
-                        # 如果目标文件已存在，先删除
-                        if os.path.exists(new_file):
-                            os.remove(new_file)
-                            logger.info(f"  删除旧文件: {new_file}")
-                        
-                        # 重命名文件
-                        os.rename(old_file, new_file)
-                        logger.info(f"  重命名: {original_base_name}{ext} -> {fixed_name}{ext}")
-                
-                logger.info(f"✅ 文件重命名完成: {original_base_name} -> {fixed_name}")
-            
-            shp_path = fixed_shp_path
-            
-            # 检查是否存在.cpg文件，如果不存在则创建GBK编码
-            cpg_path = os.path.join(upload_dir, f'{fixed_name}.cpg')
-            if not os.path.exists(cpg_path):
-                with open(cpg_path, 'w') as f:
-                    f.write('GBK')
-                logger.info(f"创建 .cpg 文件（GBK编码）: {cpg_path}")
-            else:
-                # 读取现有.cpg文件内容
-                with open(cpg_path, 'r') as f:
-                    cpg_encoding = f.read().strip()
-                logger.info(f"使用现有 .cpg 文件编码: {cpg_encoding}")
-            
+            prepared = _prepare_overlay_vector_dataset(uploaded_file, 'economy_vector', 'economy_vector')
+            shp_path = prepared['shp_path']
+            encoding = prepared['encoding']
             logger.info(f"✅ 经济矢量数据已准备就绪: {shp_path}")
             
             # 发布到GeoServer并生成样式
@@ -3165,8 +3343,6 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                 
                 # 1. 发布Shapefile到GeoServer
                 logger.info("正在发布到GeoServer...")
-                # 读取.cpg文件获取编码
-                encoding = cpg_encoding if 'cpg_encoding' in locals() else 'GBK'
                 
                 publish_success = geoserver_manager.publish_shapefile(
                     layer_name='economy_vector',
@@ -3225,12 +3401,12 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                 })
             else:
                 return Response({
-                    'success': True,
-                    'message': '经济数据矢量上传成功，但发布到GeoServer失败。请检查GeoServer服务状态。',
+                    'success': False,
+                    'message': '经济数据矢量已上传，但发布到GeoServer失败。请检查GeoServer服务状态、工作区配置或矢量坐标系。',
                     'file_name': file_name,
                     'shp_path': shp_path,
                     'warning': 'GeoServer发布失败'
-                })
+                }, status=502)
                 
         except Exception as e:
             logger.error(f"上传经济矢量失败: {str(e)}")
@@ -3267,94 +3443,10 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                     'success': False,
                     'message': '文件大小超过1GB限制'
                 }, status=400)
-            
-            # 保存文件
-            import os
-            import zipfile
-            from django.conf import settings
-            
-            upload_dir = os.path.join(settings.MEDIA_ROOT, 'ecological_projects', 'engineering_vector')
-            os.makedirs(upload_dir, exist_ok=True)
-            
-            zip_path = os.path.join(upload_dir, 'engineering_vector.zip')
-            
-            # 保存ZIP文件
-            with open(zip_path, 'wb+') as destination:
-                for chunk in uploaded_file.chunks():
-                    destination.write(chunk)
 
-            is_valid_zip, zip_message = validate_shapefile_zip(zip_path)
-            if not is_valid_zip:
-                return Response({
-                    'success': False,
-                    'message': zip_message
-                }, status=400)
-            
-            logger.info(f"工程矢量ZIP文件已保存: {zip_path}")
-            
-            # 解压文件
-            try:
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    zip_ref.extractall(upload_dir)
-                logger.info(f"文件已解压到: {upload_dir}")
-            except Exception as e:
-                return Response({
-                    'success': False,
-                    'message': f'解压文件失败: {str(e)}'
-                }, status=400)
-            
-            # 查找.shp文件
-            shp_files = [f for f in os.listdir(upload_dir) if f.endswith('.shp')]
-            if not shp_files:
-                return Response({
-                    'success': False,
-                    'message': 'ZIP文件中未找到.shp文件'
-                }, status=400)
-            
-            original_shp_name = shp_files[0]
-            original_base_name = os.path.splitext(original_shp_name)[0]
-            
-            # 固定文件名
-            fixed_name = 'engineering_vector'
-            fixed_shp_path = os.path.join(upload_dir, f'{fixed_name}.shp')
-            
-            # 如果文件名不是固定名称，重命名所有相关文件
-            if original_base_name != fixed_name:
-                logger.info(f"检测到文件名不匹配: {original_base_name} -> {fixed_name}，开始重命名...")
-                
-                # Shapefile需要重命名的文件扩展名
-                shapefile_extensions = ['.shp', '.shx', '.dbf', '.prj', '.cpg']
-                
-                for ext in shapefile_extensions:
-                    old_file = os.path.join(upload_dir, f'{original_base_name}{ext}')
-                    new_file = os.path.join(upload_dir, f'{fixed_name}{ext}')
-                    
-                    if os.path.exists(old_file):
-                        # 如果目标文件已存在，先删除
-                        if os.path.exists(new_file):
-                            os.remove(new_file)
-                            logger.info(f"  删除旧文件: {new_file}")
-                        
-                        # 重命名文件
-                        os.rename(old_file, new_file)
-                        logger.info(f"  重命名: {original_base_name}{ext} -> {fixed_name}{ext}")
-                
-                logger.info(f"✅ 文件重命名完成: {original_base_name} -> {fixed_name}")
-            
-            shp_path = fixed_shp_path
-            
-            # 检查是否存在.cpg文件，如果不存在则创建GBK编码
-            cpg_path = os.path.join(upload_dir, f'{fixed_name}.cpg')
-            if not os.path.exists(cpg_path):
-                with open(cpg_path, 'w') as f:
-                    f.write('GBK')
-                logger.info(f"创建 .cpg 文件（GBK编码）: {cpg_path}")
-            else:
-                # 读取现有.cpg文件内容
-                with open(cpg_path, 'r') as f:
-                    cpg_encoding = f.read().strip()
-                logger.info(f"使用现有 .cpg 文件编码: {cpg_encoding}")
-            
+            prepared = _prepare_overlay_vector_dataset(uploaded_file, 'engineering_vector', 'engineering_vector')
+            shp_path = prepared['shp_path']
+            encoding = prepared['encoding']
             logger.info(f"✅ 工程矢量数据已准备就绪: {shp_path}")
             
             # 发布到GeoServer并生成样式
@@ -3365,8 +3457,6 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                 
                 # 1. 发布Shapefile到GeoServer
                 logger.info("正在发布到GeoServer...")
-                # 读取.cpg文件获取编码
-                encoding = cpg_encoding if 'cpg_encoding' in locals() else 'GBK'
                 
                 publish_success = geoserver_manager.publish_shapefile(
                     layer_name='engineering_vector',
@@ -3381,10 +3471,10 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                     try:
                         # 为每次上传生成稍有不同的蓝色调
                         blue_shades = [
-                            ('#0000FF', 0.3),  # 纯蓝
-                            ('#0066FF', 0.35), # 亮蓝
-                            ('#0099FF', 0.3),  # 天蓝
-                            ('#3366FF', 0.35), # 中蓝
+                            ('#004CFF', 0.55),  # 纯蓝偏深
+                            ('#0066FF', 0.6),   # 亮蓝
+                            ('#0088FF', 0.55),  # 天蓝
+                            ('#2A5BFF', 0.6),   # 中蓝
                         ]
                         color, opacity = random.choice(blue_shades)
                         
@@ -3424,12 +3514,12 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                 })
             else:
                 return Response({
-                    'success': True,
-                    'message': '工程项目矢量上传成功，但发布到GeoServer失败。请检查GeoServer服务状态。',
+                    'success': False,
+                    'message': '工程项目矢量已上传，但发布到GeoServer失败。请检查GeoServer服务状态、工作区配置或矢量坐标系。',
                     'file_name': file_name,
                     'shp_path': shp_path,
                     'warning': 'GeoServer发布失败'
-                })
+                }, status=502)
                 
         except Exception as e:
             logger.error(f"上传工程矢量失败: {str(e)}")

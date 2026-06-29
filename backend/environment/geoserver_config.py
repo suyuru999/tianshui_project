@@ -64,6 +64,40 @@ class GeoServerManager:
         except Exception as e:
             logger.error(f"GeoServer请求异常: {e}")
             return None
+
+    def _detect_vector_srs(self, shapefile_path: str) -> Optional[str]:
+        """读取 Shapefile 实际坐标系，避免错误强制声明为 EPSG:4326。"""
+        try:
+            from osgeo import ogr
+        except ImportError:
+            logger.warning("未安装 GDAL/OGR，无法自动识别矢量坐标系")
+            return None
+
+        datasource = None
+        try:
+            datasource = ogr.Open(shapefile_path)
+            if datasource is None:
+                logger.warning(f"无法打开矢量文件以识别坐标系: {shapefile_path}")
+                return None
+
+            layer = datasource.GetLayer(0)
+            if layer is None:
+                return None
+
+            spatial_ref = layer.GetSpatialRef()
+            if spatial_ref is None:
+                logger.warning(f"矢量文件缺少坐标参考信息(.prj): {shapefile_path}")
+                return None
+
+            auth_name = spatial_ref.GetAuthorityName(None)
+            auth_code = spatial_ref.GetAuthorityCode(None)
+            if auth_name and auth_code:
+                return f"{auth_name}:{auth_code}"
+        except Exception as exc:
+            logger.warning(f"识别矢量坐标系失败 {shapefile_path}: {exc}")
+            return None
+        finally:
+            datasource = None
     
     def create_workspace(self) -> bool:
         """创建工作空间"""
@@ -1190,7 +1224,7 @@ class GeoServerManager:
         return sld
     
     def _create_vector_sld_simple(self, color: str = '#0000FF', opacity: float = 0.3) -> str:
-        """创建简单统一样式的矢量SLD"""
+        """创建简单统一样式的矢量SLD，兼容面/线/点几何。"""
         sld = f'''<?xml version="1.0" encoding="UTF-8"?>
 <StyledLayerDescriptor version="1.0.0" 
   xmlns="http://www.opengis.net/sld" 
@@ -1206,21 +1240,44 @@ class GeoServerManager:
       <Title>矢量图层统一样式</Title>
       <FeatureTypeStyle>
         <Rule>
+          <PointSymbolizer>
+            <Graphic>
+              <Mark>
+                <WellKnownName>circle</WellKnownName>
+                <Fill>
+                  <CssParameter name="fill">{color}</CssParameter>
+                  <CssParameter name="fill-opacity">0.95</CssParameter>
+                </Fill>
+                <Stroke>
+                  <CssParameter name="stroke">#FFFFFF</CssParameter>
+                  <CssParameter name="stroke-width">1.5</CssParameter>
+                </Stroke>
+              </Mark>
+              <Size>12</Size>
+            </Graphic>
+          </PointSymbolizer>
+          <LineSymbolizer>
+            <Stroke>
+              <CssParameter name="stroke">{color}</CssParameter>
+              <CssParameter name="stroke-width">4</CssParameter>
+              <CssParameter name="stroke-opacity">0.95</CssParameter>
+            </Stroke>
+          </LineSymbolizer>
           <PolygonSymbolizer>
             <Fill>
               <CssParameter name="fill">{color}</CssParameter>
-              <CssParameter name="fill-opacity">{opacity}</CssParameter>
+              <CssParameter name="fill-opacity">{max(opacity, 0.45)}</CssParameter>
             </Fill>
             <Stroke>
               <CssParameter name="stroke">{color}</CssParameter>
-              <CssParameter name="stroke-width">2</CssParameter>
+              <CssParameter name="stroke-width">3</CssParameter>
               <CssParameter name="stroke-opacity">1.0</CssParameter>
             </Stroke>
           </PolygonSymbolizer>
-                </Rule>
-            </FeatureTypeStyle>
-        </UserStyle>
-    </NamedLayer>
+        </Rule>
+      </FeatureTypeStyle>
+    </UserStyle>
+  </NamedLayer>
 </StyledLayerDescriptor>'''
         return sld
     
@@ -1342,14 +1399,13 @@ class GeoServerManager:
             # 2. 发布FeatureType（图层）
             # 获取Shapefile的基础名称（不带扩展名）
             base_name = os.path.splitext(os.path.basename(shapefile_path))[0]
+            detected_srs = self._detect_vector_srs(shapefile_path)
             
             featuretype_data = {
                 "featureType": {
                     "name": layer_name,
                     "nativeName": base_name,
                     "title": layer_name,
-                    "srs": "EPSG:4326",
-                    "projectionPolicy": "FORCE_DECLARED",
                     "enabled": True,
                     "store": {
                         "name": f"{self.workspace}:{datastore_name}",
@@ -1357,6 +1413,12 @@ class GeoServerManager:
                     }
                 }
             }
+            if detected_srs:
+                featuretype_data["featureType"]["srs"] = detected_srs
+                featuretype_data["featureType"]["projectionPolicy"] = "FORCE_DECLARED"
+                logger.info(f"检测到矢量坐标系: {detected_srs}")
+            else:
+                logger.warning(f"未识别到 {layer_name} 的明确坐标系，将让 GeoServer 使用源数据原生坐标系")
             
             # 发布FeatureType
             result = self._make_request(

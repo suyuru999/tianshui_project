@@ -13,9 +13,12 @@
           <User class="inline-icon user-icon" />
           <span>{{ currentUser ? `${currentUser.username}（${currentUser.role_display || currentUser.role || '用户'}）` : '未登录' }}</span>
         </div>
-        <button class="login-btn" @click="currentUser ? handleLogout() : openLoginDialog()">
-          {{ currentUser ? '退出' : '登录' }}
-        </button>
+        <div class="user-actions">
+          <button v-if="canManageUsers" class="admin-btn" @click="openUserManagementDialog">用户管理</button>
+          <button class="login-btn" @click="currentUser ? handleLogout() : openLoginDialog()">
+            {{ currentUser ? '退出' : '登录' }}
+          </button>
+        </div>
       </div>
 
       <div v-if="loginDialogVisible" class="login-mask" @click.self="loginDialogVisible = false">
@@ -247,6 +250,138 @@
           </div>
         </div>
       </div>
+
+      <div v-if="userManagementDialogVisible" class="login-mask" @click.self="userManagementDialogVisible = false">
+        <div class="service-dialog user-management-dialog">
+          <div class="login-title">用户管理</div>
+          <div class="user-admin-toolbar">
+            <button class="dialog-confirm" @click="openCreateUserDialog">新增用户</button>
+            <button class="dialog-cancel" @click="loadUsers">刷新</button>
+          </div>
+          <div v-if="userManagementLoading" class="empty-log">加载中...</div>
+          <div v-else class="user-list">
+            <div v-for="item in managedUsers" :key="item.id" class="user-card">
+              <div class="user-card-head">
+                <div>
+                  <div class="user-card-name">{{ item.username }}</div>
+                  <div class="user-card-meta">{{ item.role_display || item.role }} · {{ item.is_active ? '启用' : '禁用' }}</div>
+                </div>
+                <div class="user-card-actions">
+                  <button class="layer-action-btn" title="编辑用户" @click="openEditUserDialog(item)">
+                    <Setting class="button-icon" />
+                  </button>
+                  <button class="layer-action-btn" title="权限分配" @click="openPermissionDialog(item)">
+                    <Files class="button-icon" />
+                  </button>
+                  <button class="layer-action-btn danger" title="删除用户" @click="handleDeleteUser(item)">
+                    <Delete class="button-icon" />
+                  </button>
+                </div>
+              </div>
+              <div class="user-card-grid">
+                <div>姓名：{{ [item.first_name, item.last_name].filter(Boolean).join(' ') || '未填写' }}</div>
+                <div>邮箱：{{ item.email || '未填写' }}</div>
+                <div>机构：{{ item.organization || '未填写' }}</div>
+                <div>电话：{{ item.phone || '未填写' }}</div>
+              </div>
+            </div>
+          </div>
+          <div class="login-actions">
+            <button class="dialog-confirm" @click="userManagementDialogVisible = false">关闭</button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="userEditDialogVisible" class="login-mask" @click.self="userEditDialogVisible = false">
+        <div class="service-dialog">
+          <div class="login-title">{{ userEditMode === 'create' ? '新增用户' : '编辑用户' }}</div>
+          <label class="login-field">
+            <span>用户名</span>
+            <input v-model="userForm.username" type="text" autocomplete="off" />
+          </label>
+          <label class="login-field">
+            <span>邮箱</span>
+            <input v-model="userForm.email" type="email" autocomplete="off" />
+          </label>
+          <label class="login-field">
+            <span>姓名</span>
+            <input v-model="userForm.first_name" type="text" autocomplete="off" />
+          </label>
+          <label class="login-field">
+            <span>角色</span>
+            <select v-model="userForm.role">
+              <option value="admin">管理员</option>
+              <option value="user">普通用户</option>
+              <option value="expert">专家</option>
+            </select>
+          </label>
+          <label class="login-field">
+            <span>手机号</span>
+            <input v-model="userForm.phone" type="text" autocomplete="off" />
+          </label>
+          <label class="login-field">
+            <span>所属机构</span>
+            <input v-model="userForm.organization" type="text" autocomplete="off" />
+          </label>
+          <label class="login-field">
+            <span>部门</span>
+            <input v-model="userForm.department" type="text" autocomplete="off" />
+          </label>
+          <label class="login-field">
+            <span>职位</span>
+            <input v-model="userForm.position" type="text" autocomplete="off" />
+          </label>
+          <label class="login-field">
+            <span>状态</span>
+            <select v-model="userForm.is_active">
+              <option :value="true">启用</option>
+              <option :value="false">禁用</option>
+            </select>
+          </label>
+          <label class="login-field">
+            <span>{{ userEditMode === 'create' ? '密码' : '新密码（可留空）' }}</span>
+            <input v-model="userForm.password" type="password" autocomplete="new-password" />
+          </label>
+          <label v-if="userEditMode === 'create'" class="login-field">
+            <span>确认密码</span>
+            <input v-model="userForm.password_confirm" type="password" autocomplete="new-password" />
+          </label>
+          <div class="login-actions">
+            <button class="dialog-cancel" @click="userEditDialogVisible = false">取消</button>
+            <button class="dialog-confirm" :disabled="userSubmitting" @click="submitUserForm">
+              {{ userSubmitting ? '保存中...' : '保存' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="permissionDialogVisible" class="login-mask" @click.self="permissionDialogVisible = false">
+        <div class="service-dialog permission-dialog">
+          <div class="login-title">权限分配</div>
+          <div class="permission-subtitle">{{ activeManagedUser?.username }}</div>
+          <div class="permission-groups">
+            <div v-for="(permissionItems, moduleName) in permissionSchema" :key="moduleName" class="permission-group">
+              <div class="permission-group-title">{{ permissionModuleLabels[moduleName] || moduleName }}</div>
+              <div class="permission-options">
+                <label v-for="permissionName in permissionItems" :key="`${moduleName}-${permissionName}`" class="permission-option">
+                  <input
+                    type="checkbox"
+                    :checked="hasPermission(moduleName, permissionName)"
+                    @change="togglePermission(moduleName, permissionName, $event.target.checked)"
+                  />
+                  <span>{{ permissionLabels[permissionName] || permissionName }}</span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="login-actions">
+            <button class="dialog-cancel" @click="permissionDialogVisible = false">取消</button>
+            <button class="dialog-confirm" :disabled="permissionSubmitting" @click="savePermissions">
+              {{ permissionSubmitting ? '保存中...' : '保存权限' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 主地图区域 -->
@@ -413,7 +548,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref, reactive } from 'vue'
+import { computed, onMounted, ref, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowDown,
@@ -452,6 +587,17 @@ const coordinateInput = ref('')
 const currentUser = ref(null)
 const loginDialogVisible = ref(false)
 const loginLoading = ref(false)
+const userManagementDialogVisible = ref(false)
+const userManagementLoading = ref(false)
+const userEditDialogVisible = ref(false)
+const userEditMode = ref('create')
+const userSubmitting = ref(false)
+const permissionDialogVisible = ref(false)
+const permissionSubmitting = ref(false)
+const activeManagedUser = ref(null)
+const managedUsers = ref([])
+const permissionSchema = ref({})
+const permissionDraft = reactive({})
 const businessLayerUploading = ref(false)
 const businessLayerActionIds = ref(new Set())
 const businessServiceDialogVisible = ref(false)
@@ -465,6 +611,21 @@ const activeBusinessLayer = ref(null)
 const loginForm = reactive({
   username: '',
   password: ''
+})
+const userForm = reactive({
+  id: null,
+  username: '',
+  email: '',
+  first_name: '',
+  last_name: '',
+  role: 'user',
+  phone: '',
+  organization: '',
+  department: '',
+  position: '',
+  is_active: true,
+  password: '',
+  password_confirm: ''
 })
 const businessServiceForm = reactive({
   name: '',
@@ -497,6 +658,21 @@ const businessLayersExpanded = ref(true)
 const tempLayersExpanded = ref(true)
 const toolboxExpanded = ref(true)
 const businessFunctionsExpanded = ref(true)
+const canManageUsers = computed(() => Boolean(currentUser.value?.is_admin || currentUser.value?.role === 'admin'))
+const permissionModuleLabels = {
+  remote_sensing: '遥感生态指数分析',
+  ecological_index: '生态环境指数计算',
+  overlay_analysis: '重大工程叠加分析',
+  climate_monitoring: '气候环境监测统计',
+  feedback: '民众意见反馈',
+  business_layers: '业务图层管理',
+  user_management: '用户管理'
+}
+const permissionLabels = {
+  view: '查看',
+  use: '使用',
+  manage: '管理'
+}
 
 // 业务图层数据
 const businessLayers = reactive([
@@ -583,6 +759,22 @@ const openLoginDialog = () => {
   loginDialogVisible.value = true
 }
 
+const resetUserForm = () => {
+  userForm.id = null
+  userForm.username = ''
+  userForm.email = ''
+  userForm.first_name = ''
+  userForm.last_name = ''
+  userForm.role = 'user'
+  userForm.phone = ''
+  userForm.organization = ''
+  userForm.department = ''
+  userForm.position = ''
+  userForm.is_active = true
+  userForm.password = ''
+  userForm.password_confirm = ''
+}
+
 const handleLogin = async () => {
   if (!loginForm.username || !loginForm.password) {
     ElMessage.warning('请输入用户名和密码')
@@ -611,7 +803,195 @@ const handleLogout = async () => {
     console.warn('后端登出请求未完成，已在前端清除登录状态:', error)
   } finally {
     currentUser.value = null
+    managedUsers.value = []
+    userManagementDialogVisible.value = false
     ElMessage.success('已退出登录')
+  }
+}
+
+const loadUsers = async () => {
+  if (!canManageUsers.value) return
+  userManagementLoading.value = true
+  try {
+    const result = await authService.getUsers({}, { silentError: true })
+    managedUsers.value = Array.isArray(result) ? result : (result.results || [])
+  } finally {
+    userManagementLoading.value = false
+  }
+}
+
+const ensurePermissionSchema = async () => {
+  if (!canManageUsers.value || Object.keys(permissionSchema.value).length > 0) return
+  const result = await authService.getPermissionSchema({ silentError: true })
+  permissionSchema.value = result.modules || {}
+}
+
+const openUserManagementDialog = async () => {
+  if (!canManageUsers.value) {
+    ElMessage.warning('仅管理员可管理用户')
+    return
+  }
+  userManagementDialogVisible.value = true
+  await Promise.all([loadUsers(), ensurePermissionSchema()])
+}
+
+const openCreateUserDialog = () => {
+  resetUserForm()
+  userEditMode.value = 'create'
+  userEditDialogVisible.value = true
+}
+
+const openEditUserDialog = (user) => {
+  resetUserForm()
+  userEditMode.value = 'edit'
+  userForm.id = user.id
+  userForm.username = user.username || ''
+  userForm.email = user.email || ''
+  userForm.first_name = user.first_name || ''
+  userForm.last_name = user.last_name || ''
+  userForm.role = user.role || 'user'
+  userForm.phone = user.phone || ''
+  userForm.organization = user.organization || ''
+  userForm.department = user.department || ''
+  userForm.position = user.position || ''
+  userForm.is_active = user.is_active !== false
+  userEditDialogVisible.value = true
+}
+
+const submitUserForm = async () => {
+  if (!userForm.username.trim()) {
+    ElMessage.warning('请填写用户名')
+    return
+  }
+  if (userEditMode.value === 'create' && !userForm.password) {
+    ElMessage.warning('请填写初始密码')
+    return
+  }
+  if (userEditMode.value === 'create' && userForm.password !== userForm.password_confirm) {
+    ElMessage.warning('两次密码输入不一致')
+    return
+  }
+
+  userSubmitting.value = true
+  try {
+    if (userEditMode.value === 'create') {
+      await authService.createUser({
+        username: userForm.username.trim(),
+        email: userForm.email.trim(),
+        first_name: userForm.first_name.trim(),
+        last_name: userForm.last_name.trim(),
+        role: userForm.role,
+        phone: userForm.phone.trim(),
+        organization: userForm.organization.trim(),
+        department: userForm.department.trim(),
+        position: userForm.position.trim(),
+        password: userForm.password,
+        password_confirm: userForm.password_confirm
+      })
+      ElMessage.success('用户创建成功')
+    } else {
+      const payload = {
+        username: userForm.username.trim(),
+        email: userForm.email.trim(),
+        first_name: userForm.first_name.trim(),
+        last_name: userForm.last_name.trim(),
+        role: userForm.role,
+        phone: userForm.phone.trim(),
+        organization: userForm.organization.trim(),
+        department: userForm.department.trim(),
+        position: userForm.position.trim(),
+        is_active: userForm.is_active
+      }
+      if (userForm.password) {
+        payload.password = userForm.password
+      }
+      await authService.updateUser(userForm.id, payload)
+      ElMessage.success('用户更新成功')
+    }
+    userEditDialogVisible.value = false
+    await loadUsers()
+  } catch (error) {
+    console.error(error)
+  } finally {
+    userSubmitting.value = false
+  }
+}
+
+const handleDeleteUser = async (user) => {
+  if (String(user.id) === String(currentUser.value?.id)) {
+    ElMessage.warning('不能删除当前登录管理员')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(`确定删除用户 ${user.username} 吗？`, '删除用户', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消'
+    })
+  } catch {
+    return
+  }
+
+  try {
+    await authService.deleteUser(user.id)
+    ElMessage.success('用户删除成功')
+    await loadUsers()
+  } catch (error) {
+    console.error(error)
+  }
+}
+
+const clearPermissionDraft = () => {
+  Object.keys(permissionDraft).forEach(key => {
+    delete permissionDraft[key]
+  })
+}
+
+const openPermissionDialog = async (user) => {
+  activeManagedUser.value = user
+  clearPermissionDraft()
+  await ensurePermissionSchema()
+  const response = await authService.getUserPermissions(user.id, { silentError: true })
+  const permissionList = Array.isArray(response.permissions) ? response.permissions : []
+  permissionList.forEach(item => {
+    if (!permissionDraft[item.module]) {
+      permissionDraft[item.module] = []
+    }
+    permissionDraft[item.module].push(item.permission)
+  })
+  permissionDialogVisible.value = true
+}
+
+const hasPermission = (moduleName, permissionName) => {
+  return Array.isArray(permissionDraft[moduleName]) && permissionDraft[moduleName].includes(permissionName)
+}
+
+const togglePermission = (moduleName, permissionName, checked) => {
+  const current = new Set(permissionDraft[moduleName] || [])
+  if (checked) {
+    current.add(permissionName)
+  } else {
+    current.delete(permissionName)
+  }
+  permissionDraft[moduleName] = Array.from(current)
+}
+
+const savePermissions = async () => {
+  if (!activeManagedUser.value) return
+  permissionSubmitting.value = true
+  try {
+    const payload = {}
+    Object.keys(permissionSchema.value).forEach(moduleName => {
+      payload[moduleName] = Array.isArray(permissionDraft[moduleName]) ? permissionDraft[moduleName] : []
+    })
+    await authService.assignUserPermissions(activeManagedUser.value.id, payload)
+    ElMessage.success('权限保存成功')
+    permissionDialogVisible.value = false
+    await loadUsers()
+  } catch (error) {
+    console.error(error)
+  } finally {
+    permissionSubmitting.value = false
   }
 }
 
@@ -781,6 +1161,18 @@ const formatLogDetails = (details) => {
   }
 }
 
+const getRequestErrorMessage = (error, fallback) => {
+  const data = error?.response?.data
+  return (
+    data?.error ||
+    data?.detail ||
+    data?.message ||
+    data?.non_field_errors?.[0] ||
+    (typeof data === 'string' ? data : '') ||
+    fallback
+  )
+}
+
 const loadBusinessLayers = async () => {
   try {
     const result = await spatialService.getBusinessLayers()
@@ -809,7 +1201,7 @@ const handleBusinessLayerUpload = async (event) => {
     }
   } catch (error) {
     console.error(error)
-    ElMessage.error('业务图层上传或发布失败，请检查文件格式和GeoServer状态')
+    ElMessage.error(getRequestErrorMessage(error, '业务图层上传或发布失败，请检查文件格式和GeoServer状态'))
   } finally {
     businessLayerUploading.value = false
   }
@@ -843,7 +1235,7 @@ const handleBusinessServiceCreate = async () => {
     ElMessage.success(`${result.name} 已接入业务图层服务`)
   } catch (error) {
     console.error(error)
-    ElMessage.error(error?.response?.data?.detail || error?.response?.data?.non_field_errors?.[0] || '标准服务接入失败，请检查服务地址和图层名称')
+    ElMessage.error(getRequestErrorMessage(error, '标准服务接入失败，请检查服务地址和图层名称'))
   } finally {
     businessServiceSubmitting.value = false
   }
@@ -858,7 +1250,7 @@ const handleBusinessLayerPublish = async (layer) => {
     ElMessage.success(`${result.name} 已发布到 GeoServer`)
   } catch (error) {
     console.error(error)
-    ElMessage.error('重新发布失败，请检查GeoServer状态')
+    ElMessage.error(getRequestErrorMessage(error, '重新发布失败，请检查GeoServer状态'))
   } finally {
     setBusinessLayerBusy(layer, false)
   }
@@ -885,7 +1277,7 @@ const handleBusinessLayerUnpublish = async (layer) => {
     ElMessage.success(`${result.name} 已撤销发布`)
   } catch (error) {
     console.error(error)
-    ElMessage.error('撤销发布失败，请检查GeoServer状态')
+    ElMessage.error(getRequestErrorMessage(error, '撤销发布失败，请检查GeoServer状态'))
   } finally {
     setBusinessLayerBusy(layer, false)
   }
@@ -912,7 +1304,7 @@ const handleBusinessLayerDelete = async (layer) => {
     ElMessage.success(`${layer.name} 已删除`)
   } catch (error) {
     console.error(error)
-    ElMessage.error('删除业务图层失败')
+    ElMessage.error(getRequestErrorMessage(error, '删除业务图层失败'))
   } finally {
     setBusinessLayerBusy(layer, false)
   }
@@ -948,7 +1340,7 @@ const handleBusinessLayerStyleSave = async () => {
     ElMessage.success(`${result.name} 样式已更新`)
   } catch (error) {
     console.error(error)
-    ElMessage.error(error?.response?.data?.error || '业务图层样式更新失败')
+    ElMessage.error(getRequestErrorMessage(error, '业务图层样式更新失败'))
   } finally {
     businessLayerStyleSubmitting.value = false
   }
@@ -1075,6 +1467,7 @@ const toggleBusinessFunctions = () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
 }
 
 .user-info {
@@ -1100,6 +1493,27 @@ const toggleBusinessFunctions = () => {
 .user-icon {
   font-size: 16px;
   color: #1677ff;
+}
+
+.user-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-btn {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.admin-btn:hover {
+  background: #dbeafe;
 }
 
 .login-btn {
@@ -1211,6 +1625,109 @@ const toggleBusinessFunctions = () => {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 20px;
+}
+
+.user-management-dialog {
+  width: min(960px, calc(100vw - 32px));
+}
+
+.user-admin-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.user-list {
+  display: grid;
+  gap: 12px;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+.user-card {
+  border: 1px solid #dbe6f0;
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: #f8fbfd;
+}
+
+.user-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.user-card-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #24405f;
+}
+
+.user-card-meta {
+  font-size: 12px;
+  color: #6f8498;
+  margin-top: 4px;
+}
+
+.user-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.user-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  font-size: 13px;
+  color: #4e6478;
+}
+
+.permission-dialog {
+  width: min(860px, calc(100vw - 32px));
+}
+
+.permission-subtitle {
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: #5f7488;
+}
+
+.permission-groups {
+  display: grid;
+  gap: 14px;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+.permission-group {
+  border: 1px solid #dbe6f0;
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: #f8fbfd;
+}
+
+.permission-group-title {
+  margin-bottom: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #24405f;
+}
+
+.permission-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.permission-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #4e6478;
 }
 
 .dialog-cancel,

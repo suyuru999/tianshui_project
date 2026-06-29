@@ -1,27 +1,22 @@
-账户admin
-密码admin123456
-python manage.py runserver --settings=tianshuipy.settings_dev
-http://127.0.0.1:8000/admin/
+天水流域生态环境监管系统当前测试账号
 
- celery启动
- celery -A tianshuipy worker --loglevel=INFO -P eventlet
+1. 管理员账号
+用户名：admin
+密码：admin123456
+角色：admin
 
- 
-Redis启动
- 1.切换到redis安装目录 cmd
- 2.redis-server.exe redis.windows.conf
+2. 普通用户账号
+用户名：user
+密码：user123456
+角色：user
 
-GeoServer配置（可选）
-1. 默认配置已设置（无需修改）：
-   URL: http://localhost:8080/geoserver
-   用户名: admin
-   密码: geoserver
-   
-2. 测试GeoServer连接：
-   python manage.py test_geoserver
-   
-3. 查看配置状态API：
-   http://localhost:8000/api/v1/environment/spatial/geoserver/status/
-   
-4. 详细配置指南：
-   参考 backend/GEOSERVER_CONFIG.md
+说明：
+- 以上账号为当前本地开发环境测试账号
+- 管理员可登录系统后使用“用户管理”功能创建、修改、删除用户
+- 如需重置密码，可通过 Django shell 或后台用户管理功能修改
+
+当前前端地址：
+http://localhost:3000
+
+当前后端地址：
+http://127.0.0.1:8000

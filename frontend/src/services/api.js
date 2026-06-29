@@ -22,6 +22,40 @@ export const authService = {
   getProfile(config = {}) {
     return request.get(buildApiUrl(API_ENDPOINTS.AUTH.PROFILE), {}, config)
   },
+
+  getCurrentUser(config = {}) {
+    return request.get(buildApiUrl(API_ENDPOINTS.AUTH.ME), {}, config)
+  },
+
+  getUsers(params = {}, config = {}) {
+    return request.get(buildApiUrl(API_ENDPOINTS.AUTH.USERS), params, config)
+  },
+
+  createUser(userData, config = {}) {
+    return request.post(buildApiUrl(API_ENDPOINTS.AUTH.USERS), userData, config)
+  },
+
+  updateUser(userId, userData, config = {}) {
+    return request.put(buildApiUrl(API_ENDPOINTS.AUTH.USER_DETAIL(userId)), userData, config)
+  },
+
+  deleteUser(userId, config = {}) {
+    return request.delete(buildApiUrl(API_ENDPOINTS.AUTH.USER_DETAIL(userId)), config)
+  },
+
+  getPermissionSchema(config = {}) {
+    return request.get(buildApiUrl(API_ENDPOINTS.AUTH.PERMISSION_SCHEMA), {}, config)
+  },
+
+  getUserPermissions(userId, config = {}) {
+    return request.get(buildApiUrl(API_ENDPOINTS.AUTH.USER_PERMISSIONS(userId)), {}, config)
+  },
+
+  assignUserPermissions(userId, permissions, config = {}) {
+    return request.put(buildApiUrl(API_ENDPOINTS.AUTH.USER_ASSIGN_PERMISSIONS(userId)), {
+      permissions
+    }, config)
+  },
   
   // 用户登出
   logout() {

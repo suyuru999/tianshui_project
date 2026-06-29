@@ -666,7 +666,8 @@ def analyze_climate_data_task(self, file_id, task_id, analysis_type='comprehensi
         # 执行分析
         logger.info(f"开始分析气候数据文件: {data_file.name}")
         try:
-            analysis_result = analyze_climate_data(file_path, data_file.file_type)
+            preferred_metric = None if analysis_type == 'comprehensive' else analysis_type
+            analysis_result = analyze_climate_data(file_path, data_file.file_type, preferred_metric=preferred_metric)
             
             # 验证分析结果
             if not analysis_result:
@@ -720,6 +721,7 @@ def analyze_climate_data_task(self, file_id, task_id, analysis_type='comprehensi
             
             climate_result = ClimateAnalysisResult.objects.create(
                 data_file=data_file,
+                processing_task=task,
                 analysis_type=analysis_type,
                 chart_data=chart_data,
                 **flat_stats

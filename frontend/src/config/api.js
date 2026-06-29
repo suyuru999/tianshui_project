@@ -39,6 +39,12 @@ export const API_ENDPOINTS = {
     LOGOUT: '/users/logout/',
     REGISTER: '/users/register/',
     PROFILE: '/users/profile/',
+    ME: '/users/me/',
+    USERS: '/users/',
+    USER_DETAIL: (id) => `/users/${id}/`,
+    USER_PERMISSIONS: (id) => `/users/${id}/permissions/`,
+    USER_ASSIGN_PERMISSIONS: (id) => `/users/${id}/assign_permissions/`,
+    PERMISSION_SCHEMA: '/users/permission_schema/',
     REFRESH_TOKEN: '/users/token/refresh/',
   },
   

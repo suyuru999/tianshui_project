@@ -745,6 +745,9 @@ async function handleStartAnalysis() {
       remote_sensing_image_id: currentImageId.value
     };
     status.value = 'done';
+    if (analyzeResult?.preview_message) {
+      messageStore.warning(analyzeResult.preview_message);
+    }
     saveAnalysisResult(resultData.value, currentImageId.value, selectedIndex.value);
     messageStore.success('分析完成！');
     
@@ -772,6 +775,9 @@ async function handleStartAnalysis() {
       }
       if (Array.isArray(data?.supported_index_labels) && data.supported_index_labels.length > 0) {
         errorDetails = `${errorDetails} 建议选择：${data.supported_index_labels.join('、')}。`;
+      }
+      if (data?.bands_count) {
+        errorDetails = `${errorDetails} 当前影像识别到 ${data.bands_count} 个波段。`.trim();
       }
       if (Array.isArray(data?.supported_indices) && data.supported_indices.includes('ndvi')) {
         selectedIndex.value = 'ndvi';

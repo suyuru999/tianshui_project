@@ -44,6 +44,43 @@
               <div class="file-status">
                 {{ selectedFile ? selectedFile.name : '未选择文件' }}
               </div>
+              <div v-if="fileCapabilities" class="capability-card">
+                <div class="capability-title">文件识别结果</div>
+                <div class="capability-mode">
+                  {{ capabilityModeText }}
+                </div>
+                <div class="capability-tags">
+                  <span
+                    v-for="metric in climateMetricBadges"
+                    :key="metric.key"
+                    class="capability-tag"
+                    :class="{ active: fileCapabilities.supported_metrics?.includes(metric.key), muted: !fileCapabilities.supported_metrics?.includes(metric.key) }"
+                  >
+                    {{ metric.label }}
+                  </span>
+                </div>
+                <div v-if="fileCapabilities.reason" class="capability-reason" :class="{ warning: fileCapabilities.unsupported_for_climate }">
+                  {{ fileCapabilities.reason }}
+                </div>
+                <div v-if="showMetricSelector" class="metric-selector">
+                  <div class="metric-selector-label">请指定当前栅格变量</div>
+                  <div v-if="selectedMetricLabel" class="metric-selector-current">
+                    当前已选择：{{ selectedMetricLabel }}
+                  </div>
+                  <div class="metric-selector-options">
+                    <button
+                      v-for="metric in climateMetricBadges"
+                      :key="`selector-${metric.key}`"
+                      type="button"
+                      class="metric-option"
+                      :class="{ active: selectedMetric === metric.key }"
+                      @click="selectedMetric = metric.key"
+                    >
+                      {{ metric.label }}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -58,9 +95,10 @@
             <button
               @click="startAnalysis"
               class="analysis-btn"
-              :class="{ 'disabled': !selectedFile || isAnalyzing }"
+              :disabled="!selectedFile || isAnalyzing || isClimateAnalysisBlocked"
+              :class="{ 'disabled': !selectedFile || isAnalyzing || isClimateAnalysisBlocked }"
             >
-              {{ isAnalyzing ? '分析中...' : '开始分析' }}
+              {{ isAnalyzing ? '分析中...' : isClimateAnalysisBlocked ? '当前文件不适用于本模块' : '开始分析' }}
             </button>
           </div>
         </div>
@@ -111,6 +149,11 @@
 
         <!-- 有数据时显示分析结果 -->
         <div v-else class="analysis-results">
+          <div v-if="analysisNotice" class="analysis-notice">
+            <div class="analysis-notice-title">结果说明</div>
+            <div class="analysis-notice-text">{{ analysisNotice }}</div>
+          </div>
+
           <!-- 统计概览 -->
           <div class="stats-overview">
             <h3>统计概览</h3>
@@ -169,7 +212,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { ArrowLeft, CircleCheck, CircleClose, CirclePlus, Files, Search } from '@element-plus/icons-vue'
 import { climateMonitoringService } from '../services/api.js'
 
@@ -184,6 +227,9 @@ const errorMessage = ref('')
 const successMessage = ref('')
 const hasData = ref(false)
 const statistics = ref([])
+const analysisNotice = ref('')
+const fileCapabilities = ref(null)
+const selectedMetric = ref('')
 const chartData = ref({
   temperature: [],
   precipitation: [],
@@ -208,7 +254,10 @@ const handleFileSelect = (event) => {
     const validationResult = validateClimateDataFile(file)
     if (validationResult.isValid) {
       selectedFile.value = file
+      fileCapabilities.value = null
+      selectedMetric.value = ''
       errorMessage.value = ''
+      clearAnalysisState()
       successMessage.value = `文件 "${file.name}" 选择成功，可以开始分析`
       // 3秒后自动清除成功消息
       setTimeout(() => {
@@ -276,9 +325,50 @@ const validateClimateDataFile = (file) => {
   }
 }
 
+const climateMetricBadges = [
+  { key: 'temperature', label: '温度' },
+  { key: 'precipitation', label: '降水' },
+  { key: 'humidity', label: '湿度' },
+  { key: 'wind_speed', label: '风速' }
+]
+
+const isClimateAnalysisBlocked = computed(() => !!fileCapabilities.value?.unsupported_for_climate)
+const showMetricSelector = computed(() => !!fileCapabilities.value?.manual_selection_required)
+const selectedMetricLabel = computed(() => {
+  const current = climateMetricBadges.find(metric => metric.key === selectedMetric.value)
+  return current ? current.label : ''
+})
+
+const capabilityModeText = computed(() => {
+  if (!fileCapabilities.value) return ''
+  if (fileCapabilities.value.unsupported_for_climate) {
+    return '检测为遥感指数栅格'
+  }
+  if (fileCapabilities.value.manual_selection_required) {
+    return '单变量气候栅格，待手动指定变量'
+  }
+  return fileCapabilities.value.detected_mode === 'single_metric_raster' ? '单变量气候栅格' : '综合气候表格'
+})
+
 const removeFile = () => {
   selectedFile.value = null
   fileInput.value.value = ''
+  selectedMetric.value = ''
+  fileCapabilities.value = null
+  clearAnalysisState()
+}
+
+const clearAnalysisState = () => {
+  hasData.value = false
+  analysisNotice.value = ''
+  statistics.value = []
+  analysisTaskId.value = null
+  chartData.value = {
+    temperature: [],
+    precipitation: [],
+    humidity: [],
+    windSpeed: []
+  }
 }
 
 // 清除错误信息
@@ -310,12 +400,23 @@ const startAnalysis = async () => {
     errorMessage.value = '正在分析中，请等待完成'
     return
   }
+
+  if (isClimateAnalysisBlocked.value) {
+    errorMessage.value = fileCapabilities.value?.reason || '当前文件不适用于气候环境监测统计，请改用遥感生态指数分析模块'
+    return
+  }
+
+  if (showMetricSelector.value && !selectedMetric.value) {
+    errorMessage.value = '请先指定当前栅格是温度、降水、湿度还是风速'
+    return
+  }
   
   try {
     isAnalyzing.value = true
     errorMessage.value = ''
     uploadProgress.value = 0
     analysisStatus.value = 'uploading'
+    const chosenMetric = selectedMetric.value
     
     // 调用真实的后端API
     try {
@@ -346,6 +447,16 @@ const startAnalysis = async () => {
       
       if (uploadResponse.success) {
         const fileId = uploadResponse.file_id
+        fileCapabilities.value = uploadResponse.capabilities || null
+        if (uploadResponse.capabilities?.inferred_metric) {
+          selectedMetric.value = uploadResponse.capabilities.inferred_metric
+        } else if (chosenMetric) {
+          selectedMetric.value = chosenMetric
+        }
+
+        if (uploadResponse.capabilities?.unsupported_for_climate) {
+          throw new Error(uploadResponse.capabilities.reason || '当前文件属于遥感指数栅格，请改用遥感生态指数分析模块')
+        }
         
         // 验证文件ID
         if (!fileId) {
@@ -365,7 +476,8 @@ const startAnalysis = async () => {
           }
         }, 300)
         
-        const analysisResponse = await climateMonitoringService.analyzeClimateData(fileId, 'comprehensive')
+        const analysisType = selectedMetric.value || chosenMetric || 'comprehensive'
+        const analysisResponse = await climateMonitoringService.analyzeClimateData(fileId, analysisType)
         
         clearInterval(analysisProgressInterval)
         
@@ -535,24 +647,7 @@ const validateAnalysisData = (data) => {
   if (!data || typeof data !== 'object') {
     throw new Error('分析数据格式无效')
   }
-  
-  // 检查必需的统计字段
-  const requiredFields = [
-    'temperature_avg', 'temperature_max', 'temperature_min', 'temperature_std',
-    'precipitation_avg', 'precipitation_max', 'precipitation_min', 'precipitation_std',
-    'humidity_avg', 'humidity_max', 'humidity_min', 'humidity_std',
-    'wind_speed_avg', 'wind_speed_max', 'wind_speed_min', 'wind_speed_std'
-  ]
-  
-  const missingFields = requiredFields.filter(field => 
-    data[field] === undefined || data[field] === null || isNaN(data[field])
-  )
-  
-  if (missingFields.length > 0) {
-    console.warn('缺少统计字段:', missingFields)
-    // 不抛出错误，而是使用默认值
-  }
-  
+
   // 检查图表数据
   if (data.chart_data && typeof data.chart_data === 'object') {
     const chartFields = ['temperature', 'precipitation', 'humidity', 'wind_speed']
@@ -567,12 +662,43 @@ const validateAnalysisData = (data) => {
   return true
 }
 
-// 安全获取数值，提供默认值
-const safeGetValue = (value, defaultValue = 0, precision = 1) => {
+// 安全获取数值
+const safeGetValue = (value, defaultValue = '--', precision = 1) => {
   if (value === null || value === undefined || isNaN(value)) {
     return defaultValue
   }
   return Number(value).toFixed(precision)
+}
+
+const climateMetricDefinitions = [
+  { key: 'temperature', label: '温度(°C)' },
+  { key: 'precipitation', label: '降水量(mm)' },
+  { key: 'humidity', label: '湿度(%)' },
+  { key: 'wind_speed', label: '风速(m/s)' }
+]
+
+const buildStatisticItems = (data) => {
+  return climateMetricDefinitions
+    .map(metric => {
+      const avgKey = `${metric.key}_avg`
+      const maxKey = `${metric.key}_max`
+      const minKey = `${metric.key}_min`
+      const stdKey = `${metric.key}_std`
+      const hasMetric = [avgKey, maxKey, minKey, stdKey].some(key => data[key] !== null && data[key] !== undefined && !isNaN(data[key]))
+
+      if (!hasMetric) {
+        return null
+      }
+
+      return {
+        indicator: metric.label,
+        average: safeGetValue(data[avgKey]),
+        max: safeGetValue(data[maxKey]),
+        min: safeGetValue(data[minKey]),
+        stdDev: safeGetValue(data[stdKey])
+      }
+    })
+    .filter(Boolean)
 }
 
 // 加载分析结果
@@ -601,37 +727,20 @@ const loadAnalysisResults = async () => {
     // 验证数据完整性
     validateAnalysisData(data)
     
-    // 更新统计数据 - 使用安全的数值获取
-    statistics.value = [
-      { 
-        indicator: '温度(°C)', 
-        average: safeGetValue(data.temperature_avg, 0), 
-        max: safeGetValue(data.temperature_max, 0), 
-        min: safeGetValue(data.temperature_min, 0), 
-        stdDev: safeGetValue(data.temperature_std, 0) 
-      },
-      { 
-        indicator: '降水量(mm)', 
-        average: safeGetValue(data.precipitation_avg, 0), 
-        max: safeGetValue(data.precipitation_max, 0), 
-        min: safeGetValue(data.precipitation_min, 0), 
-        stdDev: safeGetValue(data.precipitation_std, 0) 
-      },
-      { 
-        indicator: '湿度(%)', 
-        average: safeGetValue(data.humidity_avg, 0), 
-        max: safeGetValue(data.humidity_max, 0), 
-        min: safeGetValue(data.humidity_min, 0), 
-        stdDev: safeGetValue(data.humidity_std, 0) 
-      },
-      { 
-        indicator: '风速(m/s)', 
-        average: safeGetValue(data.wind_speed_avg, 0), 
-        max: safeGetValue(data.wind_speed_max, 0), 
-        min: safeGetValue(data.wind_speed_min, 0), 
-        stdDev: safeGetValue(data.wind_speed_std, 0) 
+    statistics.value = buildStatisticItems(data)
+
+    const rasterMeta = data.chart_data?.raster_metadata
+    if (rasterMeta?.source_type === 'single_metric_raster') {
+      const metricMap = {
+        temperature: '温度',
+        precipitation: '降水量',
+        humidity: '湿度',
+        wind_speed: '风速'
       }
-    ]
+      analysisNotice.value = `当前上传的是单变量气候栅格，系统识别并计算了“${metricMap[rasterMeta.inferred_metric] || rasterMeta.inferred_metric}”指标；其余指标未包含在该文件中，因此不会显示为计算结果。`
+    } else {
+      analysisNotice.value = ''
+    }
     
     // 更新图表数据 - 添加验证
     if (data.chart_data && typeof data.chart_data === 'object') {
@@ -650,6 +759,10 @@ const loadAnalysisResults = async () => {
         windSpeed: []
       }
     }
+
+    if (statistics.value.length === 0) {
+      throw new Error('当前文件未解析出可展示的气候指标')
+    }
     
     // 生成图表
     setTimeout(() => {
@@ -658,7 +771,7 @@ const loadAnalysisResults = async () => {
     
   } catch (error) {
     console.error('加载分析结果失败:', error)
-    errorMessage.value = '加载分析结果失败'
+    errorMessage.value = error.message || '加载分析结果失败'
   }
 }
 
@@ -1417,6 +1530,116 @@ const drawWindSpeedChart = () => {
   border: 1px solid #dbe6f0;
 }
 
+.capability-card {
+  background: linear-gradient(180deg, #f7fbff 0%, #ffffff 100%);
+  border: 1px solid #d7e7f6;
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 8px 20px rgba(31, 120, 209, 0.06);
+}
+
+.capability-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #24405f;
+  margin-bottom: 6px;
+}
+
+.capability-mode {
+  font-size: 12px;
+  color: #5d7488;
+  margin-bottom: 10px;
+}
+
+.capability-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.capability-reason {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #5d7488;
+}
+
+.capability-reason.warning {
+  color: #b54708;
+}
+
+.metric-selector {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e5eef6;
+}
+
+.metric-selector-label {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #36516b;
+}
+
+.metric-selector-current {
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: #1f78d1;
+  font-weight: 700;
+}
+
+.metric-selector-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.metric-option {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid #cfe0ee;
+  background: #f8fbfd;
+  color: #587085;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.metric-option:hover {
+  border-color: #8dbce8;
+  color: #1f78d1;
+  background: #eef6fd;
+}
+
+.metric-option.active {
+  border-color: #9fc8f1;
+  color: #1f78d1;
+  background: #e8f4ff;
+  box-shadow: inset 0 0 0 1px rgba(31, 120, 209, 0.08);
+}
+
+.capability-tag {
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.capability-tag.active {
+  background: #e8f4ff;
+  color: #1f78d1;
+  border-color: #b7d8fb;
+}
+
+.capability-tag.muted {
+  background: #f4f6f8;
+  color: #99a7b5;
+  border-color: #e1e7ed;
+}
+
 .analysis-btn {
   width: 100%;
   height: 42px;
@@ -1687,6 +1910,28 @@ const drawWindSpeedChart = () => {
   max-width: 1320px;
   margin: 0 auto;
   padding: 0;
+}
+
+.analysis-notice {
+  margin-bottom: 20px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  border: 1px solid #d7e7f6;
+  background: linear-gradient(180deg, #f7fbff 0%, #ffffff 100%);
+  box-shadow: 0 10px 24px rgba(31, 120, 209, 0.08);
+}
+
+.analysis-notice-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #22405f;
+  margin-bottom: 6px;
+}
+
+.analysis-notice-text {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #5b7185;
 }
 
 @keyframes fadeIn {

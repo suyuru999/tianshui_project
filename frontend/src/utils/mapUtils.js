@@ -235,7 +235,7 @@ export class MapUtils {
       const bbox = `${minX},${minY},${maxX},${maxY}`
       
       // 构建GetFeatureInfo请求URL
-      const url = new URL(baseUrl)
+      const url = new URL(baseUrl, window.location.origin)
       url.searchParams.set('SERVICE', 'WMS')
       url.searchParams.set('VERSION', '1.1.0')  // 使用 1.1.0 版本
       url.searchParams.set('REQUEST', 'GetFeatureInfo')
@@ -341,7 +341,7 @@ export class MapUtils {
       console.log('loadRasterFromWMS 被调用:', { wmsUrl, layerMetadata, options })
       
       // 解析WMS URL，提取图层名称
-      const urlObj = new URL(wmsUrl)
+      const urlObj = new URL(wmsUrl, window.location.origin)
       const layersParam = urlObj.searchParams.get('layers') || urlObj.searchParams.get('LAYERS')
       
       console.log('解析WMS URL:', {

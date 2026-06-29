@@ -20,7 +20,16 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from django.shortcuts import render
-from rest_framework.documentation import include_docs_urls
+from django.views.generic.base import RedirectView
+import logging
+
+logger = logging.getLogger(__name__)
+
+try:
+    from rest_framework.documentation import include_docs_urls
+except Exception as exc:
+    include_docs_urls = None
+    logger.warning(f"REST framework docs 不可用，将跳过 /api/docs/ 路由: {exc}")
 
 def home_view(request):
     """首页视图 - 显示系统信息"""
@@ -38,8 +47,16 @@ urlpatterns = [
         path("users/", include('users.urls')),
         path("environment/", include('environment.urls')),
     ])),
-    path("api/docs/", include_docs_urls(title='天水平台 API 文档'), name="api-docs"),
+    path("api/", RedirectView.as_view(url='/api/v1/', permanent=False)),
 ]
+
+if include_docs_urls is not None:
+    try:
+        urlpatterns.append(
+            path("api/docs/", include_docs_urls(title='天水平台 API 文档'), name="api-docs")
+        )
+    except Exception as exc:
+        logger.warning(f"REST framework docs 初始化失败，已跳过 /api/docs/ 路由: {exc}")
 
 # 开发环境下提供媒体文件服务
 if settings.DEBUG:

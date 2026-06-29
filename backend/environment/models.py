@@ -253,6 +253,7 @@ class ClimateAnalysisResult(models.Model):
     """气候分析结果模型"""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     data_file = models.ForeignKey(ClimateDataFile, on_delete=models.CASCADE, related_name='analysis_results', verbose_name='数据文件')
+    processing_task = models.ForeignKey('ProcessingTask', on_delete=models.SET_NULL, null=True, blank=True, related_name='climate_results', verbose_name='处理任务')
     analysis_type = models.CharField(max_length=50, default='comprehensive', verbose_name='分析类型')
     
     # 统计数据

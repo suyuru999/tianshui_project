@@ -19,6 +19,16 @@
           </el-button>
         </div>
 
+        <div v-if="resultData?.preview_mode || resultData?.preview_message" class="result-notice is-preview">
+          <div class="notice-title">当前为大文件预览分析</div>
+          <div class="notice-text">{{ resultData?.preview_message || '系统已自动切换为预览模式。' }}</div>
+        </div>
+
+        <div v-if="resultData?.supported_index_labels?.length" class="result-notice is-hint">
+          <div class="notice-title">当前影像支持的指数</div>
+          <div class="notice-text">{{ resultData.supported_index_labels.join('、') }}</div>
+        </div>
+
         <div v-if="primaryVisualizationUrl" class="visualization-section">
           <img :src="primaryVisualizationUrl" alt="指数可视化结果" class="visualization-image" />
         </div>
@@ -108,6 +118,19 @@
         <div v-if="indicesData.length === 0 && !loading" class="no-data-apple">
           <p>暂无分析结果数据</p>
           <p class="hint-text">请等待计算完成或重新开始分析</p>
+        </div>
+      </div>
+    </template>
+    <template v-else-if="status === 'error'">
+      <div class="error-state-card">
+        <h3 class="error-title">分析未完成</h3>
+        <p class="error-message">{{ resultData?.error || '发生未知错误' }}</p>
+        <p v-if="resultData?.details" class="error-details">{{ resultData.details }}</p>
+        <div v-if="resultData?.supported_index_labels?.length" class="error-supported">
+          建议改用：{{ resultData.supported_index_labels.join('、') }}
+        </div>
+        <div v-if="resultData?.bands_count" class="error-meta">
+          当前识别波段数：{{ resultData.bands_count }}
         </div>
       </div>
     </template>
@@ -622,6 +645,35 @@ onUnmounted(() => {
   gap: 24px;
 }
 
+.result-notice {
+  border-radius: 14px;
+  padding: 14px 16px;
+  border: 1px solid transparent;
+}
+
+.result-notice.is-preview {
+  background: linear-gradient(180deg, #eef6ff 0%, #f9fbff 100%);
+  border-color: #bfdcff;
+}
+
+.result-notice.is-hint {
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+  border-color: #d7e7f6;
+}
+
+.notice-title {
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #21507e;
+}
+
+.notice-text {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #4c657d;
+}
+
 .result-header-apple {
   display: flex;
   justify-content: space-between;
@@ -773,6 +825,36 @@ onUnmounted(() => {
   text-align: center;
   padding: 60px 32px;
   color: #909399;
+}
+
+.error-state-card {
+  background: linear-gradient(180deg, #fff7f7 0%, #ffffff 100%);
+  border: 1px solid #ffd4d4;
+  border-radius: 18px;
+  padding: 24px;
+  box-shadow: 0 14px 30px rgba(216, 78, 78, 0.08);
+}
+
+.error-title {
+  margin: 0 0 10px;
+  font-size: 20px;
+  color: #9f1f1f;
+}
+
+.error-message {
+  margin: 0;
+  font-size: 15px;
+  color: #6f2c2c;
+  font-weight: 600;
+}
+
+.error-details,
+.error-supported,
+.error-meta {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #7a4a4a;
 }
 
 .no-data-apple p {

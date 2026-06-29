@@ -166,6 +166,15 @@ const currentDataType = computed(() => {
 const ecologyInput = ref(null)
 const economyInput = ref(null)
 const engineeringInput = ref(null)
+const maxUploadSize = 1024 * 1024 * 1024
+
+const getRequestErrorMessage = (error, fallback = '上传失败') => {
+  const data = error?.response?.data
+  if (Array.isArray(data?.details) && data.details.length > 0) {
+    return data.details.join('；')
+  }
+  return data?.message || data?.error || data?.detail || error?.message || fallback
+}
 
 // 选择数据类型
 const selectDataType = (type) => {
@@ -201,9 +210,9 @@ const uploadStatus = reactive({
 })
 
 const publishedLayers = reactive({
-  ecology: true,
-  economy: true,
-  engineering: true
+  ecology: false,
+  economy: false,
+  engineering: false
 })
 
 const deleting = reactive({
@@ -227,12 +236,10 @@ const triggerFileInput = (type) => {
 const handleFileSelect = (event, type) => {
   const file = event.target.files[0]
   if (file) {
-    // 验证文件大小（最大100MB）
-    const maxSize = 100 * 1024 * 1024
-    if (file.size > maxSize) {
+    if (file.size > maxUploadSize) {
       uploadStatus[type] = {
         type: 'error',
-        message: '文件大小超过100MB限制'
+        message: '文件大小超过1GB限制'
       }
       return
     }
@@ -306,6 +313,7 @@ const uploadFile = async (type) => {
       // 触发地图刷新事件
       emitRefreshMap(type, 'updated')
     } else {
+      publishedLayers[type] = false
       uploadStatus[type] = {
         type: 'error',
         message: response.message || '上传失败'
@@ -318,17 +326,7 @@ const uploadFile = async (type) => {
     // 提取错误信息
     let errorMessage = '上传失败'
     if (error.response) {
-      // 服务器返回了错误响应
-      if (error.response.data) {
-        if (error.response.data.message) {
-          errorMessage = error.response.data.message
-        } else if (error.response.data.error) {
-          errorMessage = error.response.data.error
-        } else if (error.response.data.error_detail) {
-          errorMessage = `上传失败: ${error.response.data.error_detail.substring(0, 200)}`
-        }
-      }
-      errorMessage = `${errorMessage} (HTTP ${error.response.status})`
+      errorMessage = `${getRequestErrorMessage(error)} (HTTP ${error.response.status})`
     } else if (error.message) {
       errorMessage = `上传失败: ${error.message}`
     }
@@ -337,6 +335,7 @@ const uploadFile = async (type) => {
       type: 'error',
       message: errorMessage
     }
+    publishedLayers[type] = false
   } finally {
     uploading[type] = false
   }
@@ -364,7 +363,7 @@ const deleteUploadedLayer = async (type) => {
     console.error('删除图层失败:', error)
     uploadStatus[type] = {
       type: 'error',
-      message: error.response?.data?.message || error.response?.data?.error || '删除图层失败'
+      message: getRequestErrorMessage(error, '删除图层失败')
     }
   } finally {
     deleting[type] = false

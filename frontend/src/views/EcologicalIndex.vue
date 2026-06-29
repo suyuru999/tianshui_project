@@ -138,11 +138,29 @@
                   class="value-item"
                 >
                   <div class="value-name">{{ getIndexName(key) }}</div>
-                  <div class="value-number">{{ value.toFixed(4) }}</div>
+                  <div class="value-number">{{ formatIndexValue(key, value) }}</div>
                   <div class="value-status" :class="getStatusClass(key, value)">
                     {{ getStatusText(key, value) }}
                   </div>
                   <div class="value-unit">{{ getIndexUnit(key) }}</div>
+                  <div class="value-scale">{{ getScaleHint(key) }}</div>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="analysisMeta" class="analysis-meta-card">
+              <div class="chart-title">计算说明</div>
+              <div class="meta-row">
+                <span class="meta-label">计算引擎</span>
+                <span class="meta-value">{{ analysisMeta.analysis_engine_label || analysisMeta.analysis_engine }}</span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">计算精度</span>
+                <span class="meta-value">{{ getPrecisionLabel(analysisMeta.analysis_precision) }}</span>
+              </div>
+              <div class="meta-notes">
+                <div v-for="(note, index) in analysisMeta.analysis_notes || []" :key="index" class="meta-note">
+                  {{ note }}
                 </div>
               </div>
             </div>
@@ -216,12 +234,21 @@ import http from '../utils/http.js'
 export default {
   name: 'EcologicalIndex',
   setup() {
+    const getRequestErrorMessage = (error, fallback = '服务器错误') => {
+      const data = error?.response?.data
+      if (Array.isArray(data?.details) && data.details.length > 0) {
+        return data.details.join('；')
+      }
+      return data?.error || data?.message || data?.detail || error?.message || fallback
+    }
+
     // 响应式数据
     const fileList = ref([])
     const globalLoading = ref(false)
     const uploadLoading = ref(false)
     const landuseVisualizationUrl = ref('')
     const landuseStatistics = ref(null)
+    const analysisMeta = ref(null)
     
     // 监听 globalLoading 的变化
     watch(globalLoading, (newVal, oldVal) => {
@@ -351,6 +378,7 @@ export default {
       })
       landuseVisualizationUrl.value = ''
       landuseStatistics.value = null
+      analysisMeta.value = null
       // 重置指数状态
       structureIndices.forEach(index => {
         index.calculated = false
@@ -412,6 +440,7 @@ export default {
           const visualization = structureResponse.visualization || stressResponse.visualization
           landuseVisualizationUrl.value = visualization?.visualization_file_url || ''
           landuseStatistics.value = visualization?.landuse_statistics || null
+          analysisMeta.value = structureResponse.meta || stressResponse.meta || null
           
           // 更新指数状态
           const allIndices = [...structureIndices, ...stressIndices]
@@ -437,8 +466,8 @@ export default {
         let errorMessage = '分析失败'
         if (error.response) {
           // 服务器响应了错误状态码
-          const { status, data } = error.response
-          errorMessage = `分析失败 (${status}): ${data?.error || data?.message || '服务器错误'}`
+          const { status } = error.response
+          errorMessage = `分析失败 (${status}): ${getRequestErrorMessage(error)}`
         } else if (error.request) {
           // 请求已发出但没有收到响应
           errorMessage = '分析失败: 无法连接到服务器，请检查网络连接'
@@ -493,6 +522,9 @@ export default {
             landuseVisualizationUrl.value = response.visualization.visualization_file_url || landuseVisualizationUrl.value
             landuseStatistics.value = response.visualization.landuse_statistics || landuseStatistics.value
           }
+          if (response.meta) {
+            analysisMeta.value = response.meta
+          }
           index.calculated = true
           
           ElMessage.success(`${index.name} 计算完成`)
@@ -511,8 +543,8 @@ export default {
         let errorMessage = `${index.name} 计算失败`
         if (error.response) {
           // 服务器响应了错误状态码
-          const { status, data } = error.response
-          errorMessage = `${index.name} 计算失败 (${status}): ${data?.error || data?.message || '服务器错误'}`
+          const { status } = error.response
+          errorMessage = `${index.name} 计算失败 (${status}): ${getRequestErrorMessage(error)}`
         } else if (error.request) {
           // 请求已发出但没有收到响应
           errorMessage = `${index.name} 计算失败: 无法连接到服务器，请检查网络连接`
@@ -553,12 +585,12 @@ export default {
           return 'status-bad'                        // 劣：极低多样性
           
         case 'cohesion_index':
-          // 内聚力指数：值越高表示连接性越好
-          if (value === 0) return 'status-bad'       // 劣：无连接性
-          if (value < 0.3) return 'status-poor'      // 差：低连接性
-          if (value < 0.5) return 'status-moderate'  // 中：中等连接性
-          if (value < 0.8) return 'status-good'      // 良：良好连接性
-          return 'status-excellent'                  // 优：极佳连接性
+          // 内聚力指数：后端返回百分制
+          if (value === 0) return 'status-bad'
+          if (value < 30) return 'status-poor'
+          if (value < 50) return 'status-moderate'
+          if (value < 80) return 'status-good'
+          return 'status-excellent'
           
         case 'fragility_index':
           // 脆弱性指数：值越低表示抵抗力越强
@@ -625,9 +657,9 @@ export default {
           
         case 'cohesion_index':
           if (value === 0) return '劣'
-          if (value < 0.3) return '差'
-          if (value < 0.5) return '中'
-          if (value < 0.8) return '良'
+          if (value < 30) return '差'
+          if (value < 50) return '中'
+          if (value < 80) return '良'
           return '优'
           
         case 'fragility_index':
@@ -684,6 +716,39 @@ export default {
       }
       return unitMap[key] || '无单位'
     }
+
+    const getScaleHint = (key) => {
+      const hintMap = {
+        'fragmentation_index': '理论范围 0-1，越低越完整',
+        'cohesion_index': '百分制，越高越连通',
+        'shannon_diversity': '通常 0-3，越高越多样',
+        'fragility_index': '理论范围 0-1，越低越稳定',
+        'soil_erosion_index': '理论范围 0-1，越低越安全',
+        'unused_land_proportion': '面积占比，单位 %',
+        'cultivated_construction_proportion': '面积占比，单位 %',
+        'land_degradation_index': '理论范围 0-1，越低越安全'
+      }
+      return hintMap[key] || '请结合指标定义解读'
+    }
+
+    const formatIndexValue = (key, value) => {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) {
+        return '--'
+      }
+      const numericValue = Number(value)
+      if (key === 'cohesion_index' || key === 'unused_land_proportion' || key === 'cultivated_construction_proportion') {
+        return numericValue.toFixed(2)
+      }
+      return numericValue.toFixed(4)
+    }
+
+    const getPrecisionLabel = (precision) => {
+      const labelMap = {
+        full_resolution: '全分辨率统计',
+        mixed_resolution: '全量统计 + 预览估算'
+      }
+      return labelMap[precision] || precision || '未知'
+    }
     
     const downloadResults = () => {
       try {
@@ -728,18 +793,18 @@ export default {
       // 更新雷达图
       if (radarChart.value) {
         const radar = echarts.init(radarChart.value)
-        
-        // 计算合适的最大值
-        const maxValue = Math.max(...Object.values(indexResults))
-        const chartMax = Math.ceil(maxValue * 1.2) // 留出20%的边距
+        const radarKeys = Object.keys(indexResults).filter(key => getIndexUnit(key) !== '%')
+        const radarValues = radarKeys.map(key => Number(indexResults[key]) || 0)
+        const maxValue = radarValues.length ? Math.max(...radarValues) : 1
+        const chartMax = Math.max(1, Math.ceil(maxValue * 1.2 * 1000) / 1000)
         
         const radarOption = {
           title: { 
-            text: '生态环境指数雷达图',
+            text: '生态环境指数雷达图（非百分比项）',
             textStyle: { fontSize: 16, fontWeight: 'bold' }
           },
           radar: {
-            indicator: Object.keys(indexResults).map(key => ({
+            indicator: radarKeys.map(key => ({
               name: getIndexName(key),
               max: chartMax
             })),
@@ -749,7 +814,7 @@ export default {
           series: [{
             type: 'radar',
             data: [{
-              value: Object.values(indexResults),
+              value: radarValues,
               name: '指数值',
               areaStyle: { 
                 opacity: 0.3,
@@ -771,6 +836,7 @@ export default {
       // 更新柱状图
       if (barChart.value) {
         const bar = echarts.init(barChart.value)
+        const orderedKeys = Object.keys(indexResults)
         
         // 为不同类型的指数设置不同的颜色
         const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16', '#f97316']
@@ -784,12 +850,13 @@ export default {
             trigger: 'axis',
             formatter: function(params) {
               const data = params[0]
-              return `${data.name}<br/>${data.value.toFixed(4)}`
+              const key = orderedKeys[data.dataIndex]
+              return `${data.name}<br/>${formatIndexValue(key, data.value)} ${getIndexUnit(key)}`
             }
           },
           xAxis: {
             type: 'category',
-            data: Object.keys(indexResults).map(key => getIndexName(key)),
+            data: orderedKeys.map(key => getIndexName(key)),
             axisLabel: { 
               rotate: 45,
               fontSize: 12
@@ -797,12 +864,12 @@ export default {
           },
           yAxis: { 
             type: 'value',
-            name: '指数值'
+            name: '混合量纲，请结合卡片单位查看'
           },
           series: [{
             type: 'bar',
-            data: Object.values(indexResults).map((value, index) => ({
-              value: value,
+            data: orderedKeys.map((key, index) => ({
+              value: Number(indexResults[key]) || 0,
               itemStyle: { 
                 color: colors[index % colors.length]
               }
@@ -834,6 +901,7 @@ export default {
       hasResults,
       landuseVisualizationUrl,
       landuseClasses,
+      analysisMeta,
       radarChart,
       barChart,
       triggerFileUpload,
@@ -846,6 +914,9 @@ export default {
       getStatusClass,
       getStatusText,
       getIndexUnit,
+      getScaleHint,
+      formatIndexValue,
+      getPrecisionLabel,
       downloadResults
     }
   }
@@ -1454,6 +1525,62 @@ export default {
   font-size: 12px;
   color: #8a98a8;
   font-weight: 500;
+}
+
+.value-scale {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #8fa1b3;
+}
+
+.analysis-meta-card {
+  background: linear-gradient(180deg, #f7fbff 0%, #ffffff 100%);
+  border: 1px solid #d7e7f6;
+  border-radius: 12px;
+  padding: 20px 22px;
+  margin-bottom: 24px;
+  box-shadow: 0 10px 24px rgba(31, 120, 209, 0.08);
+}
+
+.meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(148, 184, 216, 0.18);
+}
+
+.meta-row:last-of-type {
+  border-bottom: none;
+}
+
+.meta-label {
+  font-size: 13px;
+  color: #5d7286;
+  font-weight: 600;
+}
+
+.meta-value {
+  font-size: 14px;
+  color: #22405f;
+  font-weight: 700;
+}
+
+.meta-notes {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.meta-note {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #4f6478;
+  background: rgba(224, 239, 252, 0.65);
+  border-radius: 10px;
+  padding: 10px 12px;
 }
 
 .status-excellent {

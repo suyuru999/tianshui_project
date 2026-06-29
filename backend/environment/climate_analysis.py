@@ -26,6 +26,9 @@ from .raster_processing import prepare_raster_upload, raster_band_statistics, pr
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_CLIMATE_MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024
+DEFAULT_CLIMATE_MAX_ROWS = 200000
+
 # 设置中文字体
 plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
@@ -68,9 +71,9 @@ class ClimateDataAnalyzer:
         if file_size == 0:
             return False, "文件为空"
         
-        max_size = 50 * 1024 * 1024  # 50MB
+        max_size = DEFAULT_CLIMATE_MAX_FILE_SIZE
         if file_size > max_size:
-            return False, f"文件过大: {file_size / (1024*1024):.2f}MB > 50MB"
+            return False, f"文件过大: {file_size / (1024*1024):.2f}MB > {max_size / (1024*1024*1024):.1f}GB"
         
         return True, ""
     
@@ -91,8 +94,8 @@ class ClimateDataAnalyzer:
         if len(self.df) < 2:
             return False, "数据行数不足，至少需要2行数据"
         
-        if len(self.df) > 10000:
-            return False, f"数据行数过多: {len(self.df)} > 10000"
+        if len(self.df) > DEFAULT_CLIMATE_MAX_ROWS:
+            return False, f"数据行数过多: {len(self.df)} > {DEFAULT_CLIMATE_MAX_ROWS}"
         
         # 检查必需的列（支持中英文列名）
         required_columns_en = ['Date', 'Temperature', 'Precipitation', 'Humidity', 'WindSpeed']
@@ -458,7 +461,7 @@ class ClimateDataAnalyzer:
         return result
 
 
-def analyze_climate_data(file_path: str, file_type: str) -> Dict:
+def analyze_climate_data(file_path: str, file_type: str, preferred_metric: Optional[str] = None) -> Dict:
     """
     分析气候数据的便捷函数
     
@@ -470,14 +473,61 @@ def analyze_climate_data(file_path: str, file_type: str) -> Dict:
         Dict: 分析结果
     """
     if file_type.lower() in ['tif', 'tiff', 'zip']:
-        return analyze_climate_raster(file_path, file_type)
+        return analyze_climate_raster(file_path, file_type, preferred_metric=preferred_metric)
 
     analyzer = ClimateDataAnalyzer(file_path, file_type)
     return analyzer.analyze()
 
 
+NON_CLIMATE_KEYWORDS = [
+    'ndvi', 'ndwi', 'ndbi', 'ndsi', 'rsei',
+    'dryness', 'wetness', 'greenness', 'heat',
+    '干度', '湿度指数', '绿度', '热度', '生态指数',
+    '归一化干度', '归一化湿度', '归一化植被', '归一化建筑', '归一化水体',
+    '遥感', '生态', '植被指数', '建筑指数', '水体指数',
+]
+
+
+def detect_climate_raster_capabilities(file_path):
+    name = os.path.basename(file_path).lower()
+    metric = _infer_climate_metric(file_path)
+    climate_metrics = ['temperature', 'precipitation', 'humidity', 'wind_speed']
+    reason = None
+    unsupported_for_climate = False
+    manual_selection_required = False
+    detected_category = 'climate_metric'
+    supported_metrics = []
+    inferred_metric = None
+
+    if metric == 'remote_sensing_index':
+        unsupported_for_climate = True
+        detected_category = 'remote_sensing_index'
+        reason = '检测到该文件更像遥感生态指数栅格，不属于气候监测统计的温度/降水/湿度/风速变量。'
+    elif metric == 'unknown':
+        manual_selection_required = True
+        detected_category = 'unknown_climate_raster'
+        supported_metrics = climate_metrics
+        reason = '当前文件未包含明确变量名，无法自动判断是温度、降水、湿度还是风速，请先手动选择后再分析。'
+    else:
+        inferred_metric = metric
+        supported_metrics = [metric]
+
+    return {
+        'detected_mode': 'single_metric_raster',
+        'inferred_metric': inferred_metric,
+        'supported_metrics': supported_metrics,
+        'unsupported_for_climate': unsupported_for_climate,
+        'manual_selection_required': manual_selection_required,
+        'detected_category': detected_category,
+        'reason': reason,
+        'filename_hint': name,
+    }
+
+
 def _infer_climate_metric(file_path):
     name = os.path.basename(file_path).lower()
+    if any(key in name for key in NON_CLIMATE_KEYWORDS):
+        return 'remote_sensing_index'
     if any(key in name for key in ['降水', 'precip', 'rain']):
         return 'precipitation'
     if any(key in name for key in ['湿度', 'humidity', 'wet']):
@@ -486,7 +536,7 @@ def _infer_climate_metric(file_path):
         return 'wind_speed'
     if any(key in name for key in ['温度', '地温', 'lst', 'temp']):
         return 'temperature'
-    return 'temperature'
+    return 'unknown'
 
 
 def _sample_raster_values(path, max_points=240):
@@ -500,7 +550,7 @@ def _sample_raster_values(path, max_points=240):
     return [round(float(value), 4) for value in valid]
 
 
-def analyze_climate_raster(file_path: str, file_type: str) -> Dict:
+def analyze_climate_raster(file_path: str, file_type: str, preferred_metric: Optional[str] = None) -> Dict:
     cleanup_dirs = []
     raster_path = file_path
     try:
@@ -515,8 +565,24 @@ def analyze_climate_raster(file_path: str, file_type: str) -> Dict:
             height = dataset.height
             crs = str(dataset.crs) if dataset.crs else None
 
+        capability = detect_climate_raster_capabilities(file_path)
+        metric = preferred_metric or capability['inferred_metric']
+        if preferred_metric == 'wind':
+            metric = 'wind_speed'
+
+        if capability['unsupported_for_climate']:
+            return {
+                'error': capability['reason'] or '当前栅格无法识别为气候监测变量',
+                'capabilities': capability,
+            }
+
+        if metric not in {'temperature', 'precipitation', 'humidity', 'wind_speed'}:
+            return {
+                'error': capability['reason'] or '当前栅格无法识别为气候监测变量',
+                'capabilities': capability,
+            }
+
         stats = raster_band_statistics(raster_path, include_classes=False)
-        metric = _infer_climate_metric(file_path)
         metric_stats = {
             'avg': round(stats['mean_value'], 4),
             'max': round(stats['max_value'], 4),
@@ -531,6 +597,10 @@ def analyze_climate_raster(file_path: str, file_type: str) -> Dict:
             'width': width,
             'height': height,
             'crs': crs,
+            'source_type': 'single_metric_raster',
+            'inferred_metric': metric,
+            'available_metrics': [metric],
+            'detected_category': capability['detected_category'],
         }
         return {
             'statistics': statistics,
