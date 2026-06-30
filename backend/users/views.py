@@ -1,7 +1,9 @@
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.conf import settings
 from django.contrib.auth import authenticate, login, logout
+from django.middleware.csrf import get_token
 from .models import User, UserPermission
 from .serializers import (
     UserSerializer, 
@@ -18,11 +20,26 @@ def _is_admin_user(user):
     return bool(user and user.is_authenticated and (user.is_superuser or user.role == 'admin'))
 
 
+def _set_csrf_cookie(request, response):
+    """为前后端分离场景显式下发 CSRF Cookie，供后续写操作复用。"""
+    csrf_token = get_token(request)
+    response.set_cookie(
+        key=getattr(settings, 'CSRF_COOKIE_NAME', 'csrftoken'),
+        value=csrf_token,
+        max_age=getattr(settings, 'CSRF_COOKIE_AGE', None),
+        domain=getattr(settings, 'CSRF_COOKIE_DOMAIN', None),
+        path=getattr(settings, 'CSRF_COOKIE_PATH', '/'),
+        secure=getattr(settings, 'CSRF_COOKIE_SECURE', False),
+        httponly=getattr(settings, 'CSRF_COOKIE_HTTPONLY', False),
+        samesite=getattr(settings, 'CSRF_COOKIE_SAMESITE', 'Lax'),
+    )
+    return response
+
+
 class UserViewSet(viewsets.ModelViewSet):
     """用户视图集"""
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    authentication_classes = []
     
     def get_queryset(self):
         if _is_admin_user(self.request.user):
@@ -43,7 +60,7 @@ class UserViewSet(viewsets.ModelViewSet):
     
     def get_permissions(self):
         """设置权限"""
-        if self.action in ['create', 'login']:
+        if self.action in ['create', 'login', 'csrf']:
             permission_classes = [permissions.AllowAny]
         else:
             permission_classes = [permissions.IsAuthenticated]
@@ -99,21 +116,34 @@ class UserViewSet(viewsets.ModelViewSet):
                 return Response({'error': '用户已被禁用'}, status=status.HTTP_403_FORBIDDEN)
             login(request, user)
             serializer = UserSerializer(user)
-            return Response({
+            response = Response({
                 'message': '登录成功',
                 'user': serializer.data
             })
+            return _set_csrf_cookie(request, response)
         else:
             return Response(
                 {'error': '用户名或密码错误'}, 
                 status=status.HTTP_401_UNAUTHORIZED
             )
+
+    @action(detail=False, methods=['get'])
+    def csrf(self, request):
+        """下发 CSRF Cookie，供前后端分离的首次写操作使用。"""
+        response = Response({'message': 'CSRF cookie 已准备就绪'})
+        return _set_csrf_cookie(request, response)
     
     @action(detail=False, methods=['post'])
     def logout(self, request):
         """用户登出"""
         logout(request)
-        return Response({'message': '登出成功'})
+        response = Response({'message': '登出成功'})
+        response.delete_cookie(
+            getattr(settings, 'SESSION_COOKIE_NAME', 'sessionid'),
+            path=getattr(settings, 'SESSION_COOKIE_PATH', '/'),
+        )
+        response.delete_cookie(getattr(settings, 'CSRF_COOKIE_NAME', 'csrftoken'), path=getattr(settings, 'CSRF_COOKIE_PATH', '/'))
+        return response
     
     @action(detail=False, methods=['get'])
     def profile(self, request):
@@ -121,7 +151,8 @@ class UserViewSet(viewsets.ModelViewSet):
         if not request.user.is_authenticated:
             return Response({'error': '未登录'}, status=status.HTTP_401_UNAUTHORIZED)
         serializer = UserSerializer(request.user)
-        return Response(serializer.data)
+        response = Response(serializer.data)
+        return _set_csrf_cookie(request, response)
     
     @action(detail=False, methods=['put'])
     def update_profile(self, request):
@@ -146,7 +177,8 @@ class UserViewSet(viewsets.ModelViewSet):
         """当前登录用户完整信息"""
         if not request.user.is_authenticated:
             return Response({'error': '未登录'}, status=status.HTTP_401_UNAUTHORIZED)
-        return Response(UserSerializer(request.user).data)
+        response = Response(UserSerializer(request.user).data)
+        return _set_csrf_cookie(request, response)
 
     @action(detail=False, methods=['get'])
     def permission_schema(self, request):

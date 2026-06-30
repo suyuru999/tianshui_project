@@ -35,6 +35,7 @@ export const API_CONFIG = {
 export const API_ENDPOINTS = {
   // 用户认证
   AUTH: {
+    CSRF: '/users/csrf/',
     LOGIN: '/users/login/',
     LOGOUT: '/users/logout/',
     REGISTER: '/users/register/',

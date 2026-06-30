@@ -5,7 +5,7 @@
 
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import { API_CONFIG } from '../config/api.js'
+import { API_CONFIG, API_ENDPOINTS, buildApiUrl } from '../config/api.js'
 
 // 创建axios实例
 const http = axios.create({
@@ -13,6 +13,8 @@ const http = axios.create({
   headers: API_CONFIG.HEADERS,
   withCredentials: true, // 支持跨域携带cookie
 })
+
+let csrfBootstrapPromise = null
 
 // 从 cookie 读取 csrftoken（适用于 Django）
 function getCookie(name) {
@@ -22,9 +24,53 @@ function getCookie(name) {
   return null
 }
 
+async function ensureCsrfCookie() {
+  if (getCookie('csrftoken')) {
+    return getCookie('csrftoken')
+  }
+
+  if (!csrfBootstrapPromise) {
+    csrfBootstrapPromise = http.get(buildApiUrl(API_ENDPOINTS.AUTH.CSRF), {
+      skipAuth: true,
+      silentError: true,
+    }).catch((error) => {
+      throw error
+    }).finally(() => {
+      csrfBootstrapPromise = null
+    })
+  }
+
+  await csrfBootstrapPromise
+  return getCookie('csrftoken')
+}
+
+async function buildUnsafeRequestConfig(config = {}) {
+  let csrfToken = getCookie('csrftoken')
+  if (!csrfToken) {
+    try {
+      csrfToken = await ensureCsrfCookie()
+    } catch (error) {
+      console.warn('构建写请求时获取 CSRF Cookie 失败:', error)
+    }
+  }
+
+  const nextHeaders = {
+    ...(config.headers || {}),
+    'X-Requested-With': 'XMLHttpRequest',
+  }
+  if (csrfToken) {
+    nextHeaders['X-CSRFToken'] = csrfToken
+  }
+
+  return {
+    ...config,
+    headers: nextHeaders,
+  }
+}
+
 // 请求拦截器
 http.interceptors.request.use(
-  (config) => {
+  async (config) => {
     if (!config.headers) {
       config.headers = {}
     }
@@ -42,7 +88,15 @@ http.interceptors.request.use(
     // 为非安全方法自动附带 CSRF Token（Django SessionAuthentication 需要）
     const method = (config.method || 'get').toLowerCase()
     if (['post', 'put', 'patch', 'delete'].includes(method)) {
-      const csrfToken = getCookie('csrftoken')
+      let csrfToken = getCookie('csrftoken')
+      const isCsrfBootstrapRequest = typeof config.url === 'string' && config.url.includes(API_ENDPOINTS.AUTH.CSRF)
+      if (!csrfToken && !isCsrfBootstrapRequest) {
+        try {
+          csrfToken = await ensureCsrfCookie()
+        } catch (error) {
+          console.warn('自动获取 CSRF Cookie 失败，后续写请求可能被后端拒绝:', error)
+        }
+      }
       if (csrfToken) {
         config.headers['X-CSRFToken'] = csrfToken
       }
@@ -113,23 +167,26 @@ export const request = {
   },
   
   // POST请求
-  post(url, data = {}, config = {}) {
-    return http.post(url, data, config)
+  async post(url, data = {}, config = {}) {
+    const nextConfig = await buildUnsafeRequestConfig(config)
+    return http.post(url, data, nextConfig)
   },
   
   // PUT请求
-  put(url, data = {}, config = {}) {
-    return http.put(url, data, config)
+  async put(url, data = {}, config = {}) {
+    const nextConfig = await buildUnsafeRequestConfig(config)
+    return http.put(url, data, nextConfig)
   },
   
   // DELETE请求
-  delete(url, config = {}) {
-    return http.delete(url, config)
+  async delete(url, config = {}) {
+    const nextConfig = await buildUnsafeRequestConfig(config)
+    return http.delete(url, nextConfig)
   },
   
   // 文件上传
-  upload(url, formData, config = {}) {
-    return http.post(url, formData, {
+  async upload(url, formData, config = {}) {
+    const nextConfig = await buildUnsafeRequestConfig({
       // 不手动设置Content-Type，让浏览器自动设置boundary
       headers: {
         // 移除默认的Content-Type，让浏览器自动设置multipart/form-data
@@ -137,6 +194,7 @@ export const request = {
       },
       ...config,
     })
+    return http.post(url, formData, nextConfig)
   },
   
   // 文件下载
@@ -158,4 +216,5 @@ export const request = {
 
 // 导出axios实例和请求方法
 export { http }
+export { ensureCsrfCookie }
 export default request

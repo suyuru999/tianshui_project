@@ -149,6 +149,12 @@ REST_FRAMEWORK = {
 # CORS 配置
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+]
 
 # 文件上传配置
 # 大遥感栅格不能放进内存处理；超过 10MB 的上传交给 Django 临时文件处理器落盘。

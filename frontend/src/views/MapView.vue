@@ -574,6 +574,7 @@ import MapContainer from '../components/Map/MapContainer.vue'
 import { useMapStore } from '../store/map'
 import { useRoute, useRouter } from 'vue-router'
 import { authService, spatialService } from '../services/api.js'
+import { ensureCsrfCookie } from '../utils/http.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -741,6 +742,9 @@ businessFunctions[2].status = 'available'
 businessFunctions[2].route = '/overlay-analysis'
 
 onMounted(() => {
+  ensureCsrfCookie().catch((error) => {
+    console.warn('初始化 CSRF Cookie 失败，首次写操作可能需要重试:', error)
+  })
   loadCurrentUser()
   loadBusinessLayers()
 })
@@ -753,7 +757,12 @@ const loadCurrentUser = async () => {
   }
 }
 
-const openLoginDialog = () => {
+const openLoginDialog = async () => {
+  try {
+    await ensureCsrfCookie()
+  } catch (error) {
+    console.warn('打开登录框前获取 CSRF Cookie 失败:', error)
+  }
   loginForm.username = ''
   loginForm.password = ''
   loginDialogVisible.value = true
@@ -782,6 +791,7 @@ const handleLogin = async () => {
   }
   loginLoading.value = true
   try {
+    await ensureCsrfCookie()
     const result = await authService.login({
       username: loginForm.username,
       password: loginForm.password
