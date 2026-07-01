@@ -16,11 +16,12 @@ Including another URLconf
 """
 
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
 from django.conf import settings
 from django.conf.urls.static import static
 from django.shortcuts import render
 from django.views.generic.base import RedirectView
+from django.views.static import serve
 import logging
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ def overlay_analysis_demo_view(request):
     return render(request, 'overlay_analysis_demo.html')
 
 urlpatterns = [
+    re_path(r"^media/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
     path("", home_view, name="home"),  # 根路径显示首页
     path("admin/", admin.site.urls),
     path("overlay-analysis-demo/", overlay_analysis_demo_view, name="overlay-analysis-demo"),  # 叠加分析演示页面

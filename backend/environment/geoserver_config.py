@@ -195,7 +195,7 @@ class GeoServerManager:
         logger.warning(f"数据存储 {datastore_name} 创建失败或已存在")
         return False
     
-    def publish_raster(self, coverage_store_name: str, layer_name: str, file_path: str) -> bool:
+    def publish_raster(self, coverage_store_name: str, layer_name: str, file_path: str, style_type: str = 'default') -> bool:
         """发布栅格图层（使用CoverageStore）"""
         try:
             # 检查文件是否存在
@@ -240,7 +240,7 @@ class GeoServerManager:
                             logger.warning(f"读取栅格统计信息失败: {stats_error}，使用默认值域")
                             min_val, max_val = (0.0, 5.0)
                         style_name = f"{layer_name}_style"
-                        sld_content = self._create_default_raster_sld(min_val, max_val)
+                        sld_content = self._build_raster_style(style_type, min_val, max_val)
                         if self.create_style(style_name, sld_content):
                             self.apply_style_to_layer(layer_name, style_name)
                         return True
@@ -473,7 +473,7 @@ class GeoServerManager:
                                                         logger.warning(f"读取栅格统计信息失败: {stats_error}，使用默认值域")
                                                         min_val, max_val = (0.0, 5.0)
                                                     
-                                                    sld_content = self._create_default_raster_sld(min_val, max_val)
+                                                    sld_content = self._build_raster_style(style_type, min_val, max_val)
                                                     if self.create_style(style_name, sld_content):
                                                         self.apply_style_to_layer(layer_name, style_name)
                                                     
@@ -484,7 +484,7 @@ class GeoServerManager:
                                                     # 即使验证失败，也尝试应用样式（使用实际图层名称）
                                                     if actual_layer_name:
                                                         style_name = f"{actual_layer_name}_style"
-                                                        sld_content = self._create_default_raster_sld(0.0, 5.0)
+                                                        sld_content = self._build_raster_style(style_type, 0.0, 5.0)
                                                         if self.create_style(style_name, sld_content):
                                                             self.apply_style_to_layer(actual_layer_name, style_name)
                                                     
@@ -528,7 +528,7 @@ class GeoServerManager:
                                 except:
                                     pass
                                 
-                                sld_content = self._create_default_raster_sld(min_val, max_val)
+                                sld_content = self._build_raster_style(style_type, min_val, max_val)
                                 if self.create_style(style_name, sld_content):
                                     logger.info(f"样式 {style_name} 创建成功，开始应用到图层")
                                     if self.apply_style_to_layer(actual_layer_name, style_name):
@@ -553,7 +553,7 @@ class GeoServerManager:
                                     logger.warning(f"读取栅格统计信息失败: {stats_error}，使用默认值域")
                                     min_val, max_val = (0.0, 5.0)
                                 
-                                sld_content = self._create_default_raster_sld(min_val, max_val)
+                                sld_content = self._build_raster_style(style_type, min_val, max_val)
                                 if self.create_style(style_name, sld_content):
                                     self.apply_style_to_layer(actual_layer_name, style_name)
                                 
@@ -567,7 +567,7 @@ class GeoServerManager:
                             
                             # 为图层创建并应用默认样式
                             style_name = f"{layer_name}_style"
-                            sld_content = self._create_default_raster_sld(0.0, 5.0)
+                            sld_content = self._build_raster_style(style_type, 0.0, 5.0)
                             if self.create_style(style_name, sld_content):
                                 self.apply_style_to_layer(layer_name, style_name)
                             
@@ -1280,6 +1280,66 @@ class GeoServerManager:
   </NamedLayer>
 </StyledLayerDescriptor>'''
         return sld
+
+    def _create_ecology_rsei_raster_sld(self, min_value: float = 0.0, max_value: float = 1.0) -> str:
+        """创建生态/RSEI 专用五级分级样式。"""
+        classified_mode = min_value >= 0 and max_value <= 5.5 and max_value > 1.0
+
+        if classified_mode:
+            entries = [
+                {'quantity': 1, 'color': '#c0392b', 'label': '差（高风险区域）'},
+                {'quantity': 2, 'color': '#f08c7f', 'label': '较差'},
+                {'quantity': 3, 'color': '#f1c453', 'label': '中等'},
+                {'quantity': 4, 'color': '#9ccf72', 'label': '良好'},
+                {'quantity': 5, 'color': '#2f8f5b', 'label': '优秀'},
+            ]
+            color_map_entries = "\n".join(
+                f'                            <ColorMapEntry color="{entry["color"]}" quantity="{entry["quantity"]}" opacity="0.82" label="{entry["label"]}"/>'
+                for entry in entries
+            )
+            abstract = 'RSEI五级分级样式（编码栅格）：1=差，5=优秀'
+        else:
+            color_map_entries = "\n".join([
+                '                            <ColorMapEntry color="#c0392b" quantity="0.200000" opacity="0.84" label="差（高风险区域）"/>',
+                '                            <ColorMapEntry color="#f08c7f" quantity="0.400000" opacity="0.82" label="较差"/>',
+                '                            <ColorMapEntry color="#f1c453" quantity="0.600000" opacity="0.80" label="中等"/>',
+                '                            <ColorMapEntry color="#9ccf72" quantity="0.800000" opacity="0.80" label="良好"/>',
+                '                            <ColorMapEntry color="#2f8f5b" quantity="1.000000" opacity="0.82" label="优秀"/>',
+            ])
+            abstract = 'RSEI五级分级样式：0-0.2差，0.2-0.4较差，0.4-0.6中等，0.6-0.8良好，0.8-1优秀'
+
+        sld = f'''<?xml version="1.0" encoding="UTF-8"?>
+<StyledLayerDescriptor version="1.0.0"
+    xmlns="http://www.opengis.net/sld"
+    xmlns:ogc="http://www.opengis.net/ogc"
+    xmlns:xlink="http://www.w3.org/1999/xlink"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.opengis.net/sld http://schemas.opengis.net/sld/1.0.0/StyledLayerDescriptor.xsd">
+    <NamedLayer>
+        <Name>ecology_rsei_style</Name>
+        <UserStyle>
+            <Title>生态RSEI五级分级样式</Title>
+            <Abstract>{abstract}</Abstract>
+            <FeatureTypeStyle>
+                <Rule>
+                    <RasterSymbolizer>
+                        <Opacity>0.84</Opacity>
+                        <ColorMap type="intervals">
+{color_map_entries}
+                        </ColorMap>
+                    </RasterSymbolizer>
+                </Rule>
+            </FeatureTypeStyle>
+        </UserStyle>
+    </NamedLayer>
+</StyledLayerDescriptor>'''
+        return sld
+
+    def _build_raster_style(self, style_type: str, min_value: float, max_value: float) -> str:
+        """根据栅格类型选择样式。"""
+        if style_type == 'ecology_rsei':
+            return self._create_ecology_rsei_raster_sld(min_value, max_value)
+        return self._create_default_raster_sld(min_value, max_value)
     
     def apply_style_to_layer(self, layer_name: str, style_name: str) -> bool:
         """为图层应用样式"""

@@ -29,26 +29,54 @@
         <div class="section-title"><span class="section-icon">🌿</span><span>生态指数</span></div>
         <div class="info-grid">
           <div class="info-item">
-            <span class="label">生态指数值</span>
-            <span class="value" :class="getEcologyLevelClass(ecologyData.value)">
-              {{ formatEcologyValue(ecologyData.value) }}
+            <span class="label">{{ ecologyData.valueLabel || '生态指数值' }}</span>
+            <span class="value" :class="getEcologyLevelClass(ecologyData)">
+              {{ formatEcologyValue(ecologyData) }}
             </span>
           </div>
           <div class="info-item" v-if="ecologyData.level">
             <span class="label">生态等级</span>
-            <span class="value" :class="getEcologyLevelClass(ecologyData.value)">
-              {{ ecologyData.level }}
+            <span class="value" :class="getEcologyLevelClass(ecologyData)">
+              {{ ecologyData.level }}<span v-if="ecologyData.shortLevel" class="level-alias">（{{ ecologyData.shortLevel }}）</span>
+            </span>
+          </div>
+          <div class="info-item" v-if="ecologyData.sourceMode === 'continuous' && ecologyData.normalizedValue !== null">
+            <span class="label">分级依据</span>
+            <span class="value value-subtle">
+              0.2 / 0.4 / 0.6 / 0.8 五级分段
             </span>
           </div>
         </div>
-        <div class="risk-indicator" :class="getEcologyRiskClass(ecologyData.value)">
-          <span class="indicator-icon">{{ getEcologyRiskIcon(ecologyData.value) }}</span>
-          <span class="indicator-text">{{ getEcologyRiskText(ecologyData.value) }}</span>
+        <div class="risk-indicator" :class="getEcologyRiskClass(ecologyData)">
+          <span class="indicator-icon">{{ getEcologyRiskIcon(ecologyData) }}</span>
+          <span class="indicator-text">{{ getEcologyRiskText(ecologyData) }}</span>
+        </div>
+        <div v-if="ecologyData.isHighRisk" class="high-risk-banner">
+          <span class="banner-badge">高风险区域</span>
+          <span class="banner-text">该位置属于生态环境“差”等级，建议优先标注与修复。</span>
         </div>
       </div>
       <div class="section" v-else>
         <div class="section-title"><span class="section-icon">🌿</span><span>生态指数</span></div>
         <div class="no-data">该位置无生态指数数据</div>
+      </div>
+      <div class="section" v-if="ecologyData && getDisplayEntries(ecologyData.rawProperties).length">
+        <details class="attribute-panel">
+          <summary class="attribute-summary">
+            <span class="section-title compact"><span class="section-icon">🧾</span><span>生态原始属性</span></span>
+            <span class="summary-hint">展开查看全部字段</span>
+          </summary>
+          <div class="attribute-list">
+            <div
+              v-for="entry in getDisplayEntries(ecologyData.rawProperties)"
+              :key="`ecology-${entry.key}`"
+              class="attribute-row"
+            >
+              <span class="attribute-key">{{ entry.key }}</span>
+              <span class="attribute-value">{{ entry.value }}</span>
+            </div>
+          </div>
+        </details>
       </div>
 
       <!-- 经济矢量信息 -->
@@ -57,27 +85,67 @@
         <div class="info-grid">
           <div class="info-item">
             <span class="label">区域名称</span>
-            <span class="value">{{ economyData.admin_name || economyData.ADMIN_NAME || '未知' }}</span>
+            <span class="value">{{ getEconomyRegionName(economyData) }}</span>
+          </div>
+          <div class="info-item" v-if="economyData.layer_name">
+            <span class="label">图层类型</span>
+            <span class="value">{{ economyData.layer_name }}</span>
+          </div>
+          <div class="info-item" v-if="economyData.code">
+            <span class="label">编码</span>
+            <span class="value">{{ economyData.code }}</span>
+          </div>
+          <div class="info-item" v-if="hasValue(economyData.area_km2)">
+            <span class="label">面积</span>
+            <span class="value">{{ formatArea(economyData.area_km2) }}</span>
           </div>
           <div class="info-item">
-            <span class="label">GDP（亿元）</span>
+            <span class="label">2023 GDP（亿元）</span>
             <span class="value" :class="getGDPLevelClass(economyData.GDP)">
-              {{ formatGDP(economyData.GDP) }}
+              {{ formatGDP(economyData.GDP_2023 ?? economyData.GDP) }}
             </span>
           </div>
           <div class="info-item">
-            <span class="label">人口</span>
-            <span class="value">{{ formatPopulation(economyData.POP) }}</span>
+            <span class="label">2020 GDP（亿元）</span>
+            <span class="value">{{ formatGDP(economyData.GDP_2020) }}</span>
           </div>
-          <div class="info-item" v-if="economyData.area_km2">
-            <span class="label">面积</span>
-            <span class="value">{{ formatArea(economyData.area_km2) }}</span>
+          <div class="info-item">
+            <span class="label">2015 GDP（亿元）</span>
+            <span class="value">{{ formatGDP(economyData.GDP_2015) }}</span>
+          </div>
+          <div class="info-item">
+            <span class="label">2023 人口</span>
+            <span class="value">{{ formatPopulation(economyData.POP_2023 ?? economyData.POP) }}</span>
+          </div>
+          <div class="info-item">
+            <span class="label">2020 人口</span>
+            <span class="value">{{ formatPopulation(economyData.POP_2020) }}</span>
+          </div>
+          <div class="info-item">
+            <span class="label">2015 人口</span>
+            <span class="value">{{ formatPopulation(economyData.POP_2015) }}</span>
           </div>
         </div>
         <div class="risk-indicator" :class="getGDPLevelClass(economyData.GDP)">
           <span class="indicator-icon">💰</span>
           <span class="indicator-text">{{ getGDPLevelText(economyData.GDP) }}</span>
         </div>
+        <details v-if="getDisplayEntries(economyData.rawProperties).length" class="attribute-panel">
+          <summary class="attribute-summary">
+            <span class="subsection-title">完整属性</span>
+            <span class="summary-hint">展开查看全部字段</span>
+          </summary>
+          <div class="attribute-list">
+            <div
+              v-for="entry in getExpandedEntries(economyData.rawProperties, economySummaryKeys)"
+              :key="`economy-${entry.key}`"
+              class="attribute-row"
+            >
+              <span class="attribute-key">{{ entry.key }}</span>
+              <span class="attribute-value">{{ entry.value }}</span>
+            </div>
+          </div>
+        </details>
       </div>
       <div class="section" v-else>
         <div class="section-title"><span class="section-icon">💰</span><span>经济数据</span></div>
@@ -94,17 +162,25 @@
             class="project-item"
           >
             <div class="project-header">
-              <span class="project-name">{{ project.proj_name || project.PROJ_NAME || '未知工程' }}</span>
-              <span class="project-status" :class="getStatusClass(project.status)">
-                {{ project.status || project.STATUS || '未知' }}
+              <span class="project-name">{{ getProjectName(project) }}</span>
+              <span
+                v-if="getProjectStatus(project)"
+                class="project-status"
+                :class="getStatusClass(getProjectStatus(project))"
+              >
+                {{ getProjectStatus(project) }}
               </span>
             </div>
             <div class="project-details">
+              <div class="detail-item" v-if="getProjectSegment(project)">
+                <span class="label">项目段</span>
+                <span class="value">{{ getProjectSegment(project) }}</span>
+              </div>
               <div class="detail-item">
                 <span class="label">类型</span>
-                <span class="value">{{ project.proj_type || project.PROJ_TYPE || '未知' }}</span>
+                <span class="value">{{ getProjectType(project) }}</span>
               </div>
-              <div class="detail-item" v-if="project.area_km2">
+              <div class="detail-item" v-if="hasValue(project.area_km2)">
                 <span class="label">面积</span>
                 <span class="value">{{ formatArea(project.area_km2) }}</span>
               </div>
@@ -113,6 +189,22 @@
                 <span class="value">{{ project.start_date }}</span>
               </div>
             </div>
+            <details v-if="getDisplayEntries(project.rawProperties).length" class="attribute-panel">
+              <summary class="attribute-summary">
+                <span class="subsection-title">完整属性</span>
+                <span class="summary-hint">展开查看全部字段</span>
+              </summary>
+              <div class="attribute-list">
+                <div
+                  v-for="entry in getExpandedEntries(project.rawProperties, projectSummaryKeys)"
+                  :key="`project-${index}-${entry.key}`"
+                  class="attribute-row"
+                >
+                  <span class="attribute-key">{{ entry.key }}</span>
+                  <span class="attribute-value">{{ entry.value }}</span>
+                </div>
+              </div>
+            </details>
           </div>
         </div>
       </div>
@@ -149,6 +241,31 @@
 <script setup>
 import { computed } from 'vue'
 
+const economySummaryKeys = [
+  'admin_name', 'ADMIN_NAME', 'name', 'NAME', 'Name',
+  'layer', 'LAYER',
+  'code', 'CODE',
+  'area_km2', 'AREA_KM2', 'area__k2', 'AREA__K2', 'area', 'AREA',
+  '2015_GDP', 'GDP_2015', 'gdp_2015',
+  '2020_GDP', 'GDP_2020', 'gdp_2020',
+  '2023_GDP', 'GDP_2023', 'gdp_2023',
+  '2015_POP', 'POP_2015', 'pop_2015',
+  '2020_POP', 'POP_2020', 'pop_2020',
+  '2023_POP', 'POP_2023', 'pop_2023',
+  'GDP', 'gdp', 'Gdp',
+  'POP', 'pop', 'Pop'
+]
+
+const projectSummaryKeys = [
+  'proj_name', 'PROJ_NAME', 'project_name', 'PROJECT_NAME', 'name', 'NAME', '地名',
+  'proj_segment', 'PROJ_SEGMENT', 'project_segment', 'PROJECT_SEGMENT', 'segment', 'SEGMENT', '项目段',
+  'proj_type', 'PROJ_TYPE', 'project_type', 'PROJECT_TYPE', 'type', 'TYPE', 'category', 'CATEGORY', '项目类',
+  'status', 'STATUS', 'state', 'STATE',
+  'start_date', 'START_DATE', 'start_time', 'START_TIME', 'begin_date', 'BEGIN_DATE',
+  'end_date', 'END_DATE', 'end_time', 'END_TIME', 'finish_date', 'FINISH_DATE',
+  'area_km2', 'AREA_KM2', 'area', 'AREA'
+]
+
 const props = defineProps({
   visible: {
     type: Boolean,
@@ -178,6 +295,68 @@ const close = () => {
   emit('close')
 }
 
+const hasValue = (value) => value !== null && value !== undefined && value !== ''
+
+const getProjectName = (project) => {
+  return project?.proj_name || project?.PROJ_NAME || project?.project_name || project?.PROJECT_NAME || project?.name || project?.NAME || project?.['地名'] || '未知工程'
+}
+
+const getProjectSegment = (project) => {
+  return project?.proj_segment || project?.PROJ_SEGMENT || project?.project_segment || project?.PROJECT_SEGMENT || project?.segment || project?.SEGMENT || project?.['项目段'] || ''
+}
+
+const getProjectType = (project) => {
+  return project?.proj_type || project?.PROJ_TYPE || project?.project_type || project?.PROJECT_TYPE || project?.type || project?.TYPE || project?.category || project?.CATEGORY || project?.['项目类'] || '未知'
+}
+
+const getProjectStatus = (project) => {
+  return project?.status || project?.STATUS || ''
+}
+
+const getEconomyRegionName = (economyData) => {
+  return economyData?.admin_name || economyData?.ADMIN_NAME || economyData?.Name || economyData?.name || '未知'
+}
+
+const getDisplayEntries = (properties) => {
+  if (!properties || typeof properties !== 'object') {
+    return []
+  }
+
+  return Object.entries(properties)
+    .filter(([key]) => key !== 'bbox')
+    .map(([key, value]) => ({
+      key,
+      value: formatAttributeValue(value)
+    }))
+}
+
+const getFilteredDisplayEntries = (properties, excludedKeys = []) => {
+  const excluded = new Set(excludedKeys)
+  return getDisplayEntries(properties).filter((entry) => !excluded.has(entry.key))
+}
+
+const getExpandedEntries = (properties, excludedKeys = []) => {
+  const filteredEntries = getFilteredDisplayEntries(properties, excludedKeys)
+  if (filteredEntries.length > 0) {
+    return filteredEntries
+  }
+  return getDisplayEntries(properties)
+}
+
+const formatAttributeValue = (value) => {
+  if (value === null || value === undefined || value === '') {
+    return 'N/A'
+  }
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
+  return String(value)
+}
+
 // 格式化坐标
 const formatCoordinate = (coord) => {
   if (coord === null || coord === undefined || isNaN(coord) || coord === 'NaN') {
@@ -193,57 +372,53 @@ const formatCoordinate = (coord) => {
 }
 
 // 格式化生态指数值
-const formatEcologyValue = (value) => {
-  if (value === null || value === undefined) return 'N/A'
-  // 如果是DEM风格的值（50-1000），转换为生态指数风格（0-1）
-  if (value >= 50 && value <= 1000) {
-    return ((value - 50) / 950).toFixed(3)
+const formatEcologyValue = (ecologyData) => {
+  if (!ecologyData) return 'N/A'
+
+  if (ecologyData.displayValueText) {
+    return ecologyData.displayValueText
   }
-  return value.toFixed(3)
+
+  const value = ecologyData.displayValue ?? ecologyData.normalizedValue ?? ecologyData.value
+  if (value === null || value === undefined || Number.isNaN(value)) return 'N/A'
+  if (Number.isInteger(value)) return String(value)
+  return Number(value).toFixed(3)
 }
 
 // 获取生态等级
-const getEcologyLevelClass = (value) => {
-  if (value === null || value === undefined) return 'unknown'
-  
-  // 处理DEM风格的值（50-1000）
-  let normalizedValue = value
-  if (value >= 50 && value <= 1000) {
-    normalizedValue = (value - 50) / 950
-  }
-  
-  if (normalizedValue >= 0.6) return 'excellent'
-  if (normalizedValue >= 0.4) return 'good'
-  if (normalizedValue >= 0.2) return 'moderate'
-  return 'poor'
+const getEcologyLevelClass = (ecologyData) => {
+  const levelCode = ecologyData?.levelCode
+  if (!levelCode) return 'unknown'
+  return levelCode
 }
 
 // 获取生态风险等级
-const getEcologyRiskClass = (value) => {
-  const level = getEcologyLevelClass(value)
-  if (level === 'poor') return 'high-risk'
-  if (level === 'moderate') return 'medium-risk'
+const getEcologyRiskClass = (ecologyData) => {
+  const level = getEcologyLevelClass(ecologyData)
+  if (level === 'bad') return 'high-risk'
+  if (level === 'poor' || level === 'moderate') return 'medium-risk'
   return 'low-risk'
 }
 
-const getEcologyRiskIcon = (value) => {
-  const level = getEcologyLevelClass(value)
-  if (level === 'poor') return '🔴'
-  if (level === 'moderate') return '🟡'
+const getEcologyRiskIcon = (ecologyData) => {
+  const level = getEcologyLevelClass(ecologyData)
+  if (level === 'bad') return '🔴'
+  if (level === 'poor' || level === 'moderate') return '🟡'
   return '🟢'
 }
 
-const getEcologyRiskText = (value) => {
-  const level = getEcologyLevelClass(value)
-  if (level === 'poor') return '生态指数较差，需要关注'
-  if (level === 'moderate') return '生态指数中等'
-  return '生态指数良好'
+const getEcologyRiskText = (ecologyData) => {
+  const level = getEcologyLevelClass(ecologyData)
+  if (level === 'bad') return '高风险区域：生态环境差，建议优先标注与修复'
+  if (level === 'poor') return '生态环境较差，建议重点巡查'
+  if (level === 'moderate') return '生态环境中等，建议持续监测'
+  return '生态环境整体较好'
 }
 
 // 格式化GDP
 const formatGDP = (gdp) => {
-  if (gdp === null || gdp === undefined) return 'N/A'
-  return gdp.toFixed(1)
+  if (gdp === null || gdp === undefined || Number.isNaN(gdp)) return 'N/A'
+  return Number(gdp).toFixed(1)
 }
 
 // 获取GDP等级
@@ -256,24 +431,26 @@ const getGDPLevelClass = (gdp) => {
 
 const getGDPLevelText = (gdp) => {
   const level = getGDPLevelClass(gdp)
-  if (level === 'high') return '高GDP区域'
-  if (level === 'medium') return '中GDP区域'
-  return '低GDP区域'
+  if (level === 'high') return '高经济强度区域'
+  if (level === 'medium') return '中等经济强度区域'
+  return '低经济强度区域'
 }
 
 // 格式化人口
 const formatPopulation = (pop) => {
-  if (pop === null || pop === undefined) return 'N/A'
-  if (pop >= 10000) {
-    return (pop / 10000).toFixed(1) + '万'
+  if (pop === null || pop === undefined || Number.isNaN(pop)) return 'N/A'
+  const numericPop = Number(pop)
+  if (Number.isNaN(numericPop)) return 'N/A'
+  if (numericPop >= 10000) {
+    return (numericPop / 10000).toFixed(1) + '万'
   }
-  return pop.toString()
+  return numericPop.toString()
 }
 
 // 格式化面积
 const formatArea = (area) => {
-  if (area === null || area === undefined) return 'N/A'
-  return area.toFixed(2) + ' km²'
+  if (area === null || area === undefined || Number.isNaN(area)) return 'N/A'
+  return Number(area).toFixed(2) + ' km²'
 }
 
 // 获取状态样式类
@@ -288,7 +465,8 @@ const getStatusClass = (status) => {
 // 计算风险分析
 const riskAnalysis = computed(() => {
   const hasEcology = props.ecologyData && props.ecologyData.value !== null
-  const hasEconomy = props.economyData && props.economyData.GDP !== null
+  const economyValue = props.economyData?.GDP_2023 ?? props.economyData?.GDP
+  const hasEconomy = props.economyData && economyValue !== null && economyValue !== undefined
   const hasEngineering = props.engineeringData && props.engineeringData.length > 0
   
   if (!hasEcology && !hasEconomy) return null
@@ -299,53 +477,65 @@ const riskAnalysis = computed(() => {
   let recommendation = ''
   
   // 生态指数较差
-  const ecologyPoor = hasEcology && getEcologyLevelClass(props.ecologyData.value) === 'poor'
-  // 生态指数中等
-  const ecologyModerate = hasEcology && getEcologyLevelClass(props.ecologyData.value) === 'moderate'
+  const ecologyBad = hasEcology && getEcologyLevelClass(props.ecologyData) === 'bad'
+  const ecologyPoor = hasEcology && getEcologyLevelClass(props.ecologyData) === 'poor'
+  const ecologyModerate = hasEcology && getEcologyLevelClass(props.ecologyData) === 'moderate'
   // GDP高
-  const economyHigh = hasEconomy && getGDPLevelClass(props.economyData.GDP) === 'high'
+  const economyHigh = hasEconomy && getGDPLevelClass(economyValue) === 'high'
   // GDP中等
-  const economyMedium = hasEconomy && getGDPLevelClass(props.economyData.GDP) === 'medium'
-  // 人口多（假设>50万为多）
-  const populationHigh = hasEconomy && props.economyData.POP && props.economyData.POP > 500000
+  const economyMedium = hasEconomy && getGDPLevelClass(economyValue) === 'medium'
   // 无治理工程
   const noEngineering = !hasEngineering || props.engineeringData.length === 0
   
   // 风险等级判断逻辑
   // 极高风险场景：生态差 + 高GDP + 无治理工程
-  if (ecologyPoor && economyHigh && noEngineering) {
+  if (ecologyBad && economyHigh && noEngineering) {
     riskLevel = 'critical'
     riskText = '⚠️ 极高风险'
-    riskDetails = '该位置生态指数较差（红色），且位于高GDP区域（红色），但无工程项目。'
+    riskDetails = '该位置属于生态环境差等级的高风险区域，且位于高GDP区域，但无工程项目。'
     recommendation = '建议尽快部署生态修复工程，优先考虑生态敏感区域保护。'
   } 
   // 高风险场景：生态差 + 中GDP + 无治理工程
-  else if (ecologyPoor && economyMedium && noEngineering) {
+  else if (ecologyBad && economyMedium && noEngineering) {
     riskLevel = 'high'
     riskText = '⚠️ 高风险'
-    riskDetails = '该位置生态指数较差（红色），且位于中GDP区域（橙色），但无工程项目。'
+    riskDetails = '该位置属于生态环境差等级的高风险区域，且位于中GDP区域，但无工程项目。'
     recommendation = '建议部署生态修复工程，加强生态保护措施。'
   }
   // 中高风险场景：生态差 + 无治理工程
-  else if (ecologyPoor && noEngineering) {
+  else if (ecologyBad && noEngineering) {
     riskLevel = 'high'
     riskText = '⚠️ 中高风险'
-    riskDetails = '该位置生态指数较差（红色），但无工程项目。'
+    riskDetails = '该位置属于生态环境差等级的高风险区域，但无工程项目。'
     recommendation = '建议考虑部署生态修复工程，改善生态环境质量。'
+  }
+  // 中高风险场景：生态较差 + 高GDP + 无治理工程
+  else if (ecologyPoor && economyHigh && noEngineering) {
+    riskLevel = 'high'
+    riskText = '⚠️ 高风险'
+    riskDetails = '该位置生态环境较差，且位于高GDP区域，但无工程项目。'
+    recommendation = '建议将该区域列入重点监测清单，必要时提前介入生态修复。'
   }
   // 中等风险场景：生态中等 + 高GDP + 无治理工程
   else if (ecologyModerate && economyHigh && noEngineering) {
     riskLevel = 'medium'
     riskText = '⚠️ 中等风险'
-    riskDetails = '该位置生态指数中等（黄色），且位于高GDP区域（红色），但无工程项目。'
+    riskDetails = '该位置生态指数中等，且位于高GDP区域，但无工程项目。'
     recommendation = '建议加强生态监测，必要时部署生态修复工程。'
   }
   // 中等风险场景：生态中等 + 无治理工程
   else if (ecologyModerate && noEngineering) {
     riskLevel = 'medium'
     riskText = '⚠️ 中等风险'
-    riskDetails = '该位置生态指数中等（黄色），但无工程项目。'
+    riskDetails = '该位置生态指数中等，但无工程项目。'
     recommendation = '建议加强生态监测，预防生态恶化。'
+  }
+  // 中等风险场景：生态较差 + 无治理工程
+  else if (ecologyPoor && noEngineering) {
+    riskLevel = 'medium'
+    riskText = '⚠️ 重点关注'
+    riskDetails = '该位置生态环境较差，建议持续巡查并评估是否需要修复工程。'
+    recommendation = '建议结合周边工程布局，优先安排风险排查和生态跟踪。'
   }
   // 低风险场景：已有治理工程
   else if (hasEngineering) {
@@ -355,10 +545,10 @@ const riskAnalysis = computed(() => {
     recommendation = '建议持续监控工程效果，确保生态修复效果。'
   }
   // 低风险场景：生态良好
-  else if (hasEcology && !ecologyPoor && !ecologyModerate) {
+  else if (hasEcology && !ecologyBad && !ecologyPoor && !ecologyModerate) {
     riskLevel = 'low'
     riskText = '✅ 生态状况良好'
-    riskDetails = '该位置生态指数良好（绿色），生态风险较低。'
+    riskDetails = '该位置生态指数良好，生态风险较低。'
     recommendation = '建议继续保持良好的生态环境，定期监测。'
   }
   
@@ -457,6 +647,18 @@ const getRiskIcon = (level) => {
   background:
     linear-gradient(180deg, rgba(244, 247, 250, 0.42) 0%, rgba(255, 255, 255, 0.96) 20%),
     #ffffff;
+  position: relative;
+}
+
+.popup-content::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 120px;
+  background:
+    radial-gradient(circle at 15% 0%, rgba(73, 163, 234, 0.12), transparent 38%),
+    radial-gradient(circle at 90% 10%, rgba(28, 126, 214, 0.08), transparent 30%);
+  pointer-events: none;
 }
 
 .section {
@@ -480,6 +682,10 @@ const getRiskIcon = (level) => {
   align-items: center;
   gap: 10px;
   letter-spacing: 0.01em;
+}
+
+.section-title.compact {
+  margin-bottom: 0;
 }
 
 .section-icon {
@@ -526,6 +732,18 @@ const getRiskIcon = (level) => {
   word-break: break-word;
 }
 
+.level-alias {
+  font-size: 12px;
+  margin-left: 4px;
+  opacity: 0.82;
+}
+
+.value.value-subtle {
+  font-size: 13px;
+  color: #667d92;
+  font-weight: 600;
+}
+
 /* 生态等级颜色 */
 .value.excellent {
   color: #1f8f4d;
@@ -540,6 +758,10 @@ const getRiskIcon = (level) => {
 }
 
 .value.poor {
+  color: #d97706;
+}
+
+.value.bad {
   color: #d64545;
 }
 
@@ -589,6 +811,37 @@ const getRiskIcon = (level) => {
   font-size: 17px;
 }
 
+.high-risk-banner {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(214, 69, 69, 0.12) 0%, rgba(255, 245, 242, 0.96) 100%);
+  border: 1px solid rgba(214, 69, 69, 0.24);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62);
+}
+
+.banner-badge {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #d64545;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.banner-text {
+  color: #8d2e2e;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
 .no-data {
   color: #8a9aab;
   font-size: 13px;
@@ -605,7 +858,9 @@ const getRiskIcon = (level) => {
 }
 
 .project-item {
-  background: linear-gradient(180deg, #fbfdff 0%, #f5f8fb 100%);
+  background:
+    radial-gradient(circle at top right, rgba(75, 163, 234, 0.08), transparent 28%),
+    linear-gradient(180deg, #fbfdff 0%, #f5f8fb 100%);
   border-radius: 18px;
   padding: 16px;
   border: 1px solid #dfe7ef;
@@ -653,6 +908,81 @@ const getRiskIcon = (level) => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.raw-attributes {
+  margin-top: 14px;
+}
+
+.subsection-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #567089;
+  letter-spacing: 0.04em;
+}
+
+.attribute-panel {
+  margin-top: 16px;
+  border: 1px solid #dbe7f1;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fcfeff 0%, #f5f9fc 100%);
+  overflow: hidden;
+}
+
+.attribute-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  color: #2a4258;
+  user-select: none;
+}
+
+.attribute-summary::-webkit-details-marker {
+  display: none;
+}
+
+.summary-hint {
+  font-size: 12px;
+  color: #7b90a4;
+  white-space: nowrap;
+}
+
+.attribute-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 14px 14px;
+}
+
+.attribute-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #e3ecf3;
+}
+
+.attribute-key {
+  flex: 0 0 38%;
+  color: #6f8498;
+  font-size: 12px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.attribute-value {
+  flex: 1;
+  color: #26384a;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+  word-break: break-word;
 }
 
 .detail-item {
@@ -785,12 +1115,19 @@ const getRiskIcon = (level) => {
   }
 
   .project-header,
-  .detail-item {
+  .detail-item,
+  .attribute-row {
     flex-direction: column;
     align-items: flex-start;
   }
 
-  .detail-item .value {
+  .attribute-summary {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .detail-item .value,
+  .attribute-value {
     text-align: left;
   }
 }

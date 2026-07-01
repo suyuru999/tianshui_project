@@ -20,6 +20,10 @@ def _is_admin_user(user):
     return bool(user and user.is_authenticated and (user.is_superuser or user.role == 'admin'))
 
 
+def _allow_public_user_registration():
+    return bool(getattr(settings, 'ALLOW_PUBLIC_USER_REGISTRATION', False))
+
+
 def _set_csrf_cookie(request, response):
     """为前后端分离场景显式下发 CSRF Cookie，供后续写操作复用。"""
     csrf_token = get_token(request)
@@ -60,11 +64,18 @@ class UserViewSet(viewsets.ModelViewSet):
     
     def get_permissions(self):
         """设置权限"""
-        if self.action in ['create', 'login', 'csrf']:
+        if self.action in ['login', 'csrf']:
             permission_classes = [permissions.AllowAny]
+        elif self.action == 'create':
+            permission_classes = [permissions.AllowAny] if _allow_public_user_registration() else [permissions.IsAuthenticated]
         else:
             permission_classes = [permissions.IsAuthenticated]
         return [permission() for permission in permission_classes]
+
+    def create(self, request, *args, **kwargs):
+        if not _allow_public_user_registration() and not _is_admin_user(request.user):
+            return Response({'error': '仅管理员可创建用户'}, status=status.HTTP_403_FORBIDDEN)
+        return super().create(request, *args, **kwargs)
 
     def list(self, request, *args, **kwargs):
         if not _is_admin_user(request.user):

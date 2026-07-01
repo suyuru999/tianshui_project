@@ -16,21 +16,133 @@
           @click="selectDataType(type.value)"
         >
           <span class="type-icon">{{ type.icon }}</span>
-          <span class="type-label">{{ type.label }}</span>
+          <span class="type-label">{{ type.tabLabel || type.label }}</span>
         </div>
       </div>
 
       <!-- 统一的上传区域 -->
       <div class="upload-section">
-        <div class="upload-zone" @click="triggerFileInput(selectedType)">
-          <input 
-            ref="ecologyInput"
-            v-if="selectedType === 'ecology'"
-            type="file" 
-            accept=".tif,.tiff"
-            @change="handleFileSelect($event, 'ecology')"
-            style="display: none"
-          />
+        <template v-if="selectedType === 'ecology'">
+          <div class="auto-sync-card">
+            <div class="auto-sync-copy">
+              <div class="auto-sync-title">挂接系统 RSEI 结果</div>
+              <div class="auto-sync-hint">
+                可以直接使用最近一次成功计算的 RSEI，也可以指定某张遥感影像对应的 RSEI 结果。
+              </div>
+            </div>
+            <div class="source-selector">
+              <label class="description-label" for="rsei-source-select">RSEI 来源影像</label>
+              <select
+                id="rsei-source-select"
+                v-model="selectedEcologySource"
+                class="source-select"
+              >
+                <option value="">最近一次成功结果</option>
+                <option
+                  v-for="item in availableRSEISources"
+                  :key="item.result_id"
+                  :value="item.remote_sensing_image_id"
+                >
+                  {{ formatRSEISourceLabel(item) }}
+                </option>
+              </select>
+            </div>
+            <RouterLink
+              to="/remote-sensing-analysis"
+              class="goto-remote-link"
+            >
+              前往遥感生态指数分析
+            </RouterLink>
+            <div class="rsei-action-row">
+              <button
+                class="rsei-action-btn sync-btn"
+                :disabled="uploading.ecology || clearingRSEICache"
+                @click="syncLatestRSEI"
+              >
+                {{ uploading.ecology ? '同步中...' : '同步 RSEI' }}
+              </button>
+              <button
+                class="rsei-action-btn clear-cache-btn"
+                :disabled="clearingRSEICache || uploading.ecology || !canClearRSEICache"
+                @click="clearRSEICache"
+              >
+                {{ clearingRSEICache ? '清除中...' : '清除缓存' }}
+              </button>
+            </div>
+          </div>
+
+          <div class="manual-ecology-upload">
+            <div class="manual-upload-title">直接上传生态栅格</div>
+            <div class="upload-zone ecology-upload-zone" @click="triggerFileInput('ecology')">
+              <input
+                ref="ecologyInput"
+                type="file"
+                accept=".tif,.tiff"
+                @change="handleFileSelect($event, 'ecology')"
+                style="display: none"
+              />
+              <div v-if="!files.ecology">
+                <div class="upload-icon ecology-upload-icon">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M14 2H6C4.9 2 4 2.9 4 4V20C4 21.1 4.89 22 5.99 22H18C19.1 22 20 21.1 20 20V8L14 2Z" stroke="#1890ff" stroke-width="2" fill="none"/>
+                    <path d="M14 2V8H20" stroke="#1890ff" stroke-width="2" fill="none"/>
+                    <path d="M12 18V12" stroke="#1890ff" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M9 15L12 12L15 15" stroke="#1890ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </div>
+                <div class="upload-text">{{ currentDataType.uploadText }}</div>
+                <div class="upload-hint">拖放文件到此处或点击选择文件</div>
+                <div class="upload-types">{{ currentDataType.fileTypes }}</div>
+              </div>
+              <div v-else class="file-info">
+                <div class="file-name">{{ files.ecology.name }}</div>
+                <div class="file-size">{{ formatFileSize(files.ecology.size) }}</div>
+                <button class="remove-btn" @click.stop="removeFile('ecology')">移除</button>
+              </div>
+            </div>
+            <div class="description-field">
+              <label class="description-label" for="description-ecology">描述信息</label>
+              <textarea
+                id="description-ecology"
+                v-model="descriptions.ecology"
+                class="description-input ecology-description-input"
+                rows="2"
+                placeholder="可选，填写生态栅格来源、时间或说明"
+              ></textarea>
+            </div>
+            <button
+              class="upload-btn ecology-upload-btn"
+              :disabled="!files.ecology || uploading.ecology"
+              @click="uploadFile('ecology')"
+            >
+              {{ uploading.ecology ? '上传中...' : currentDataType.buttonText }}
+            </button>
+          </div>
+          <div v-if="publishedLayers.ecology" class="published-row auto-sync-published">
+            <div>
+              <strong>生态指数栅格</strong>
+              <span>已发布到地图</span>
+              <span v-if="publishedLayers.ecology.sourceImageName" class="published-meta">
+                来源影像：{{ publishedLayers.ecology.sourceImageName }}
+              </span>
+              <span v-if="publishedLayers.ecology.fileName" class="published-meta">
+                结果文件：{{ publishedLayers.ecology.fileName }}
+              </span>
+              <span v-if="publishedLayers.ecology.description" class="published-meta published-description">
+                说明：{{ publishedLayers.ecology.description }}
+              </span>
+            </div>
+            <button
+              class="delete-layer-btn"
+              :disabled="deleting.ecology"
+              @click="deleteUploadedLayer('ecology')"
+            >
+              {{ deleting.ecology ? '删除中...' : '移除图层' }}
+            </button>
+          </div>
+        </template>
+
+        <div v-else class="upload-zone" @click="triggerFileInput(selectedType)">
           <input 
             ref="economyInput"
             v-if="selectedType === 'economy'"
@@ -66,7 +178,18 @@
             <button class="remove-btn" @click.stop="removeFile(selectedType)">移除</button>
           </div>
         </div>
+        <div v-if="selectedType !== 'ecology'" class="description-field">
+          <label class="description-label" :for="`description-${selectedType}`">描述信息</label>
+          <textarea
+            :id="`description-${selectedType}`"
+            v-model="descriptions[selectedType]"
+            class="description-input"
+            rows="3"
+            :placeholder="`可选，填写${currentDataType.label}的来源、用途或补充说明`"
+          ></textarea>
+        </div>
         <button 
+          v-if="selectedType !== 'ecology'"
           class="upload-btn" 
           :disabled="!files[selectedType] || uploading[selectedType]"
           @click="uploadFile(selectedType)"
@@ -80,10 +203,16 @@
         <div v-if="uploadStatus[selectedType]" :class="['status-message', uploadStatus[selectedType].type]">
           {{ uploadStatus[selectedType].message }}
         </div>
-        <div v-if="publishedLayers[selectedType]" class="published-row">
+        <div v-if="selectedType !== 'ecology' && publishedLayers[selectedType]" class="published-row">
           <div>
             <strong>{{ currentDataType.label }}</strong>
             <span>已发布到地图</span>
+            <span v-if="publishedLayers[selectedType].fileName" class="published-meta">
+              文件：{{ publishedLayers[selectedType].fileName }}
+            </span>
+            <span v-if="publishedLayers[selectedType].description" class="published-meta published-description">
+              描述：{{ publishedLayers[selectedType].description }}
+            </span>
           </div>
           <button
             class="delete-layer-btn"
@@ -99,8 +228,8 @@
       <div class="data-requirements">
         <h4>数据要求说明</h4>
         <ul>
-          <li><strong>生态指数栅格：</strong>GeoTIFF格式，需包含地理坐标信息，推荐使用EPSG:4326或EPSG:3857投影</li>
-          <li><strong>经济数据矢量：</strong>需包含字段：admin_name（区域名称）、GDP、POP（人口）、area_km2（面积）</li>
+          <li><strong>生态指数栅格：</strong>默认自动挂接系统最近一次成功计算的 RSEI 结果；如暂无结果，请先到“遥感生态指数分析”模块完成 RSEI 计算</li>
+          <li><strong>经济数据矢量：</strong>建议包含区域名称、经济指标、人口、面积等字段；系统现会自动识别常见字段名并尽量适配</li>
           <li><strong>工程项目矢量：</strong>需包含字段：proj_name（项目名称）、proj_type（类型）、status（状态）、start_date、end_date、area_km2</li>
           <li><strong>字符编码：</strong>所有矢量数据请使用UTF-8编码，确保中文正常显示</li>
           <li><strong>坐标系统：</strong>建议使用 EPSG:4326 (WGS84) 坐标系</li>
@@ -111,9 +240,11 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import request from '../../utils/http.js'
 import { API_ENDPOINTS, buildApiUrl } from '../../config/api.js'
+
+const OVERLAY_RSEI_REFRESH_KEY = 'overlay_rsei_refresh_signal'
 
 // Props
 defineProps({
@@ -128,6 +259,7 @@ const dataTypes = [
   {
     value: 'ecology',
     label: '生态指数栅格',
+    tabLabel: '生态栅格',
     
     accept: '.tif,.tiff',
     uploadText: '上传生态指数栅格文件',
@@ -137,6 +269,7 @@ const dataTypes = [
   {
     value: 'economy',
     label: '经济数据矢量',
+    tabLabel: '经济矢量',
     
     accept: '.zip',
     uploadText: '上传经济数据矢量文件',
@@ -146,6 +279,7 @@ const dataTypes = [
   {
     value: 'engineering',
     label: '工程项目矢量',
+    tabLabel: '工程矢量',
     
     accept: '.zip',
     uploadText: '上传工程项目矢量文件',
@@ -188,6 +322,16 @@ const files = reactive({
   engineering: null
 })
 
+const descriptions = reactive({
+  ecology: '',
+  economy: '',
+  engineering: ''
+})
+
+const availableRSEISources = ref([])
+const selectedEcologySource = ref('')
+const clearingRSEICache = ref(false)
+
 // 上传状态
 const uploading = reactive({
   ecology: false,
@@ -210,15 +354,26 @@ const uploadStatus = reactive({
 })
 
 const publishedLayers = reactive({
-  ecology: false,
-  economy: false,
-  engineering: false
+  ecology: null,
+  economy: null,
+  engineering: null
 })
 
 const deleting = reactive({
   ecology: false,
   economy: false,
   engineering: false
+})
+
+const hasAttemptedAutoSync = ref(false)
+let removeWindowFocusListener = null
+
+const canClearRSEICache = computed(() => {
+  return Boolean(
+    publishedLayers.ecology ||
+    selectedEcologySource.value ||
+    availableRSEISources.value.length > 0
+  )
 })
 
 // 触发文件选择
@@ -257,6 +412,153 @@ const removeFile = (type) => {
   uploadProgress[type] = 0
 }
 
+const normalizePublishedLayer = (type, payload = {}) => {
+  return {
+    type,
+    fileName: payload.file_name || payload.fileName || '',
+    description: payload.description || '',
+    layerName: payload.layer_name || payload.layerName || '',
+    updatedAt: payload.updated_at || payload.updatedAt || null,
+    sourceType: payload.source_type || payload.sourceType || '',
+    sourceImageId: payload.source_image_id || payload.sourceImageId || '',
+    sourceImageName: payload.source_image_name || payload.sourceImageName || '',
+    sourceResultId: payload.source_result_id || payload.sourceResultId || '',
+    sourceResultCreatedAt: payload.source_result_created_at || payload.sourceResultCreatedAt || null
+  }
+}
+
+const loadUploadedLayerMetadata = async () => {
+  try {
+    const endpoint = buildApiUrl(API_ENDPOINTS.OVERLAY_ANALYSIS.UPLOADED_LAYER_METADATA)
+    const response = await request.get(endpoint, {}, { skipAuth: true, silentError: true })
+    const metadata = response?.data || {}
+
+    Object.keys(publishedLayers).forEach((type) => {
+      const item = metadata[type]
+      if (item?.published) {
+        publishedLayers[type] = normalizePublishedLayer(type, item)
+        descriptions[type] = item.description || descriptions[type]
+      } else {
+        publishedLayers[type] = null
+      }
+    })
+  } catch (error) {
+    console.warn('加载已上传图层描述失败:', error)
+  }
+}
+
+const loadAvailableRSEISources = async () => {
+  try {
+    const endpoint = buildApiUrl(API_ENDPOINTS.OVERLAY_ANALYSIS.AVAILABLE_RSEI_SOURCES)
+    const response = await request.get(endpoint, {}, { skipAuth: true, silentError: true })
+    availableRSEISources.value = Array.isArray(response?.data) ? response.data : []
+  } catch (error) {
+    console.warn('加载RSEI来源列表失败:', error)
+    availableRSEISources.value = []
+  }
+}
+
+const tryConsumeOverlayRefreshSignal = async () => {
+  let signal = null
+  try {
+    const rawSignal = localStorage.getItem(OVERLAY_RSEI_REFRESH_KEY)
+    if (!rawSignal) {
+      return
+    }
+    signal = JSON.parse(rawSignal)
+  } catch (error) {
+    console.warn('读取叠加分析刷新信号失败:', error)
+  } finally {
+    try {
+      localStorage.removeItem(OVERLAY_RSEI_REFRESH_KEY)
+    } catch (error) {
+      console.warn('清理叠加分析刷新信号失败:', error)
+    }
+  }
+
+  await loadAvailableRSEISources()
+
+  if (signal?.remote_sensing_image_id) {
+    const matchedSource = availableRSEISources.value.find(
+      item => item.remote_sensing_image_id === signal.remote_sensing_image_id
+    )
+    if (matchedSource) {
+      selectedEcologySource.value = matchedSource.remote_sensing_image_id
+      await syncLatestRSEI(true)
+      return
+    }
+  }
+
+  if (availableRSEISources.value.length > 0) {
+    await syncLatestRSEI(true)
+  }
+}
+
+const formatRSEISourceLabel = (item) => {
+  const parts = [item?.remote_sensing_image_name || '未命名影像']
+  if (item?.acquisition_date) {
+    parts.push(item.acquisition_date)
+  }
+  return parts.join(' / ')
+}
+
+const syncLatestRSEI = async (silent = false) => {
+  uploading.ecology = true
+  if (!silent) {
+    uploadStatus.ecology = { type: 'info', message: '正在同步最近一次 RSEI 结果...' }
+  }
+
+  try {
+    const endpoint = buildApiUrl(API_ENDPOINTS.OVERLAY_ANALYSIS.SYNC_LATEST_RSEI)
+    const payload = selectedEcologySource.value
+      ? { remote_sensing_image_id: selectedEcologySource.value }
+      : {}
+    const response = await request.post(endpoint, payload, { skipAuth: true, silentError: silent })
+
+    if (response.success) {
+      publishedLayers.ecology = normalizePublishedLayer('ecology', response.metadata || {})
+      descriptions.ecology = response.metadata?.description || descriptions.ecology
+      if (response.metadata?.source_image_id) {
+        selectedEcologySource.value = response.metadata.source_image_id
+      }
+      uploadStatus.ecology = {
+        type: 'success',
+        message: response.message || '最近一次 RSEI 结果已同步'
+      }
+      emitRefreshMap('ecology', 'updated')
+      return true
+    }
+
+    if (response.reason === 'no_rsei_result') {
+      if (!silent && !publishedLayers.ecology) {
+        uploadStatus.ecology = {
+          type: 'info',
+          message: response.message || '当前还没有可用的 RSEI 结果，请先去遥感生态指数分析模块计算。'
+        }
+      }
+      return false
+    }
+
+    if (!silent) {
+      uploadStatus.ecology = {
+        type: 'error',
+        message: response.message || '同步最近一次 RSEI 结果失败'
+      }
+    }
+    return false
+  } catch (error) {
+    if (!silent) {
+      uploadStatus.ecology = {
+        type: 'error',
+        message: getRequestErrorMessage(error, '同步最近一次 RSEI 结果失败')
+      }
+    }
+    return false
+  } finally {
+    uploading.ecology = false
+  }
+}
+
 // 格式化文件大小
 const formatFileSize = (bytes) => {
   if (bytes === 0) return '0 B'
@@ -278,6 +580,7 @@ const uploadFile = async (type) => {
     const formData = new FormData()
     formData.append('file', files[type])
     formData.append('data_type', type)
+    formData.append('description', descriptions[type] || '')
     
     // 根据类型确定上传端点（注意：URL必须以斜杠结尾）
     let endpoint = ''
@@ -298,7 +601,11 @@ const uploadFile = async (type) => {
     })
     
     if (response.success) {
-      publishedLayers[type] = true
+      publishedLayers[type] = normalizePublishedLayer(type, response.metadata || {
+        file_name: response.file_name || files[type]?.name,
+        description: response.description || descriptions[type],
+        layer_name: response.layer_name
+      })
       uploadStatus[type] = {
         type: 'success',
         message: response.message || '上传成功！数据已发布到GeoServer'
@@ -313,7 +620,7 @@ const uploadFile = async (type) => {
       // 触发地图刷新事件
       emitRefreshMap(type, 'updated')
     } else {
-      publishedLayers[type] = false
+      publishedLayers[type] = null
       uploadStatus[type] = {
         type: 'error',
         message: response.message || '上传失败'
@@ -335,7 +642,7 @@ const uploadFile = async (type) => {
       type: 'error',
       message: errorMessage
     }
-    publishedLayers[type] = false
+    publishedLayers[type] = null
   } finally {
     uploading[type] = false
   }
@@ -351,9 +658,10 @@ const deleteUploadedLayer = async (type) => {
       params: { data_type: type }
     })
 
-    publishedLayers[type] = false
+    publishedLayers[type] = null
     files[type] = null
     uploadProgress[type] = 0
+    descriptions[type] = ''
     uploadStatus[type] = {
       type: response.success ? 'success' : 'error',
       message: response.message || '图层已删除'
@@ -370,6 +678,40 @@ const deleteUploadedLayer = async (type) => {
   }
 }
 
+const clearRSEICache = async () => {
+  if (!window.confirm('确定要清除当前挂接的生态栅格和系统生成的 RSEI 来源缓存吗？')) {
+    return
+  }
+
+  clearingRSEICache.value = true
+  uploadStatus.ecology = { type: 'info', message: '正在清除RSEI缓存...' }
+
+  try {
+    const endpoint = buildApiUrl(API_ENDPOINTS.OVERLAY_ANALYSIS.CLEAR_RSEI_CACHE)
+    const response = await request.delete(endpoint, { skipAuth: true })
+
+    publishedLayers.ecology = null
+    files.ecology = null
+    uploadProgress.ecology = 0
+    descriptions.ecology = ''
+    selectedEcologySource.value = ''
+    availableRSEISources.value = []
+    uploadStatus.ecology = {
+      type: response.success ? 'success' : 'error',
+      message: response.message || 'RSEI缓存已清除'
+    }
+    emitRefreshMap('ecology', 'deleted')
+  } catch (error) {
+    console.error('清除RSEI缓存失败:', error)
+    uploadStatus.ecology = {
+      type: 'error',
+      message: getRequestErrorMessage(error, '清除RSEI缓存失败')
+    }
+  } finally {
+    clearingRSEICache.value = false
+  }
+}
+
 // 定义事件
 const emit = defineEmits(['close', 'refresh-map'])
 
@@ -377,6 +719,35 @@ const emit = defineEmits(['close', 'refresh-map'])
 const emitRefreshMap = (type = selectedType.value, action = 'updated') => {
   emit('refresh-map', { type, action })
 }
+
+onMounted(() => {
+  loadUploadedLayerMetadata()
+  loadAvailableRSEISources().then(() => {
+    if (hasAttemptedAutoSync.value) {
+      return
+    }
+    hasAttemptedAutoSync.value = true
+
+    if (availableRSEISources.value.length > 0) {
+      syncLatestRSEI(true)
+    }
+  })
+
+  const handleWindowFocus = () => {
+    tryConsumeOverlayRefreshSignal()
+  }
+
+  window.addEventListener('focus', handleWindowFocus)
+  removeWindowFocusListener = () => window.removeEventListener('focus', handleWindowFocus)
+  tryConsumeOverlayRefreshSignal()
+})
+
+onBeforeUnmount(() => {
+  if (removeWindowFocusListener) {
+    removeWindowFocusListener()
+    removeWindowFocusListener = null
+  }
+})
 </script>
 
 <style scoped>
@@ -453,34 +824,208 @@ const emitRefreshMap = (type = selectedType.value, action = 'updated') => {
   margin-bottom: 20px;
 }
 
+.auto-sync-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  border: 1px solid #d8e6f3;
+  background:
+    radial-gradient(circle at top right, rgba(24, 144, 255, 0.08), transparent 30%),
+    linear-gradient(180deg, #f8fbfe 0%, #f3f8fc 100%);
+}
+
+.auto-sync-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.source-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.source-select {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid #cfe0ee;
+  background: #fff;
+  color: #31485d;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.source-select:focus {
+  border-color: #4aa3ea;
+  box-shadow: 0 0 0 3px rgba(74, 163, 234, 0.14);
+}
+
+.goto-remote-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid #cfe0ee;
+  background: rgba(255, 255, 255, 0.92);
+  color: #2a6fb0;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: center;
+  text-decoration: none;
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.goto-remote-link:hover {
+  border-color: #79b5ec;
+  box-shadow: 0 8px 18px rgba(42, 111, 176, 0.12);
+  transform: translateY(-1px);
+}
+
+.auto-sync-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #24415c;
+}
+
+.auto-sync-hint {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #61768a;
+}
+
+.rsei-action-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 40px;
+  margin-bottom: 0;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.sync-btn {
+  border: 1px solid #4aa3ea;
+  background: #2f97ea;
+  color: #fff;
+  box-shadow: none;
+}
+
+.rsei-action-row {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.clear-cache-btn {
+  border: 1px solid #ffccc7;
+  background: #fff7f6;
+  color: #cf1322;
+  box-shadow: none;
+}
+
+.sync-btn:hover:not(:disabled) {
+  background: #2388d8;
+  border-color: #2388d8;
+}
+
+.clear-cache-btn:hover:not(:disabled) {
+  background: #fff1f0;
+  border-color: #ff9c96;
+}
+
+.rsei-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.auto-sync-published {
+  margin-top: 0;
+}
+
+.manual-ecology-upload {
+  margin-bottom: 12px;
+  padding: 14px;
+  border: 1px solid #dbe8f3;
+  border-radius: 12px;
+  background: #fbfdff;
+}
+
+.manual-upload-title {
+  margin-bottom: 10px;
+  color: #24415c;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.ecology-upload-zone {
+  padding: 16px 12px;
+}
+
+.ecology-upload-icon {
+  margin-bottom: 4px;
+}
+
+.ecology-upload-icon svg {
+  width: 40px;
+  height: 40px;
+}
+
+.ecology-description-input {
+  min-height: 62px;
+}
+
+.ecology-upload-btn {
+  min-height: 40px;
+  padding: 9px 12px;
+  margin-bottom: 0;
+}
+
 .icon {
   font-size: 20px;
 }
 
 /* 数据类型选择器 */
 .data-type-selector {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 20px;
   border-bottom: 1px solid #f0f0f0;
-  padding-bottom: 12px;
+  padding: 0 0 16px;
 }
 
 .type-tab {
-  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: 8px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0 8px;
+  border-radius: 10px;
   cursor: pointer;
   transition: all 0.3s;
-  background: #f5f5f5;
-  color: #666;
-  font-size: 13px;
+  background: #f7f9fb;
+  color: #5c6b7a;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
   user-select: none;
-  border: 1px solid transparent;
+  border: 1px solid #e1e9f0;
 }
 
 .type-tab:hover {
@@ -497,11 +1042,16 @@ const emitRefreshMap = (type = selectedType.value, action = 'updated') => {
 }
 
 .type-icon {
-  font-size: 16px;
+  display: none;
 }
 
 .type-label {
-  font-size: 13px;
+  display: block;
+  width: 100%;
+  font-size: 12px;
+  line-height: 1.35;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .upload-zone {
@@ -560,6 +1110,8 @@ const emitRefreshMap = (type = selectedType.value, action = 'updated') => {
   align-items: center;
   justify-content: space-between;
   text-align: left;
+  width: 100%;
+  gap: 12px;
 }
 
 .file-name {
@@ -668,6 +1220,42 @@ const emitRefreshMap = (type = selectedType.value, action = 'updated') => {
   border: 1px solid #adc6ff;
 }
 
+.description-field {
+  margin-bottom: 12px;
+}
+
+.description-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: #4b5b6a;
+  font-weight: 500;
+}
+
+.description-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 78px;
+  padding: 10px 12px;
+  border: 1px solid #d9e3ec;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #24384d;
+  background: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
+}
+
+.description-input:focus {
+  outline: none;
+  border-color: #40a9ff;
+  box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.12);
+}
+
+.description-input::placeholder {
+  color: #9aa8b5;
+}
+
 .published-row {
   margin-top: 10px;
   padding: 10px 12px;
@@ -692,6 +1280,15 @@ const emitRefreshMap = (type = selectedType.value, action = 'updated') => {
 .published-row span {
   color: #6b7f93;
   font-size: 12px;
+}
+
+.published-meta {
+  margin-top: 2px;
+}
+
+.published-description {
+  white-space: pre-wrap;
+  line-height: 1.5;
 }
 
 .delete-layer-btn {

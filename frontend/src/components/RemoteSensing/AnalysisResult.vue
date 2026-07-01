@@ -30,7 +30,16 @@
         </div>
 
         <div v-if="primaryVisualizationUrl" class="visualization-section">
-          <img :src="primaryVisualizationUrl" alt="指数可视化结果" class="visualization-image" />
+          <img
+            :src="primaryVisualizationUrl"
+            alt="指数可视化结果"
+            class="visualization-image"
+            @error="handleVisualizationError"
+          />
+        </div>
+        <div v-if="visualizationLoadError" class="result-notice is-warning">
+          <div class="notice-title">可视化图片加载失败</div>
+          <div class="notice-text">{{ visualizationLoadError }}</div>
         </div>
 
         <!-- 加载中 -->
@@ -154,6 +163,7 @@ const props = defineProps({
 const loading = ref(false);
 const indicesData = ref([]);
 const pieChartRef = ref(null);
+const visualizationLoadError = ref('');
 let pieChart = null;
 let removeResizeListener = null;
 
@@ -168,10 +178,34 @@ const indexLabelMap = computed(() => ({
   uploaded_raster: '上传成果栅格'
 }));
 
-const primaryVisualizationUrl = computed(() => {
-  const first = indicesData.value[0];
-  return first?.visualization_file_url || first?.visualization_file || null;
+const primaryIndex = computed(() => {
+  if (!indicesData.value.length) return null;
+  return indicesData.value.find((item) => item.index_type === 'rsei') || indicesData.value[0];
 });
+
+const primaryVisualizationUrl = computed(() => {
+  const primary = primaryIndex.value;
+  return normalizeVisualizationUrl(primary?.visualization_file_url || primary?.visualization_file || null);
+});
+
+function normalizeVisualizationUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+
+  if (url.startsWith('/media/')) {
+    return url;
+  }
+
+  try {
+    const parsed = new URL(url, window.location.origin);
+    if (parsed.pathname.startsWith('/media/')) {
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+    return parsed.toString();
+  } catch (error) {
+    console.warn('解析可视化图片地址失败:', url, error);
+    return url;
+  }
+}
 
 // 监听状态变化，当完成时加载数据
 watch(() => props.status, async (newStatus) => {
@@ -188,6 +222,7 @@ async function loadIndicesData() {
   }
 
   loading.value = true;
+  visualizationLoadError.value = '';
 
   try {
     if (Array.isArray(props.resultData.indices)) {
@@ -298,7 +333,11 @@ function updatePieChart() {
   }
 
   // 使用第一个指数的面积数据（通常是主要指数）
-  const firstIndex = indicesData.value[0];
+  const firstIndex = primaryIndex.value;
+  if (!firstIndex) {
+    pieChart.setOption({ series: [] });
+    return;
+  }
   
   console.log('饼图数据 - 第一个指数:', firstIndex);
   console.log('面积字段:', {
@@ -541,6 +580,14 @@ function formatValue(value) {
   return typeof value === 'number' ? value.toFixed(4) : value;
 }
 
+function handleVisualizationError(event) {
+  const failedUrl = event?.target?.currentSrc || event?.target?.src || primaryVisualizationUrl.value || '';
+  console.error('可视化图片加载失败:', failedUrl);
+  visualizationLoadError.value = failedUrl
+    ? `图片地址无法访问：${failedUrl}`
+    : '图片地址为空或服务未返回有效文件。';
+}
+
 // 下载结果
 function downloadResults() {
   if (indicesData.value.length === 0) {
@@ -605,11 +652,17 @@ onUnmounted(() => {
 }
 
 .placeholder-apple {
-  color: #b0b8c9;
-  font-size: 1.18rem;
+  align-self: center;
+  margin: auto;
+  padding: 28px 32px;
+  border: 1px dashed #dbe6f0;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #8a98a8;
+  font-size: 14px;
+  box-shadow: 0 8px 20px rgba(30, 50, 70, 0.05);
   letter-spacing: 0.2px;
   text-align: center;
-  padding: 80px 32px;
 }
 
 .loading-apple {
@@ -659,6 +712,11 @@ onUnmounted(() => {
 .result-notice.is-hint {
   background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
   border-color: #d7e7f6;
+}
+
+.result-notice.is-warning {
+  background: linear-gradient(180deg, #fff8ef 0%, #ffffff 100%);
+  border-color: #f2d3aa;
 }
 
 .notice-title {

@@ -205,13 +205,8 @@ class LandUseAnalyzer:
             if num_features == 0:
                 return {'cohesion_index': 0.0}
             
-            # 计算每个斑块的面积
-            patch_areas = []
-            for i in range(1, num_features + 1):
-                patch_area = np.sum(labeled_array == i)
-                patch_areas.append(patch_area)
-            
-            patch_areas = np.array(patch_areas)
+            # np.bincount avoids scanning the whole raster once per patch.
+            patch_areas = np.bincount(labeled_array.ravel())[1:]
             total_area = np.sum(patch_areas)
             
             # 计算内聚力指数

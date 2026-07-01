@@ -143,8 +143,7 @@
       <div class="right-panel">
         <!-- 无数据时的占位符 -->
         <div v-if="!hasData" class="placeholder">
-          <CirclePlus class="placeholder-icon" />
-          <p>请先上传气候数据并开始分析</p>
+          <div class="placeholder-text">请先上传数据并开始分析</div>
         </div>
 
         <!-- 有数据时显示分析结果 -->
@@ -213,7 +212,7 @@
 
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { ArrowLeft, CircleCheck, CircleClose, CirclePlus, Files, Search } from '@element-plus/icons-vue'
+import { ArrowLeft, CircleCheck, CircleClose, Files, Search } from '@element-plus/icons-vue'
 import { climateMonitoringService } from '../services/api.js'
 
 // 响应式数据
@@ -1875,25 +1874,21 @@ const drawWindSpeedChart = () => {
 }
 
 .placeholder {
-  text-align: center;
-  color: #8a98a8;
-  min-height: 320px;
+  flex: 1;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #ffffff;
-  border: 1px dashed #dbe6f0;
-  border-radius: 12px;
-  box-shadow: 0 8px 20px rgba(30, 50, 70, 0.05);
 }
 
-.placeholder-icon {
-  width: 64px;
-  height: 64px;
-  margin-bottom: 16px;
-  color: #c3ccd6;
-  opacity: 0.5;
+.placeholder-text {
+  padding: 28px 32px;
+  border: 1px dashed #dbe6f0;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #8a98a8;
+  font-size: 14px;
+  text-align: center;
+  box-shadow: 0 8px 20px rgba(30, 50, 70, 0.05);
 }
 
 .placeholder p {

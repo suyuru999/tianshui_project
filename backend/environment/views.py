@@ -18,11 +18,13 @@ import requests
 import time
 import uuid
 import re
+import shutil
 import zipfile
 import numpy as np
 import rasterio
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from rasterio.warp import transform_bounds
 
 # 取消注释必要的导入
 from .models import (
@@ -95,6 +97,296 @@ from .file_utils import safe_file_cleanup, get_cleanup_files
 
 logger = logging.getLogger(__name__)
 
+
+def _is_authenticated(user):
+    return bool(user and user.is_authenticated)
+
+
+def _allow_anonymous_analysis_uploads():
+    return bool(getattr(settings, 'ALLOW_ANONYMOUS_ANALYSIS_UPLOADS', True))
+
+
+def _allow_anonymous_business_layer_admin():
+    return bool(getattr(settings, 'ALLOW_ANONYMOUS_BUSINESS_LAYER_ADMIN', True))
+
+
+def _allow_anonymous_overlay_admin():
+    return bool(getattr(settings, 'ALLOW_ANONYMOUS_OVERLAY_ADMIN', True))
+
+
+def _allow_public_feedback_management():
+    return bool(getattr(settings, 'ALLOW_PUBLIC_FEEDBACK_MANAGEMENT', True))
+
+
+def _get_overlay_layer_configs():
+    base_dir = os.path.join(settings.MEDIA_ROOT, 'ecological_projects')
+    return {
+        'ecology': {
+            'label': '生态指数栅格',
+            'store': 'ecology_raster',
+            'kind': 'raster',
+            'layer_name': 'ecology_raster',
+            'paths': [
+                os.path.join(base_dir, 'ecology_raster.tif'),
+            ],
+        },
+        'economy': {
+            'label': '经济数据矢量',
+            'store': 'economy_vector_store',
+            'kind': 'vector',
+            'layer_name': 'economy_vector',
+            'paths': [
+                os.path.join(base_dir, 'economy_vector'),
+            ],
+        },
+        'engineering': {
+            'label': '工程项目矢量',
+            'store': 'engineering_vector_store',
+            'kind': 'vector',
+            'layer_name': 'engineering_vector',
+            'paths': [
+                os.path.join(base_dir, 'engineering_vector'),
+            ],
+        },
+    }
+
+
+def _get_overlay_metadata_path():
+    return os.path.join(settings.MEDIA_ROOT, 'ecological_projects', 'overlay_upload_metadata.json')
+
+
+def _default_overlay_metadata():
+    return {
+        layer_type: {
+            'description': '',
+            'file_name': '',
+            'layer_name': config['layer_name'],
+            'updated_at': None,
+            'source_type': '',
+            'source_image_id': '',
+            'source_image_name': '',
+            'source_result_id': '',
+            'source_result_created_at': None,
+        }
+        for layer_type, config in _get_overlay_layer_configs().items()
+    }
+
+
+def _load_overlay_metadata():
+    metadata = _default_overlay_metadata()
+    metadata_path = _get_overlay_metadata_path()
+    if not os.path.exists(metadata_path):
+        return metadata
+
+    try:
+        with open(metadata_path, 'r', encoding='utf-8') as fh:
+            stored = json.load(fh)
+        if isinstance(stored, dict):
+            for layer_type in metadata.keys():
+                layer_data = stored.get(layer_type)
+                if isinstance(layer_data, dict):
+                    metadata[layer_type].update(layer_data)
+                    metadata[layer_type]['description'] = layer_data.get('description') or ''
+                    metadata[layer_type]['file_name'] = layer_data.get('file_name') or ''
+                    metadata[layer_type]['layer_name'] = layer_data.get('layer_name') or metadata[layer_type]['layer_name']
+                    metadata[layer_type]['source_type'] = layer_data.get('source_type') or ''
+    except Exception as exc:
+        logger.warning(f"读取叠加分析上传元数据失败: {exc}")
+
+    return metadata
+
+
+def _save_overlay_metadata(metadata):
+    metadata_path = _get_overlay_metadata_path()
+    os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
+    with open(metadata_path, 'w', encoding='utf-8') as fh:
+        json.dump(metadata, fh, ensure_ascii=False, indent=2)
+
+
+def _update_overlay_metadata(layer_type, **updates):
+    metadata = _load_overlay_metadata()
+    if layer_type not in metadata:
+        metadata[layer_type] = {}
+
+    metadata[layer_type].update(updates)
+    metadata[layer_type]['updated_at'] = timezone.now().isoformat()
+    _save_overlay_metadata(metadata)
+    return metadata[layer_type]
+
+
+def _clear_overlay_metadata(layer_type):
+    metadata = _load_overlay_metadata()
+    config = _get_overlay_layer_configs().get(layer_type, {})
+    metadata[layer_type] = {
+        'description': '',
+        'file_name': '',
+        'layer_name': config.get('layer_name', ''),
+        'updated_at': timezone.now().isoformat(),
+        'source_type': '',
+        'source_image_id': '',
+        'source_image_name': '',
+        'source_result_id': '',
+        'source_result_created_at': None,
+    }
+    _save_overlay_metadata(metadata)
+
+
+def _get_rsei_source(remote_sensing_image_id=None):
+    rsei_queryset = (
+        RSEIResult.objects
+        .select_related('remote_sensing_image', 'rsei_result')
+        .order_by('-created_at')
+    )
+    if remote_sensing_image_id:
+        rsei_queryset = rsei_queryset.filter(remote_sensing_image_id=remote_sensing_image_id)
+
+    latest_rsei = rsei_queryset.first()
+    if latest_rsei and latest_rsei.rsei_result and latest_rsei.rsei_result.result_file:
+        return latest_rsei.rsei_result, latest_rsei.remote_sensing_image, latest_rsei.created_at
+
+    index_queryset = (
+        EcologicalIndex.objects
+        .select_related('remote_sensing_image')
+        .filter(index_type='rsei')
+        .exclude(result_file='')
+        .order_by('-updated_at', '-created_at')
+    )
+    if remote_sensing_image_id:
+        index_queryset = index_queryset.filter(remote_sensing_image_id=remote_sensing_image_id)
+
+    latest_index = index_queryset.first()
+    if latest_index and latest_index.result_file:
+        return latest_index, latest_index.remote_sensing_image, latest_index.updated_at or latest_index.created_at
+
+    return None, None, None
+
+
+def _list_available_rsei_sources():
+    sources = []
+    indices = (
+        EcologicalIndex.objects
+        .select_related('remote_sensing_image')
+        .filter(index_type='rsei')
+        .exclude(result_file='')
+        .order_by('-updated_at', '-created_at')
+    )
+
+    for index in indices:
+        try:
+            result_path = index.result_file.path
+        except Exception:
+            result_path = ''
+
+        if not result_path or not os.path.exists(result_path):
+            continue
+
+        image = index.remote_sensing_image
+        sources.append({
+            'remote_sensing_image_id': str(image.id),
+            'remote_sensing_image_name': image.name,
+            'acquisition_date': image.acquisition_date.isoformat() if image.acquisition_date else None,
+            'result_id': str(index.id),
+            'result_file_name': os.path.basename(result_path),
+            'updated_at': (index.updated_at or index.created_at).isoformat() if (index.updated_at or index.created_at) else None,
+        })
+
+    return sources
+
+
+def _sync_latest_rsei_to_overlay(remote_sensing_image_id=None):
+    overlay_config = _get_overlay_layer_configs()['ecology']
+    target_path = overlay_config['paths'][0]
+
+    source_index, source_image, source_created_at = _get_rsei_source(remote_sensing_image_id=remote_sensing_image_id)
+    if not source_index or not source_index.result_file:
+        return {
+            'success': False,
+            'message': '未找到可用的RSEI结果，请先在遥感生态指数分析模块完成一次RSEI计算。',
+            'reason': 'no_rsei_result'
+        }
+
+    try:
+        source_path = source_index.result_file.path
+    except Exception as exc:
+        logger.warning(f"读取最新RSEI结果路径失败: {exc}")
+        return {
+            'success': False,
+            'message': '最近一次RSEI结果文件路径无效，暂时无法同步。',
+            'reason': 'invalid_result_path'
+        }
+
+    if not source_path or not os.path.exists(source_path):
+        return {
+            'success': False,
+            'message': '最近一次RSEI结果文件不存在，暂时无法同步。',
+            'reason': 'missing_result_file'
+        }
+
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+
+    try:
+        same_file = os.path.exists(target_path) and os.path.samefile(source_path, target_path)
+    except Exception:
+        same_file = False
+
+    try:
+        if not same_file:
+            shutil.copy2(source_path, target_path)
+            logger.info(f"已将最近一次RSEI结果同步到叠加分析图层: {source_path} -> {target_path}")
+    except Exception as exc:
+        logger.error(f"同步最近一次RSEI结果失败: {exc}")
+        return {
+            'success': False,
+            'message': f'复制最近一次RSEI结果失败: {exc}',
+            'reason': 'copy_failed'
+        }
+
+    try:
+        from .geoserver_config import geoserver_manager
+
+        publish_success = geoserver_manager.publish_raster(
+            coverage_store_name=overlay_config['store'],
+            layer_name=overlay_config['layer_name'],
+            file_path=target_path,
+            style_type='ecology_rsei'
+        )
+    except Exception as exc:
+        logger.error(f"发布同步后的RSEI图层失败: {exc}")
+        return {
+            'success': False,
+            'message': f'已同步RSEI结果文件，但发布到GeoServer失败: {exc}',
+            'reason': 'geoserver_publish_exception'
+        }
+
+    if not publish_success:
+        return {
+            'success': False,
+            'message': '已同步RSEI结果文件，但发布到GeoServer失败。',
+            'reason': 'geoserver_publish_failed'
+        }
+
+    image_name = getattr(source_image, 'name', '') or ''
+    metadata = _update_overlay_metadata(
+        'ecology',
+        description=f'系统自动同步最近一次RSEI结果：{image_name}' if image_name else '系统自动同步最近一次RSEI结果',
+        file_name=os.path.basename(source_path),
+        layer_name=overlay_config['layer_name'],
+        source_type='selected_rsei' if remote_sensing_image_id else 'latest_rsei',
+        source_image_id=str(getattr(source_image, 'id', '') or ''),
+        source_image_name=image_name,
+        source_result_id=str(source_index.id),
+        source_result_created_at=source_created_at.isoformat() if source_created_at else None,
+    )
+
+    return {
+        'success': True,
+        'message': 'RSEI结果已同步到叠加分析生态图层。',
+        'metadata': metadata,
+        'layer_name': overlay_config['layer_name'],
+        'source_path': source_path,
+        'target_path': target_path,
+    }
+
 # 取消注释遥感影像视图集
 class RemoteSensingImageViewSet(viewsets.ModelViewSet):
     """遥感影像视图集"""
@@ -102,6 +394,12 @@ class RemoteSensingImageViewSet(viewsets.ModelViewSet):
     serializer_class = RemoteSensingImageSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     permission_classes = [permissions.AllowAny]  # 修改为允许所有请求
+
+    def get_permissions(self):
+        public_actions = {'list', 'retrieve', 'indices'}
+        if self.action in public_actions or _allow_anonymous_analysis_uploads():
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
     
     def get_serializer_class(self):
         """根据操作选择序列化器"""
@@ -253,6 +551,12 @@ class EcologicalIndexViewSet(viewsets.ModelViewSet):
     queryset = EcologicalIndex.objects.select_related('remote_sensing_image').all()
     serializer_class = EcologicalIndexSerializer
     permission_classes = [permissions.AllowAny]
+
+    def get_permissions(self):
+        public_actions = {'list', 'retrieve', 'statistics'}
+        if self.action in public_actions or _allow_anonymous_analysis_uploads():
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
     
     @action(detail=False, methods=['post'])
     def calculate(self, request):
@@ -312,6 +616,12 @@ class RSEIResultViewSet(viewsets.ModelViewSet):
     ).all()
     serializer_class = RSEIResultSerializer
     permission_classes = [permissions.AllowAny]
+
+    def get_permissions(self):
+        public_actions = {'list', 'retrieve'}
+        if self.action in public_actions or _allow_anonymous_analysis_uploads():
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
     
     @action(detail=False, methods=['post'])
     def calculate(self, request):
@@ -333,6 +643,11 @@ class ProcessingTaskViewSet(viewsets.ModelViewSet):
     queryset = ProcessingTask.objects.all()
     serializer_class = ProcessingTaskSerializer
     permission_classes = [permissions.AllowAny]  # 允许所有请求
+
+    def get_permissions(self):
+        if _allow_anonymous_analysis_uploads():
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
     
     def perform_create(self, serializer):
         """创建时设置创建用户"""
@@ -364,6 +679,13 @@ class CitizenFeedbackViewSet(viewsets.ModelViewSet):
     serializer_class = CitizenFeedbackSerializer
     authentication_classes = []
     permission_classes = [permissions.AllowAny]
+
+    def get_permissions(self):
+        if self.action == 'create':
+            return [permissions.AllowAny()]
+        if _allow_public_feedback_management():
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
 
     def perform_create(self, serializer):
         if self.request.user.is_authenticated:
@@ -409,8 +731,10 @@ def _supported_remote_indices(band_count):
         return sorted([*REMOTE_INDEX_METHODS.keys(), 'rsei'])
     if band_count == 1:
         return ['uploaded_raster']
-    if band_count >= 6:
+    if band_count >= 7:
         return sorted([*REMOTE_INDEX_METHODS.keys(), 'rsei'])
+    if band_count == 6:
+        return sorted([*REMOTE_INDEX_METHODS.keys()])
     if band_count == 5:
         return ['ndvi', 'ndwi']
     if band_count == 4:
@@ -434,6 +758,12 @@ def _unsupported_remote_index_response(index_type, band_count):
             f'当前影像为4波段，不支持{requested_label}。'
             '这类GF/PMS四波段影像通常可计算NDVI或NDWI；'
             '热度指数、干度指数和RSEI需要包含短波红外/热红外等更多有效波段的数据。'
+        )
+    elif band_count == 6 and index_type == 'rsei':
+        detail = (
+            f'当前影像为6波段反射波段数据，不支持{requested_label}。'
+            '标准RSEI除绿度、湿度、干度外，还需要热度（LST/热红外）分量；'
+            '请上传包含热红外波段的Landsat类影像，或改算当前影像支持的单项指数。'
         )
     elif band_count and band_count < 6:
         detail = (
@@ -492,6 +822,124 @@ def _landuse_attribute_candidates(requested_attr=None):
         if field_name and field_name not in candidates:
             candidates.append(field_name)
     return candidates
+
+
+def _normalize_vector_field_name(field_name):
+    return re.sub(r'[\s_\-（）()\[\]{}【】.:：/\\]+', '', str(field_name or '')).lower()
+
+
+def _extract_year_from_field_name(field_name):
+    matches = re.findall(r'(19|20)\d{2}', str(field_name or ''))
+    if not matches:
+        return None
+    try:
+        return int(re.findall(r'(?:19|20)\d{2}', str(field_name or ''))[-1])
+    except Exception:
+        return None
+
+
+def _list_shapefile_field_names(shp_path, encoding=None):
+    if shapefile is None:
+        logger.warning(f"无法读取Shapefile字段，依赖缺失: {SHAPEFILE_IMPORT_ERROR}")
+        return []
+
+    try:
+        reader_kwargs = {}
+        if encoding:
+            reader_kwargs['encoding'] = encoding
+        with shapefile.Reader(shp_path, **reader_kwargs) as reader:
+            return [field[0] for field in reader.fields[1:] if field and field[0]]
+    except Exception as exc:
+        logger.warning(f"读取Shapefile字段失败: {exc}")
+        return []
+
+
+def _score_vector_field_name(field_name, aliases=None, keywords=None):
+    normalized = _normalize_vector_field_name(field_name)
+    aliases = aliases or []
+    keywords = keywords or []
+    score = 0
+
+    for alias in aliases:
+        alias_normalized = _normalize_vector_field_name(alias)
+        if normalized == alias_normalized:
+            score += 120
+        elif alias_normalized and alias_normalized in normalized:
+            score += 80
+
+    for keyword in keywords:
+        keyword_normalized = _normalize_vector_field_name(keyword)
+        if keyword_normalized and keyword_normalized in normalized:
+            score += 35
+
+    year = _extract_year_from_field_name(field_name)
+    if year:
+        score += max(0, year - 2000)
+
+    return score
+
+
+def _detect_economy_style_field(shp_path, encoding=None):
+    field_names = _list_shapefile_field_names(shp_path, encoding=encoding)
+    if not field_names:
+        return None, '经济指标'
+
+    candidate_groups = [
+        {
+            'label': 'GDP',
+            'aliases': [
+                'GDP', 'gdp', 'gdp_total', 'gross_domestic_product',
+                '地区生产总值', '生产总值', '经济总量'
+            ],
+            'keywords': ['gdp', '生产总值', '地区生产总值', '经济总量'],
+        },
+        {
+            'label': '经济产值',
+            'aliases': ['总产值', '产值', '工业总产值', '经济产值'],
+            'keywords': ['产值', '总产值', '工业产值', '经济产值'],
+        },
+        {
+            'label': '财政收入',
+            'aliases': ['财政收入', '一般公共预算收入', 'revenue', 'income'],
+            'keywords': ['财政', '收入', 'revenue', 'income'],
+        },
+        {
+            'label': '人口',
+            'aliases': ['POP', 'pop', 'population', '人口', '常住人口'],
+            'keywords': ['pop', 'population', '人口'],
+        },
+    ]
+
+    ranked_candidates = []
+    for group in candidate_groups:
+        for field_name in field_names:
+            score = _score_vector_field_name(
+                field_name,
+                aliases=group['aliases'],
+                keywords=group['keywords'],
+            )
+            if score > 0:
+                ranked_candidates.append((score, field_name, group['label']))
+
+    # 兜底：排除常见编码/名称/面积字段后，尝试其他数值字段
+    excluded_keywords = ['name', '名称', 'code', '编码', 'area', '面积', 'layer', 'grade', '等级']
+    for field_name in field_names:
+        normalized = _normalize_vector_field_name(field_name)
+        if any(_normalize_vector_field_name(keyword) in normalized for keyword in excluded_keywords):
+            continue
+        ranked_candidates.append((5 + (_extract_year_from_field_name(field_name) or 0) % 100, field_name, '经济指标'))
+
+    ranked_candidates.sort(key=lambda item: (-item[0], item[1]))
+
+    seen_fields = set()
+    deduped_candidates = []
+    for score, field_name, label in ranked_candidates:
+        if field_name in seen_fields:
+            continue
+        seen_fields.add(field_name)
+        deduped_candidates.append((score, field_name, label))
+
+    return (deduped_candidates[0][1], deduped_candidates[0][2]) if deduped_candidates else (None, '经济指标')
 
 
 def _rasterize_shapefile_with_rasterio(shp_path, output_tif, attribute_field, nodata_value=-9999):
@@ -705,6 +1153,58 @@ def _prepare_overlay_vector_dataset(uploaded_file, dataset_folder, fixed_name):
     }
 
 
+def _landuse_structure_payload(analyzer):
+    results = {
+        'fragmentation': analyzer.calculate_fragmentation_index() or {'error': '破碎度指数计算失败'},
+        'cohesion': analyzer.calculate_cohesion_index() or {'error': '内聚力指数计算失败'},
+        'diversity': analyzer.calculate_diversity_index() or {'error': '多样性指数计算失败'},
+        'fragility': analyzer.calculate_fragility_index() or {'error': '脆弱度指数计算失败'},
+    }
+    summary = {
+        'fragmentation_index': results.get('fragmentation', {}).get('overall_fragmentation', 0),
+        'cohesion_index': results.get('cohesion', {}).get('cohesion_index', 0),
+        'shannon_diversity': results.get('diversity', {}).get('shannon_diversity', 0),
+        'fragility_index': results.get('fragility', {}).get('fragility_index', 0),
+    }
+    return results, summary
+
+
+def _landuse_stress_payload(analyzer):
+    results = {
+        'soil_erosion': analyzer.calculate_soil_erosion_index() or {'error': '土壤侵蚀指数计算失败'},
+        'unused_land': analyzer.calculate_unused_land_ratio() or {'error': '未利用地面积比例计算失败'},
+        'cultivated_construction': analyzer.calculate_development_ratio() or {'error': '耕地建设用地面积比例计算失败'},
+        'land_degradation': analyzer.calculate_land_degradation_index() or {'error': '土地退化指数计算失败'},
+    }
+    summary = {
+        'soil_erosion_index': results.get('soil_erosion', {}).get('soil_erosion_index', 0),
+        'unused_land_proportion': results.get('unused_land', {}).get('unused_land_ratio', 0),
+        'cultivated_construction_proportion': results.get('cultivated_construction', {}).get('development_ratio', 0),
+        'land_degradation_index': results.get('land_degradation', {}).get('land_degradation_index', 0),
+    }
+    return results, summary
+
+
+def _landuse_analysis_meta(analyzer_cls):
+    is_gdal_engine = analyzer_cls is LandUseAnalyzer
+    return {
+        'analysis_engine': 'gdal' if is_gdal_engine else 'rasterio_fallback',
+        'analysis_engine_label': 'GDAL精确计算' if is_gdal_engine else 'Rasterio兼容计算',
+        'analysis_precision': 'full_resolution' if is_gdal_engine else 'mixed_resolution',
+        'analysis_notes': (
+            [
+                '当前结果基于全量栅格像元进行计算，适合直接用于正式分析。'
+            ]
+            if is_gdal_engine else
+            [
+                '当前环境未启用GDAL，系统已自动切换为兼容计算模式。',
+                '面积占比、脆弱度、土壤侵蚀、开发比例、退化指数基于全量像元统计。',
+                '破碎度和内聚力在兼容模式下基于降采样预览估算，适合快速研判，正式成果建议在GDAL环境复核。'
+            ]
+        )
+    }
+
+
 def _run_landuse_index_analysis(request, uploaded_file, analysis_type):
     prepared = None
     analyzer = None
@@ -715,55 +1215,16 @@ def _run_landuse_index_analysis(request, uploaded_file, analysis_type):
         )
         analyzer_cls = LandUseAnalyzer if LandUseAnalyzer is not None else RasterioLandUseAnalyzer
         analyzer = analyzer_cls(prepared['raster_input'])
-        is_gdal_engine = analyzer_cls is LandUseAnalyzer
-
-        analysis_meta = {
-            'analysis_engine': 'gdal' if is_gdal_engine else 'rasterio_fallback',
-            'analysis_engine_label': 'GDAL精确计算' if is_gdal_engine else 'Rasterio兼容计算',
-            'analysis_precision': 'full_resolution' if is_gdal_engine else 'mixed_resolution',
-            'analysis_notes': (
-                [
-                    '当前结果基于全量栅格像元进行计算，适合直接用于正式分析。'
-                ]
-                if is_gdal_engine else
-                [
-                    '当前环境未启用GDAL，系统已自动切换为兼容计算模式。',
-                    '面积占比、脆弱度、土壤侵蚀、开发比例、退化指数基于全量像元统计。',
-                    '破碎度和内聚力在兼容模式下基于降采样预览估算，适合快速研判，正式成果建议在GDAL环境复核。'
-                ]
-            )
-        }
+        analysis_meta = _landuse_analysis_meta(analyzer_cls)
 
         if not analyzer.load_landuse_data():
             return Response({'error': '土地利用数据加载失败'}, status=400)
 
         if analysis_type == 'structure':
-            results = {
-                'fragmentation': analyzer.calculate_fragmentation_index() or {'error': '破碎度指数计算失败'},
-                'cohesion': analyzer.calculate_cohesion_index() or {'error': '内聚力指数计算失败'},
-                'diversity': analyzer.calculate_diversity_index() or {'error': '多样性指数计算失败'},
-                'fragility': analyzer.calculate_fragility_index() or {'error': '脆弱度指数计算失败'},
-            }
-            summary = {
-                'fragmentation_index': results.get('fragmentation', {}).get('overall_fragmentation', 0),
-                'cohesion_index': results.get('cohesion', {}).get('cohesion_index', 0),
-                'shannon_diversity': results.get('diversity', {}).get('shannon_diversity', 0),
-                'fragility_index': results.get('fragility', {}).get('fragility_index', 0),
-            }
+            results, summary = _landuse_structure_payload(analyzer)
             message = '生态环境结构指数计算完成'
         else:
-            results = {
-                'soil_erosion': analyzer.calculate_soil_erosion_index() or {'error': '土壤侵蚀指数计算失败'},
-                'unused_land': analyzer.calculate_unused_land_ratio() or {'error': '未利用地面积比例计算失败'},
-                'cultivated_construction': analyzer.calculate_development_ratio() or {'error': '耕地建设用地面积比例计算失败'},
-                'land_degradation': analyzer.calculate_land_degradation_index() or {'error': '土地退化指数计算失败'},
-            }
-            summary = {
-                'soil_erosion_index': results.get('soil_erosion', {}).get('soil_erosion_index', 0),
-                'unused_land_proportion': results.get('unused_land', {}).get('unused_land_ratio', 0),
-                'cultivated_construction_proportion': results.get('cultivated_construction', {}).get('development_ratio', 0),
-                'land_degradation_index': results.get('land_degradation', {}).get('land_degradation_index', 0),
-            }
+            results, summary = _landuse_stress_payload(analyzer)
             message = '生态环境胁迫指数计算完成'
 
         visualization = _landuse_visualization_payload(request, analyzer, uploaded_file.name)
@@ -792,8 +1253,7 @@ def _run_landuse_index_analysis(request, uploaded_file, analysis_type):
 def _media_url(request, relative_path):
     if not relative_path:
         return None
-    url = settings.MEDIA_URL + relative_path.replace('\\', '/')
-    return request.build_absolute_uri(url)
+    return settings.MEDIA_URL + relative_path.replace('\\', '/')
 
 
 def _statistics_payload(stats):
@@ -823,7 +1283,11 @@ def _remote_preview_thresholds():
 def _should_use_remote_preview(dataset):
     max_pixels, max_side = _remote_preview_thresholds()
     total_pixels = int(dataset.width) * int(dataset.height)
-    return total_pixels > max_pixels or dataset.width > max_side or dataset.height > max_side
+    max_dimension = max(int(dataset.width), int(dataset.height))
+    min_dimension = min(int(dataset.width), int(dataset.height))
+
+    # 避免把 Landsat 这类长边略大、但总体像元量仍可控的影像误判成超大图。
+    return total_pixels > max_pixels or (max_dimension > max_side and min_dimension > max_side)
 
 
 def _remote_preview_scale(width, height):
@@ -870,6 +1334,181 @@ def _preview_multiband_index(raster_path, index_type):
         if nodata is not None:
             index_data[index_data == nodata] = np.nan
         return np.clip(index_data, -1.0, 1.0)
+
+
+def _infer_remote_sensing_metadata(raster_path):
+    center_lat = 0.0
+    center_lon = 0.0
+    resolution = None
+    bands_count = None
+
+    with rasterio.open(raster_path) as dataset:
+        bands_count = int(dataset.count)
+        if dataset.res:
+            try:
+                resolution = float(abs(dataset.res[0]))
+            except Exception:
+                resolution = None
+
+        if dataset.crs:
+            try:
+                bounds = dataset.bounds
+                if dataset.crs.to_string() == 'EPSG:4326':
+                    left, bottom, right, top = bounds.left, bounds.bottom, bounds.right, bounds.top
+                else:
+                    left, bottom, right, top = transform_bounds(
+                        dataset.crs,
+                        'EPSG:4326',
+                        bounds.left,
+                        bounds.bottom,
+                        bounds.right,
+                        bounds.top,
+                        densify_pts=21
+                    )
+                center_lon = float((left + right) / 2)
+                center_lat = float((bottom + top) / 2)
+            except Exception as exc:
+                logger.warning(f'推断遥感影像中心点失败，使用默认坐标: {exc}')
+
+    return {
+        'center_lat': center_lat,
+        'center_lon': center_lon,
+        'resolution': resolution,
+        'bands_count': bands_count,
+    }
+
+
+def _build_remote_analysis_payload(
+    request,
+    index_type,
+    label,
+    stats,
+    result_file_rel=None,
+    visualization_rel=None,
+    extra=None,
+):
+    payload = {
+        'id': uuid.uuid4().hex,
+        'index_type': index_type,
+        'index_type_display': label,
+        **_statistics_payload(stats),
+        'result_file_url': _media_url(request, result_file_rel) if result_file_rel else None,
+        'visualization_file_url': _media_url(request, visualization_rel) if visualization_rel else None,
+    }
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+def _persist_rsei_analysis_result(request, uploaded_file_name, raster_abs, calculator, result_items, pca_meta):
+    user = request.user if request.user.is_authenticated else None
+    image_id = uuid.uuid4()
+    safe_name = get_valid_filename(Path(uploaded_file_name).stem or 'rsei_image')
+    source_suffix = Path(raster_abs).suffix.lower() or '.tif'
+    source_filename = f'{image_id}_{safe_name}{source_suffix}'
+    source_rel = os.path.join('remote_sensing', source_filename).replace('\\', '/')
+    source_abs = os.path.join(settings.MEDIA_ROOT, source_rel)
+
+    result_dir_rel = os.path.join('ecological_indices', str(image_id)).replace('\\', '/')
+    result_dir_abs = os.path.join(settings.MEDIA_ROOT, result_dir_rel)
+    created_paths = []
+    created_image = None
+    created_indices = {}
+
+    try:
+        os.makedirs(os.path.dirname(source_abs), exist_ok=True)
+        os.makedirs(result_dir_abs, exist_ok=True)
+
+        shutil.copy2(raster_abs, source_abs)
+        created_paths.append(source_abs)
+
+        metadata = _infer_remote_sensing_metadata(source_abs)
+        created_image = RemoteSensingImage.objects.create(
+            id=image_id,
+            name=safe_name,
+            description='通过遥感生态指数分析页面生成的 RSEI 结果源影像',
+            image_type='custom',
+            file_path=source_rel,
+            center_lat=metadata['center_lat'],
+            center_lon=metadata['center_lon'],
+            acquisition_date=timezone.now().date(),
+            resolution=metadata['resolution'],
+            bands_count=metadata['bands_count'],
+            file_size=os.path.getsize(source_abs),
+            is_processed=True,
+            processing_status='completed',
+            uploaded_by=user,
+        )
+
+        for item in result_items:
+            index_type = item['index_type']
+            label = item['label']
+            index_data = item['data']
+            stats = item['stats']
+
+            result_file_rel = f'{result_dir_rel}/{index_type}_result.tif'
+            visualization_file_rel = f'{result_dir_rel}/{index_type}_visualization.png'
+            result_file_abs = os.path.join(settings.MEDIA_ROOT, result_file_rel)
+            visualization_file_abs = os.path.join(settings.MEDIA_ROOT, visualization_file_rel)
+
+            if not calculator.save_result(index_data, result_file_abs):
+                raise ValueError(f'保存 {index_type} 结果栅格失败')
+            created_paths.append(result_file_abs)
+
+            if not calculator.create_visualization(index_data, label, visualization_file_abs):
+                raise ValueError(f'生成 {index_type} 可视化失败')
+            created_paths.append(visualization_file_abs)
+
+            created_indices[index_type] = EcologicalIndex.objects.create(
+                remote_sensing_image=created_image,
+                index_type=index_type,
+                result_file=result_file_rel,
+                visualization_file=visualization_file_rel,
+                min_value=stats.get('min_value'),
+                max_value=stats.get('max_value'),
+                mean_value=stats.get('mean_value'),
+                std_value=stats.get('std_value'),
+                excellent_area=stats.get('excellent_area'),
+                good_area=stats.get('good_area'),
+                moderate_area=stats.get('moderate_area'),
+                poor_area=stats.get('poor_area'),
+                bad_area=stats.get('bad_area'),
+                created_by=user,
+            )
+
+        RSEIResult.objects.create(
+            remote_sensing_image=created_image,
+            greenness=created_indices['greenness'],
+            wetness=created_indices['wetness'],
+            dryness=created_indices['dryness'],
+            heat=created_indices['heat'],
+            rsei_result=created_indices['rsei'],
+            pc1_variance=pca_meta.get('pc1_variance', 0.0),
+            pc2_variance=pca_meta.get('pc2_variance', 0.0),
+            pc3_variance=pca_meta.get('pc3_variance', 0.0),
+            pc4_variance=pca_meta.get('pc4_variance', 0.0),
+            greenness_weight=pca_meta.get('greenness_weight', 0.0),
+            wetness_weight=pca_meta.get('wetness_weight', 0.0),
+            dryness_weight=pca_meta.get('dryness_weight', 0.0),
+            heat_weight=pca_meta.get('heat_weight', 0.0),
+        )
+
+        return created_image, created_indices
+    except Exception:
+        if created_image:
+            try:
+                created_image.delete()
+            except Exception as exc:
+                logger.warning(f'回滚遥感影像记录失败: {exc}')
+
+        for path in reversed(created_paths):
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception as exc:
+                logger.warning(f'回滚持久化文件失败: {path}, {exc}')
+
+        raise
 
 
 def _safe_layer_name(name):
@@ -1515,6 +2154,14 @@ def analyze_remote_sensing_upload(request):
                 'supported_index_labels': [REMOTE_INDEX_LABELS[item] for item in ['ndvi', 'ndwi', 'ndbi']],
             }, status=400)
 
+        if band_count == 1 and extension in ['.tif', '.tiff'] and index_type == 'rsei':
+            return Response({
+                'error': '当前上传的是单波段成果栅格或分类栅格，不能直接计算 RSEI，也不会生成可同步到叠加分析的 RSEI 结果。',
+                'details': '请上传原始多波段遥感影像后再选择“遥感生态指数（RSEI）”进行分析；像土地利用分类图这类 1-6 等级值栅格，只能做成果展示，不能反推 RSEI。',
+                'bands_count': band_count,
+                'requested_index': index_type,
+            }, status=400)
+
         if band_count == 1 and extension in ['.tif', '.tiff']:
             label = '上传成果栅格'
             index_data, stats = _single_band_statistics(raster_abs)
@@ -1564,26 +2211,93 @@ def analyze_remote_sensing_upload(request):
         if not stats:
             return Response({'error': '统计结果生成失败'}, status=500)
 
-        result_png_rel = f'{result_dir_rel}/{index_result_type}.png'
-        result_png_abs = os.path.join(settings.MEDIA_ROOT, result_png_rel)
         result_file_url = locals().get('result_file_url')
-        if calculator:
-            result_tif_rel = f'{result_dir_rel}/{index_result_type}.tif'
-            result_tif_abs = os.path.join(settings.MEDIA_ROOT, result_tif_rel)
-            calculator.save_result(index_data, result_tif_abs)
-            result_file_url = _media_url(request, result_tif_rel)
+        persisted_remote_sensing_image_id = None
+        persisted_remote_sensing_image_name = None
+        if index_result_type == 'rsei' and calculator and not preview_mode:
+            component_definitions = [
+                ('greenness', '绿度指数', rsei_result['greenness']),
+                ('wetness', '湿度指数(Tasseled Cap)', rsei_result['wetness']),
+                ('dryness', '干度指数(NDBSI)', rsei_result['dryness']),
+                ('heat', '热度指数(LST/Heat)', rsei_result['heat']),
+                ('rsei', 'RSEI', rsei_result['rsei']),
+            ]
 
-        preview_calculator = calculator or EcologicalIndexCalculator(raster_abs)
-        preview_calculator.create_visualization(index_data, label, result_png_abs)
+            result_items = []
+            for component_type, component_label, component_data in component_definitions:
+                component_stats = calculator.calculate_statistics(component_data)
+                if not component_stats:
+                    return Response({'error': f'{component_label}统计结果生成失败'}, status=500)
+                result_items.append({
+                    'index_type': component_type,
+                    'label': component_label,
+                    'data': component_data,
+                    'stats': component_stats,
+                })
 
-        results.append({
-            'id': uuid.uuid4().hex,
-            'index_type': index_result_type,
-            'index_type_display': label,
-            **_statistics_payload(stats),
-            'result_file_url': result_file_url,
-            'visualization_file_url': _media_url(request, result_png_rel),
-        })
+            pca_variance = rsei_result.get('pca_variance')
+            variance_list = list(pca_variance) if pca_variance is not None else []
+            component_matrix = rsei_result.get('pca_components')
+            first_component = component_matrix[0] if component_matrix is not None and len(component_matrix) > 0 else [0, 0, 0, 0]
+            pca_meta = {
+                'pc1_variance': float(variance_list[0]) if len(variance_list) > 0 else 0.0,
+                'pc2_variance': float(variance_list[1]) if len(variance_list) > 1 else 0.0,
+                'pc3_variance': float(variance_list[2]) if len(variance_list) > 2 else 0.0,
+                'pc4_variance': float(variance_list[3]) if len(variance_list) > 3 else 0.0,
+                'greenness_weight': float(first_component[0]) if len(first_component) > 0 else 0.0,
+                'wetness_weight': float(first_component[1]) if len(first_component) > 1 else 0.0,
+                'dryness_weight': float(first_component[2]) if len(first_component) > 2 else 0.0,
+                'heat_weight': float(first_component[3]) if len(first_component) > 3 else 0.0,
+            }
+
+            persisted_image, persisted_indices = _persist_rsei_analysis_result(
+                request=request,
+                uploaded_file_name=uploaded_file.name,
+                raster_abs=raster_abs,
+                calculator=calculator,
+                result_items=result_items,
+                pca_meta=pca_meta,
+            )
+            persisted_remote_sensing_image_id = str(persisted_image.id)
+            persisted_remote_sensing_image_name = persisted_image.name
+
+            response_order = ['rsei', 'greenness', 'wetness', 'dryness', 'heat']
+            label_map = {item['index_type']: item['label'] for item in result_items}
+            stats_map = {item['index_type']: item['stats'] for item in result_items}
+            for item_type in response_order:
+                persisted_index = persisted_indices[item_type]
+                results.append(_build_remote_analysis_payload(
+                    request=request,
+                    index_type=item_type,
+                    label=label_map[item_type],
+                    stats=stats_map[item_type],
+                    result_file_rel=persisted_index.result_file.name,
+                    visualization_rel=persisted_index.visualization_file.name,
+                ))
+            result_file_url = _media_url(request, persisted_indices['rsei'].result_file.name)
+        else:
+            result_png_rel = f'{result_dir_rel}/{index_result_type}.png'
+            result_png_abs = os.path.join(settings.MEDIA_ROOT, result_png_rel)
+
+            if calculator:
+                result_tif_rel = f'{result_dir_rel}/{index_result_type}.tif'
+                result_tif_abs = os.path.join(settings.MEDIA_ROOT, result_tif_rel)
+                calculator.save_result(index_data, result_tif_abs)
+                result_file_url = _media_url(request, result_tif_rel)
+            else:
+                result_tif_rel = None
+
+            preview_calculator = calculator or EcologicalIndexCalculator(raster_abs)
+            preview_calculator.create_visualization(index_data, label, result_png_abs)
+
+            results.append(_build_remote_analysis_payload(
+                request=request,
+                index_type=index_result_type,
+                label=label,
+                stats=stats,
+                result_file_rel=result_tif_rel,
+                visualization_rel=result_png_rel,
+            ))
 
         return Response({
             'message': '分析完成',
@@ -1595,6 +2309,8 @@ def analyze_remote_sensing_upload(request):
                 'bands_count': band_count,
                 'supported_indices': _supported_remote_indices(band_count),
             },
+            'remote_sensing_image_id': persisted_remote_sensing_image_id,
+            'remote_sensing_image_name': persisted_remote_sensing_image_name,
             'indices': results,
             'result': results[0],
         })
@@ -1652,6 +2368,65 @@ def calculate_ecological_stress_indices(request):
     return _run_landuse_index_analysis(request, landuse_file, 'stress')
 
 
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def calculate_ecological_landuse_indices(request):
+    """一次加载土地利用数据并计算结构指数和胁迫指数。"""
+    if 'landuse_file' not in request.FILES:
+        return Response({'error': '请上传土地利用数据文件'}, status=400)
+
+    landuse_file = request.FILES['landuse_file']
+    if landuse_file.name.lower().endswith('.adf'):
+        return Response({
+            'error': 'ADF 是 ArcGIS 栅格目录格式，不能作为单文件上传。请先用 GDAL/ArcGIS 转为 GeoTIFF(.tif) 后再上传。'
+        }, status=400)
+
+    prepared = None
+    analyzer = None
+    try:
+        prepared = _prepare_landuse_analysis_input(
+            landuse_file,
+            requested_attr=request.data.get('landuse_attr'),
+        )
+        analyzer_cls = LandUseAnalyzer if LandUseAnalyzer is not None else RasterioLandUseAnalyzer
+        analyzer = analyzer_cls(prepared['raster_input'])
+
+        if not analyzer.load_landuse_data():
+            return Response({'error': '土地利用数据加载失败'}, status=400)
+
+        structure_results, structure_summary = _landuse_structure_payload(analyzer)
+        stress_results, stress_summary = _landuse_stress_payload(analyzer)
+        visualization = _landuse_visualization_payload(request, analyzer, landuse_file.name)
+
+        return Response({
+            'message': '生态环境指数计算完成',
+            'results': {
+                'structure': structure_results,
+                'stress': stress_results,
+            },
+            'summary': {
+                **structure_summary,
+                **stress_summary,
+            },
+            'visualization': visualization,
+            'meta': _landuse_analysis_meta(analyzer_cls),
+        })
+    except ValueError as exc:
+        return Response({'error': str(exc)}, status=400)
+    except RuntimeError as exc:
+        status_code = 503 if 'gdal' in str(exc).lower() or 'osgeo' in str(exc).lower() else 500
+        return Response({'error': str(exc)}, status=status_code)
+    except Exception as exc:
+        logger.exception('计算土地利用综合指数失败')
+        return Response({'error': f'计算失败: {exc}'}, status=500)
+    finally:
+        if analyzer is not None:
+            analyzer.close()
+        if prepared:
+            _cleanup_temp_paths(prepared.get('cleanup_files'), prepared.get('cleanup_dirs'))
+
+
 # 气候监测相关视图
 class ClimateDataFileViewSet(viewsets.ModelViewSet):
     """气候数据文件视图集"""
@@ -1659,6 +2434,11 @@ class ClimateDataFileViewSet(viewsets.ModelViewSet):
     serializer_class = ClimateDataFileSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     permission_classes = [permissions.AllowAny]
+
+    def get_permissions(self):
+        if _allow_anonymous_analysis_uploads():
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
     
     def get_serializer_class(self):
         """根据操作选择序列化器"""
@@ -2164,8 +2944,10 @@ class BusinessLayerViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.AllowAny]
 
     def get_permissions(self):
-        public_actions = {'list', 'retrieve', 'logs', 'create', 'publish', 'unpublish', 'destroy', 'style'}
+        public_actions = {'list', 'retrieve'}
         if self.action in public_actions:
+            return [permissions.AllowAny()]
+        if _allow_anonymous_business_layer_admin():
             return [permissions.AllowAny()]
         return [permissions.IsAuthenticated()]
 
@@ -2595,6 +3377,11 @@ class EcologicalIndexFileViewSet(viewsets.ModelViewSet):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     permission_classes = [AllowAny]
 
+    def get_permissions(self):
+        if _allow_anonymous_overlay_admin():
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
+
     def get_serializer_class(self):
         if self.action == 'create':
             return EcologicalIndexFileUploadSerializer
@@ -2629,6 +3416,11 @@ class EcologicalProjectFileViewSet(viewsets.ModelViewSet):
     serializer_class = EcologicalProjectFileSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     permission_classes = [AllowAny]
+
+    def get_permissions(self):
+        if _allow_anonymous_overlay_admin():
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -2669,6 +3461,14 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]
     parser_classes = [MultiPartParser, FormParser, JSONParser]  # 支持文件上传
 
+    def get_permissions(self):
+        public_actions = {'list', 'retrieve', 'risk_statistics', 'available_rsei_sources', 'uploaded_layer_metadata'}
+        if self.action in public_actions:
+            return [permissions.AllowAny()]
+        if _allow_anonymous_overlay_admin():
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
+
     def get_serializer_class(self):
         if self.action == 'create':
             return OverlayAnalysisTaskCreateSerializer
@@ -2693,36 +3493,133 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
             # 不要重新抛出异常，让DRF正常返回创建成功的响应
             # 前端可以通过轮询任务状态来获取失败信息
 
+    @action(detail=False, methods=['get'], url_path='uploaded-layer-metadata')
+    def uploaded_layer_metadata(self, request):
+        """获取叠加分析上传图层的描述元数据"""
+        configs = _get_overlay_layer_configs()
+        metadata = _load_overlay_metadata()
+        payload = {}
+        for layer_type, config in configs.items():
+            layer_meta = metadata.get(layer_type, {})
+            payload[layer_type] = {
+                'label': config['label'],
+                'layer_name': layer_meta.get('layer_name') or config['layer_name'],
+                'file_name': layer_meta.get('file_name') or '',
+                'description': layer_meta.get('description') or '',
+                'updated_at': layer_meta.get('updated_at'),
+                'source_type': layer_meta.get('source_type') or '',
+                'source_image_id': layer_meta.get('source_image_id') or '',
+                'source_image_name': layer_meta.get('source_image_name') or '',
+                'source_result_id': layer_meta.get('source_result_id') or '',
+                'source_result_created_at': layer_meta.get('source_result_created_at'),
+                'published': any(os.path.exists(path) for path in config['paths']),
+            }
+
+        return Response({
+            'success': True,
+            'data': payload,
+        })
+
+    @action(detail=False, methods=['post'], url_path='sync-latest-rsei')
+    def sync_latest_rsei(self, request):
+        """将最新或指定影像的RSEI结果同步为叠加分析生态图层"""
+        remote_sensing_image_id = request.data.get('remote_sensing_image_id') or request.query_params.get('remote_sensing_image_id')
+        result = _sync_latest_rsei_to_overlay(remote_sensing_image_id=remote_sensing_image_id)
+        status_code = 200 if result.get('success') or result.get('reason') == 'no_rsei_result' else 400
+        return Response(result, status=status_code)
+
+    @action(detail=False, methods=['get'], url_path='available-rsei-sources')
+    def available_rsei_sources(self, request):
+        """获取可用于叠加分析的RSEI结果来源列表"""
+        return Response({
+            'success': True,
+            'data': _list_available_rsei_sources()
+        })
+
+    @action(detail=False, methods=['delete'], url_path='clear-rsei-cache')
+    def clear_rsei_cache(self, request):
+        """清理叠加分析可选的系统生成 RSEI 缓存和当前生态栅格挂接。"""
+        ecology_config = _get_overlay_layer_configs()['ecology']
+        removed_paths = []
+
+        try:
+            from .geoserver_config import geoserver_manager
+            geoserver_manager.delete_coveragestore(ecology_config['store'], recurse=True)
+        except Exception as exc:
+            logger.warning(f"清理RSEI缓存时删除GeoServer生态图层失败: {exc}")
+
+        for path in ecology_config['paths']:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+                    removed_paths.append(path)
+            except Exception as exc:
+                logger.warning(f"清理RSEI缓存时删除叠加生态栅格失败 {path}: {exc}")
+
+        generated_description = '通过遥感生态指数分析页面生成的 RSEI 结果源影像'
+        generated_images = list(RemoteSensingImage.objects.filter(description=generated_description))
+        media_root = os.path.abspath(str(settings.MEDIA_ROOT))
+        cleanup_paths = []
+        cleanup_dirs = []
+
+        for image in generated_images:
+            try:
+                if image.file_path:
+                    cleanup_paths.append(image.file_path.path)
+            except Exception:
+                pass
+            try:
+                if image.thumbnail:
+                    cleanup_paths.append(image.thumbnail.path)
+            except Exception:
+                pass
+            cleanup_dirs.append(os.path.join(settings.MEDIA_ROOT, 'ecological_indices', str(image.id)))
+
+        deleted_sources = len(generated_images)
+        if generated_images:
+            RemoteSensingImage.objects.filter(id__in=[image.id for image in generated_images]).delete()
+
+        def is_under_media(path):
+            try:
+                abs_path = os.path.abspath(str(path))
+                return os.path.commonpath([media_root, abs_path]) == media_root
+            except Exception:
+                return False
+
+        for path in cleanup_paths:
+            if not path or not is_under_media(path):
+                continue
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+                    removed_paths.append(path)
+            except Exception as exc:
+                logger.warning(f"清理RSEI缓存文件失败 {path}: {exc}")
+
+        for path in cleanup_dirs:
+            if not path or not is_under_media(path):
+                continue
+            try:
+                if os.path.isdir(path):
+                    remove_tree(path)
+                    removed_paths.append(path)
+            except Exception as exc:
+                logger.warning(f"清理RSEI缓存目录失败 {path}: {exc}")
+
+        _clear_overlay_metadata('ecology')
+
+        return Response({
+            'success': True,
+            'message': 'RSEI缓存已清除',
+            'deleted_sources': deleted_sources,
+            'removed_paths': removed_paths,
+        })
+
     @action(detail=False, methods=['delete'], url_path='delete-uploaded-layer')
     def delete_uploaded_layer(self, request):
         """删除叠加分析中已上传并发布的固定业务图层"""
         layer_type = request.query_params.get('data_type') or request.data.get('data_type')
-        layer_configs = {
-            'ecology': {
-                'label': '生态指数栅格',
-                'store': 'ecology_raster',
-                'kind': 'raster',
-                'paths': [
-                    os.path.join(settings.MEDIA_ROOT, 'ecological_projects', 'ecology_raster.tif'),
-                ],
-            },
-            'economy': {
-                'label': '经济数据矢量',
-                'store': 'economy_vector_store',
-                'kind': 'vector',
-                'paths': [
-                    os.path.join(settings.MEDIA_ROOT, 'ecological_projects', 'economy_vector'),
-                ],
-            },
-            'engineering': {
-                'label': '工程项目矢量',
-                'store': 'engineering_vector_store',
-                'kind': 'vector',
-                'paths': [
-                    os.path.join(settings.MEDIA_ROOT, 'ecological_projects', 'engineering_vector'),
-                ],
-            },
-        }
+        layer_configs = _get_overlay_layer_configs()
 
         if layer_type not in layer_configs:
             return Response({
@@ -2753,6 +3650,8 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                     removed_paths.append(path)
             except Exception as exc:
                 logger.warning(f"删除本地文件失败 {path}: {exc}")
+
+        _clear_overlay_metadata(layer_type)
 
         return Response({
             'success': geoserver_success,
@@ -3212,6 +4111,7 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
             
             uploaded_file = request.FILES['file']
             file_name = uploaded_file.name
+            description = (request.data.get('description') or '').strip()
             logger.info(f"接收到文件: {file_name}, 大小: {uploaded_file.size} bytes")
             
             # 验证文件类型
@@ -3256,17 +4156,26 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                 success = geoserver_manager.publish_raster(
                     coverage_store_name='ecology_raster',
                     layer_name='ecology_raster',
-                    file_path=save_path
+                    file_path=save_path,
+                    style_type='ecology_rsei'
                 )
                 logger.info(f"publish_raster返回值: {success}")
                 
                 if success:
                     logger.info("✅ GeoServer发布成功")
+                    metadata = _update_overlay_metadata(
+                        'ecology',
+                        description=description,
+                        file_name=file_name,
+                        layer_name='ecology_raster',
+                    )
                     return Response({
                         'success': True,
                         'message': '生态指数栅格上传成功并已发布到GeoServer',
                         'file_name': file_name,
-                        'layer_name': 'ecology_raster'
+                        'layer_name': 'ecology_raster',
+                        'description': description,
+                        'metadata': metadata,
                     })
                 else:
                     logger.warning("⚠️ GeoServer发布失败")
@@ -3316,6 +4225,7 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
             
             uploaded_file = request.FILES['file']
             file_name = uploaded_file.name
+            description = (request.data.get('description') or '').strip()
             
             # 验证文件类型
             if not file_name.lower().endswith('.zip'):
@@ -3354,33 +4264,39 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                     logger.info("✅ 成功发布到GeoServer")
                     
                     # 2. 读取矢量数据统计信息并生成样式
+                    style_field_name = None
+                    style_field_label = '经济指标'
                     try:
-                        min_val, max_val, mean_val = geoserver_manager._get_vector_statistics(shp_path, 'GDP')
-                        
-                        if min_val is not None and max_val is not None:
-                            logger.info(f"GDP统计信息: min={min_val}, max={max_val}, mean={mean_val}")
-                            
-                            # 根据数据分布生成样式
+                        style_field_name, style_field_label = _detect_economy_style_field(shp_path, encoding=encoding)
+                        if style_field_name:
+                            min_val, max_val, mean_val = geoserver_manager._get_vector_statistics(shp_path, style_field_name)
+                        else:
+                            min_val, max_val, mean_val = (None, None, None)
+
+                        if style_field_name and min_val is not None and max_val is not None:
+                            logger.info(
+                                f"{style_field_label}字段统计信息({style_field_name}): "
+                                f"min={min_val}, max={max_val}, mean={mean_val}"
+                            )
+
                             style_name = 'economy_vector'
                             sld_content = geoserver_manager._create_vector_sld_by_attribute(
-                                field_name='GDP',
+                                field_name=style_field_name,
                                 min_val=min_val,
                                 max_val=max_val,
-                                color_scheme='default'  # 黄-橙-红配色
+                                color_scheme='default'
                             )
-                            
-                            # 删除旧样式（如果存在）
+
                             try:
                                 geoserver_manager.delete_style(style_name)
-                            except:
+                            except Exception:
                                 pass
-                            
-                            # 创建并应用新样式
+
                             if geoserver_manager.create_style(style_name, sld_content):
                                 geoserver_manager.apply_style_to_layer('economy_vector', style_name)
-                                logger.info(f"✅ 经济矢量样式已自动生成并应用")
+                                logger.info(f"✅ 经济矢量样式已自动生成并应用，分级字段: {style_field_name}")
                         else:
-                            logger.warning("无法读取GDP统计信息，使用默认样式")
+                            logger.warning("无法识别可用的经济分级字段，使用默认样式")
                     except Exception as e:
                         logger.warning(f"生成矢量样式失败: {e}，使用默认样式")
                 else:
@@ -3392,12 +4308,22 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
             
             # 返回结果
             if publish_success:
+                metadata = _update_overlay_metadata(
+                    'economy',
+                    description=description,
+                    file_name=file_name,
+                    layer_name='economy_vector',
+                )
                 return Response({
                     'success': True,
                     'message': '经济数据矢量上传并发布成功！',
                     'file_name': file_name,
                     'shp_path': shp_path,
-                    'layer_name': 'economy_vector'
+                    'layer_name': 'economy_vector',
+                    'style_field_name': style_field_name,
+                    'style_field_label': style_field_label,
+                    'description': description,
+                    'metadata': metadata,
                 })
             else:
                 return Response({
@@ -3429,6 +4355,7 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
             
             uploaded_file = request.FILES['file']
             file_name = uploaded_file.name
+            description = (request.data.get('description') or '').strip()
             
             # 验证文件类型
             if not file_name.lower().endswith('.zip'):
@@ -3505,12 +4432,20 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
             
             # 返回结果
             if publish_success:
+                metadata = _update_overlay_metadata(
+                    'engineering',
+                    description=description,
+                    file_name=file_name,
+                    layer_name='engineering_vector',
+                )
                 return Response({
                     'success': True,
                     'message': '工程项目矢量上传并发布成功！',
                     'file_name': file_name,
                     'shp_path': shp_path,
-                    'layer_name': 'engineering_vector'
+                    'layer_name': 'engineering_vector',
+                    'description': description,
+                    'metadata': metadata,
                 })
             else:
                 return Response({

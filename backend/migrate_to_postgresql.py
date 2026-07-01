@@ -12,6 +12,7 @@ import os
 import sys
 import django
 import json
+import secrets
 from pathlib import Path
 
 # 添加项目路径
@@ -156,6 +157,7 @@ def create_env_file():
     db_password = input("数据库密码: ").strip()
     db_host = input("数据库主机 [localhost]: ").strip() or "localhost"
     db_port = input("数据库端口 [5432]: ").strip() or "5432"
+    secret_key = secrets.token_urlsafe(50)
     
     env_content = f"""# PostgreSQL 配置
 DB_ENGINE=postgresql
@@ -166,13 +168,13 @@ DB_HOST={db_host}
 DB_PORT={db_port}
 
 # Django 配置
-SECRET_KEY=django-insecure-@jmeepv1459j^#n1nfu@87jcfkcp_ia@jip2)m=k#h7n6@89lw
-DEBUG=True
+SECRET_KEY={secret_key}
+DEBUG=False
 
 # GeoServer 配置
 GEOSERVER_URL=http://localhost:8080/geoserver
 GEOSERVER_USERNAME=admin
-GEOSERVER_PASSWORD=geoserver
+GEOSERVER_PASSWORD=change_me
 GEOSERVER_WORKSPACE=tianshuipy
 """
     

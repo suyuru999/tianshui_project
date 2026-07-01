@@ -210,7 +210,7 @@ def calculate_ecological_indices(self, image_id, indices_list, task_id=None):
         
         logger.info(f"基础指数计算完成，成功计算 {len(calculated_indices)} 个指数")
         
-        # 如果计算了RSEI所需的四个分量，则计算RSEI
+        # 如果计算了标准RSEI所需的四个分量，则计算RSEI
         rsei_components = ['greenness', 'wetness', 'dryness', 'heat']
         if all(comp in calculated_indices for comp in rsei_components):
             try:
@@ -295,11 +295,12 @@ def calculate_ecological_indices(self, image_id, indices_list, task_id=None):
                             logger.error(f"创建RSEI指数记录失败: {rsei_index_error}")
                 else:
                     logger.warning("RSEI计算失败")
-                
             except Exception as e:
                 logger.error(f"计算RSEI时出错: {e}")
                 import traceback
                 traceback.print_exc()
+        elif 'rsei' in indices_list:
+            logger.warning("已请求RSEI，但当前影像未成功生成标准RSEI所需的四个基础分量")
         
         # 更新遥感影像状态
         try:

@@ -72,6 +72,7 @@
           <button 
             class="index-btn"
             :class="{ active: localIndex === 'heat' }"
+            :disabled="disabledIndices.includes('heat')"
             @click="onIndexChange('heat')"
           >
             <span class="btn-text">热度指数 (LST)</span>
@@ -80,6 +81,7 @@
           <button 
             class="index-btn"
             :class="{ active: localIndex === 'ndvi' }"
+            :disabled="disabledIndices.includes('ndvi')"
             @click="onIndexChange('ndvi')"
           >
             <span class="btn-text">绿化指数 (NDVI)</span>
@@ -88,6 +90,7 @@
           <button 
             class="index-btn"
             :class="{ active: localIndex === 'ndwi' }"
+            :disabled="disabledIndices.includes('ndwi')"
             @click="onIndexChange('ndwi')"
           >
             <span class="btn-text">湿度指数 (NDWI)</span>
@@ -96,6 +99,7 @@
           <button 
             class="index-btn"
             :class="{ active: localIndex === 'dryness' }"
+            :disabled="disabledIndices.includes('dryness')"
             @click="onIndexChange('dryness')"
           >
             <span class="btn-text">干度指数 (NDBSI)</span>
@@ -104,6 +108,7 @@
           <button
             class="index-btn"
             :class="{ active: localIndex === 'rsei' }"
+            :disabled="disabledIndices.includes('rsei')"
             @click="onIndexChange('rsei')"
           >
             <span class="btn-text">遥感生态指数 (RSEI)</span>
@@ -138,11 +143,15 @@ const props = defineProps({
   selectedIndex: String,
   fileName: String,
   uploading: Boolean,
-  hasCachedResult: Boolean
+  hasCachedResult: Boolean,
+  disabledIndices: {
+    type: Array,
+    default: () => []
+  }
 });
 const emit = defineEmits(['file-change', 'start-analysis', 'index-change', 'clear-cache']);
 
-const localIndex = ref(props.selectedIndex || 'ndvi');
+const localIndex = ref(props.selectedIndex || 'rsei');
 watch(() => props.selectedIndex, (val) => {
   localIndex.value = val;
 });
@@ -161,6 +170,9 @@ function handleFileChange(event) {
 }
 
 function onIndexChange(val) {
+  if (props.disabledIndices.includes(val)) {
+    return;
+  }
   emit('index-change', val);
 }
 </script>

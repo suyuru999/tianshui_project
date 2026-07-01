@@ -409,24 +409,11 @@ export default {
       globalLoading.value = true
       try {
         const file = fileList.value[0]
-        const structureFormData = new FormData()
-        structureFormData.append('landuse_file', file)
+        const formData = new FormData()
+        formData.append('landuse_file', file)
         
-        // 计算生态环境结构指数
-        ElMessage.info('正在计算生态环境结构指数...')
-        const structureResponse = await http.post(buildApiUrl(API_ENDPOINTS.ECOLOGICAL_INDICES.STRUCTURE_INDICES), structureFormData, {
-          headers: {
-            'Content-Type': 'multipart/form-data'
-          },
-          skipAuth: true
-        })
-
-        const stressFormData = new FormData()
-        stressFormData.append('landuse_file', file)
-        
-        // 计算生态环境胁迫指数
-        ElMessage.info('正在计算生态环境胁迫指数...')
-        const stressResponse = await http.post(buildApiUrl(API_ENDPOINTS.ECOLOGICAL_INDICES.STRESS_INDICES), stressFormData, {
+        ElMessage.info('正在计算生态环境指数...')
+        const analysisResponse = await http.post(buildApiUrl(API_ENDPOINTS.ECOLOGICAL_INDICES.LANDUSE_INDICES), formData, {
           headers: {
             'Content-Type': 'multipart/form-data'
           },
@@ -434,13 +421,13 @@ export default {
         })
         
         // 处理结果
-        if (structureResponse.summary && stressResponse.summary) {
+        if (analysisResponse.summary) {
           // 合并所有指数结果
-          Object.assign(indexResults, structureResponse.summary, stressResponse.summary)
-          const visualization = structureResponse.visualization || stressResponse.visualization
+          Object.assign(indexResults, analysisResponse.summary)
+          const visualization = analysisResponse.visualization
           landuseVisualizationUrl.value = visualization?.visualization_file_url || ''
           landuseStatistics.value = visualization?.landuse_statistics || null
-          analysisMeta.value = structureResponse.meta || stressResponse.meta || null
+          analysisMeta.value = analysisResponse.meta || null
           
           // 更新指数状态
           const allIndices = [...structureIndices, ...stressIndices]

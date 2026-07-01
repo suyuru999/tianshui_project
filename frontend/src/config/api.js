@@ -68,6 +68,8 @@ export const API_ENDPOINTS = {
     DETAIL: (id) => `/environment/ecological-indices/${id}/`,
     CALCULATE: '/environment/ecological-indices/calculate/',
     RSEI_CALCULATE: '/environment/rsei-results/calculate/',
+    // 土地利用综合指数计算
+    LANDUSE_INDICES: '/environment/ecological-landuse-indices/',
     // 新增：生态环境结构指数计算
     STRUCTURE_INDICES: '/environment/ecological-structure-indices/',
     // 新增：生态环境胁迫指数计算
@@ -122,7 +124,11 @@ export const API_ENDPOINTS = {
     UPLOAD_ECOLOGY_RASTER: '/environment/overlay-analysis-tasks/upload-ecology-raster/',
     UPLOAD_ECONOMY_VECTOR: '/environment/overlay-analysis-tasks/upload-economy-vector/',
     UPLOAD_ENGINEERING_VECTOR: '/environment/overlay-analysis-tasks/upload-engineering-vector/',
-    DELETE_UPLOADED_LAYER: '/environment/overlay-analysis-tasks/delete-uploaded-layer/'
+    SYNC_LATEST_RSEI: '/environment/overlay-analysis-tasks/sync-latest-rsei/',
+    AVAILABLE_RSEI_SOURCES: '/environment/overlay-analysis-tasks/available-rsei-sources/',
+    CLEAR_RSEI_CACHE: '/environment/overlay-analysis-tasks/clear-rsei-cache/',
+    DELETE_UPLOADED_LAYER: '/environment/overlay-analysis-tasks/delete-uploaded-layer/',
+    UPLOADED_LAYER_METADATA: '/environment/overlay-analysis-tasks/uploaded-layer-metadata/'
   }
 }
 

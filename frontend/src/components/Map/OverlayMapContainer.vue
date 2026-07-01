@@ -65,6 +65,13 @@ let ecologyRasterLayer = null
 let economyVectorLayer = null
 let engineeringVectorLayer = null
 
+const hasFeatureProperties = (item) => {
+  if (!item) return false
+  if (Array.isArray(item)) return item.length > 0
+  if (typeof item === 'object') return Object.keys(item).length > 0
+  return false
+}
+
 // 坐标显示
 const coordinates = reactive({ lng: '105.7000', lat: '34.6000' })
 
@@ -76,6 +83,83 @@ const popup = reactive({
   economyData: null,
   engineeringData: []
 })
+
+const ECOLOGY_LEVEL_CONFIG = [
+  { code: 'excellent', label: '优秀', shortLabel: '优', riskCode: 'low-risk' },
+  { code: 'good', label: '良好', shortLabel: '良', riskCode: 'low-risk' },
+  { code: 'moderate', label: '中等', shortLabel: '中', riskCode: 'medium-risk' },
+  { code: 'poor', label: '较差', shortLabel: '低', riskCode: 'medium-risk' },
+  { code: 'bad', label: '差', shortLabel: '差', riskCode: 'high-risk' }
+]
+
+const ECOLOGY_CLASS_CODE_MAP = {
+  0: ECOLOGY_LEVEL_CONFIG[4],
+  1: ECOLOGY_LEVEL_CONFIG[4],
+  2: ECOLOGY_LEVEL_CONFIG[3],
+  3: ECOLOGY_LEVEL_CONFIG[2],
+  4: ECOLOGY_LEVEL_CONFIG[1],
+  5: ECOLOGY_LEVEL_CONFIG[0]
+}
+
+const parseFiniteNumber = (value) => {
+  if (value === null || value === undefined || value === '') {
+    return null
+  }
+
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const getEcologyClassification = (rawValue, sourceField = '') => {
+  if (!Number.isFinite(rawValue)) {
+    return null
+  }
+
+  const normalizedField = String(sourceField || '').toUpperCase()
+  const isIntegerLike = Math.abs(rawValue - Math.round(rawValue)) < 1e-6
+
+  if (isIntegerLike) {
+    const classInfo = ECOLOGY_CLASS_CODE_MAP[Math.round(rawValue)]
+    const looksLikeGradeField =
+      normalizedField.includes('GRAY_INDEX') ||
+      normalizedField.includes('CLASS') ||
+      normalizedField.includes('GRADE') ||
+      normalizedField.includes('LEVEL')
+
+    if (classInfo && (looksLikeGradeField || rawValue > 1)) {
+      return {
+        ...classInfo,
+        rawValue,
+        displayValue: Math.round(rawValue),
+        displayValueText: String(Math.round(rawValue)),
+        sourceMode: 'classified',
+        normalizedValue: null,
+        isHighRisk: classInfo.code === 'bad'
+      }
+    }
+  }
+
+  let normalizedValue = rawValue
+  if (rawValue > 1 && rawValue <= 100) {
+    normalizedValue = rawValue / 100
+  }
+
+  let classInfo = ECOLOGY_LEVEL_CONFIG[4]
+  if (normalizedValue >= 0.8) classInfo = ECOLOGY_LEVEL_CONFIG[0]
+  else if (normalizedValue >= 0.6) classInfo = ECOLOGY_LEVEL_CONFIG[1]
+  else if (normalizedValue >= 0.4) classInfo = ECOLOGY_LEVEL_CONFIG[2]
+  else if (normalizedValue >= 0.2) classInfo = ECOLOGY_LEVEL_CONFIG[3]
+
+  return {
+    ...classInfo,
+    rawValue,
+    displayValue: normalizedValue,
+    displayValueText: normalizedValue.toFixed(3),
+    sourceMode: 'continuous',
+    normalizedValue,
+    isHighRisk: classInfo.code === 'bad'
+  }
+}
 
 // 监听图层可见性变化
 watch(() => props.layerVisibility, (newVal) => {
@@ -293,7 +377,16 @@ const handleMapClick = async (event) => {
       console.log('🏗️ 工程数据:', popup.engineeringData)
         }
         
-        // 显示弹窗
+    const shouldOpenPopup =
+      hasFeatureProperties(popup.ecologyData) ||
+      hasFeatureProperties(popup.economyData) ||
+      hasFeatureProperties(popup.engineeringData)
+
+    if (!shouldOpenPopup) {
+      console.log('ℹ️ 当前点击位置未命中任何业务图层')
+      return
+    }
+
     popup.visible = true
     console.log('✅ 弹窗已打开')
         
@@ -312,37 +405,44 @@ const parseEcologyData = (data) => {
       const feature = data.features[0]
       const properties = feature.properties || {}
       
-      // 查找栅格值（可能在不同字段中）
-      let value = null
-    const possibleFields = ['GRAY_INDEX', 'Band1', 'value', 'pixel_value']
+    // 查找栅格值（优先识别RSEI结果或已分级后的编码值）
+    let value = null
+    let sourceField = null
+    const possibleFields = ['RSEI', 'rsei', 'RESI', 'resi', 'GRAY_INDEX', 'Band1', 'value', 'pixel_value']
     
     for (const field of possibleFields) {
-      if (properties[field] !== undefined && properties[field] !== null) {
-        value = parseFloat(properties[field])
-            break
-          }
-        }
+      const parsedValue = parseFiniteNumber(properties[field])
+      if (parsedValue !== null) {
+        value = parsedValue
+        sourceField = field
+        break
+      }
+    }
     
     if (value === null) {
       return null
-      }
-      
-    // 判断等级（假设栅格值范围是0-1，或者50-1000）
-        let normalizedValue = value
-        if (value >= 50 && value <= 1000) {
-      normalizedValue = (value - 50) / 950 // 归一化到0-1
-        }
-        
-    let level = '较差'
-        if (normalizedValue >= 0.6) level = '优秀'
-        else if (normalizedValue >= 0.4) level = '良好'
-        else if (normalizedValue >= 0.2) level = '中等'
-        
-        return {
-          value: value,
-          normalizedValue: normalizedValue,
-          level: level
-        }
+    }
+
+    const classification = getEcologyClassification(value, sourceField)
+    if (!classification) {
+      return null
+    }
+
+    return {
+      value,
+      sourceField,
+      level: classification.label,
+      levelCode: classification.code,
+      shortLevel: classification.shortLabel,
+      riskCode: classification.riskCode,
+      isHighRisk: classification.isHighRisk,
+      sourceMode: classification.sourceMode,
+      normalizedValue: classification.normalizedValue,
+      displayValue: classification.displayValue,
+      displayValueText: classification.displayValueText,
+      valueLabel: classification.sourceMode === 'classified' ? '分级编码' : 'RSEI值',
+      rawProperties: properties
+    }
   } catch (error) {
     console.error('解析生态数据失败:', error)
     return null
@@ -362,6 +462,81 @@ const parseEconomyData = (data) => {
     // 调试：打印所有属性
     console.log('💰 经济数据原始属性:', properties)
     console.log('💰 所有属性键:', Object.keys(properties))
+
+    const normalizeFieldName = (fieldName) => String(fieldName || '')
+      .replace(/[\s_\-（）()\[\]{}【】.:：/\\]+/g, '')
+      .toLowerCase()
+
+    const fieldEntries = Object.keys(properties).map((key) => ({
+      key,
+      normalized: normalizeFieldName(key)
+    }))
+
+    const extractYear = (fieldName) => {
+      const matches = String(fieldName || '').match(/(?:19|20)\d{2}/g)
+      if (!matches || !matches.length) return null
+      return Number.parseInt(matches[matches.length - 1], 10)
+    }
+
+    const parseNumberValue = (...keys) => {
+      for (const key of keys) {
+        const value = properties[key]
+        if (value !== null && value !== undefined && value !== '') {
+          const parsed = Number.parseFloat(value)
+          if (!Number.isNaN(parsed)) {
+            return parsed
+          }
+        }
+      }
+      return null
+    }
+
+    const findNumericFieldValue = (aliases = [], keywords = [], options = {}) => {
+      const { preferredYear = null, excludedKeywords = [] } = options
+      const normalizedAliases = aliases.map((item) => normalizeFieldName(item))
+      const normalizedKeywords = keywords.map((item) => normalizeFieldName(item))
+      const normalizedExcluded = excludedKeywords.map((item) => normalizeFieldName(item))
+      let bestMatch = null
+
+      for (const entry of fieldEntries) {
+        const value = properties[entry.key]
+        if (value === null || value === undefined || value === '') continue
+        const parsed = Number.parseFloat(value)
+        if (Number.isNaN(parsed)) continue
+        if (normalizedExcluded.some((keyword) => keyword && entry.normalized.includes(keyword))) continue
+
+        let score = 0
+        if (normalizedAliases.includes(entry.normalized)) {
+          score += 120
+        }
+        normalizedAliases.forEach((alias) => {
+          if (alias && entry.normalized.includes(alias)) {
+            score += 80
+          }
+        })
+        normalizedKeywords.forEach((keyword) => {
+          if (keyword && entry.normalized.includes(keyword)) {
+            score += 35
+          }
+        })
+
+        const year = extractYear(entry.key)
+        if (preferredYear && year === preferredYear) {
+          score += 60
+        } else if (preferredYear && year) {
+          score -= Math.abs(preferredYear - year)
+        } else if (year) {
+          score += Math.max(0, year - 2000)
+        }
+
+        if (score <= 0) continue
+        if (!bestMatch || score > bestMatch.score) {
+          bestMatch = { key: entry.key, value: parsed, score }
+        }
+      }
+
+      return bestMatch
+    }
     
     // 辅助函数：安全获取字符串值（处理空字符串、null、undefined、占位符）
     const getStringValue = (...keys) => {
@@ -387,12 +562,108 @@ const parseEconomyData = (data) => {
       }
       return null // 返回null，让前端组件处理
     }
+
+    const findStringFieldValue = (aliases = [], keywords = []) => {
+      const normalizedAliases = aliases.map((item) => normalizeFieldName(item))
+      const normalizedKeywords = keywords.map((item) => normalizeFieldName(item))
+      let bestMatch = null
+
+      for (const entry of fieldEntries) {
+        const rawValue = properties[entry.key]
+        if (rawValue === null || rawValue === undefined) continue
+        const value = String(rawValue).trim()
+        if (!value || /^\?+$/.test(value)) continue
+        if (['null', 'undefined', 'N/A', 'NA', '-', 'none', 'None', 'NONE'].includes(value)) continue
+
+        let score = 0
+        if (normalizedAliases.includes(entry.normalized)) {
+          score += 120
+        }
+        normalizedAliases.forEach((alias) => {
+          if (alias && entry.normalized.includes(alias)) {
+            score += 80
+          }
+        })
+        normalizedKeywords.forEach((keyword) => {
+          if (keyword && entry.normalized.includes(keyword)) {
+            score += 35
+          }
+        })
+        if (score <= 0) continue
+        if (!bestMatch || score > bestMatch.score) {
+          bestMatch = { value, score }
+        }
+      }
+
+      return bestMatch?.value || null
+    }
+
+    const pop2015 = parseNumberValue('2015_POP', 'POP_2015', 'pop_2015')
+    const pop2020 = parseNumberValue('2020_POP', 'POP_2020', 'pop_2020')
+    const pop2023 = parseNumberValue('2023_POP', 'POP_2023', 'pop_2023')
+    const gdp2015 = parseNumberValue('2015_GDP', 'GDP_2015', 'gdp_2015')
+    const gdp2020 = parseNumberValue('2020_GDP', 'GDP_2020', 'gdp_2020')
+    const gdp2023 = parseNumberValue('2023_GDP', 'GDP_2023', 'gdp_2023')
+
+    const gdpField2023 = findNumericFieldValue(
+      ['2023_GDP', 'GDP_2023'],
+      ['gdp', '生产总值', '地区生产总值', '经济总量', '总产值', '产值'],
+      { preferredYear: 2023, excludedKeywords: ['pop', '人口', 'area', '面积'] }
+    )
+    const gdpField2020 = findNumericFieldValue(
+      ['2020_GDP', 'GDP_2020'],
+      ['gdp', '生产总值', '地区生产总值', '经济总量', '总产值', '产值'],
+      { preferredYear: 2020, excludedKeywords: ['pop', '人口', 'area', '面积'] }
+    )
+    const gdpField2015 = findNumericFieldValue(
+      ['2015_GDP', 'GDP_2015'],
+      ['gdp', '生产总值', '地区生产总值', '经济总量', '总产值', '产值'],
+      { preferredYear: 2015, excludedKeywords: ['pop', '人口', 'area', '面积'] }
+    )
+    const popField2023 = findNumericFieldValue(
+      ['2023_POP', 'POP_2023'],
+      ['pop', 'population', '人口', '常住人口'],
+      { preferredYear: 2023, excludedKeywords: ['gdp', '产值', '收入', 'area', '面积'] }
+    )
+    const popField2020 = findNumericFieldValue(
+      ['2020_POP', 'POP_2020'],
+      ['pop', 'population', '人口', '常住人口'],
+      { preferredYear: 2020, excludedKeywords: ['gdp', '产值', '收入', 'area', '面积'] }
+    )
+    const popField2015 = findNumericFieldValue(
+      ['2015_POP', 'POP_2015'],
+      ['pop', 'population', '人口', '常住人口'],
+      { preferredYear: 2015, excludedKeywords: ['gdp', '产值', '收入', 'area', '面积'] }
+    )
+
+    const latestGDP = gdp2023 ?? gdpField2023?.value ?? gdp2020 ?? gdpField2020?.value ?? gdp2015 ?? gdpField2015?.value ?? parseNumberValue('GDP', 'gdp', 'Gdp')
+    const latestPOP = pop2023 ?? popField2023?.value ?? pop2020 ?? popField2020?.value ?? pop2015 ?? popField2015?.value ?? parseNumberValue('POP', 'pop', 'Pop')
+    const areaValue = parseNumberValue('area_km2', 'AREA_KM2', 'area__k2', 'AREA__K2', 'area', 'AREA')
+      ?? findNumericFieldValue(
+        ['area_km2', 'AREA_KM2'],
+        ['area', '面积', 'km2', '平方公里'],
+        { excludedKeywords: ['gdp', 'pop', '人口', '产值'] }
+      )?.value
     
     return {
-      admin_name: getStringValue('admin_name', 'ADMIN_NAME', 'name', 'NAME', 'region_name', 'REGION_NAME'),
-      GDP: parseFloat(properties.GDP || properties.gdp || properties.Gdp || 0),
-      POP: parseInt(properties.POP || properties.pop || properties.Pop || 0),
-      area_km2: parseFloat(properties.area_km2 || properties.AREA_KM2 || properties.area || properties.AREA || 0)
+      admin_name: getStringValue('admin_name', 'ADMIN_NAME', 'name', 'NAME', 'Name', 'region_name', 'REGION_NAME')
+        ?? findStringFieldValue(['admin_name', 'name', 'region_name'], ['名称', '行政区', '区域', '乡镇', '街道']),
+      layer_name: getStringValue('layer', 'LAYER')
+        ?? findStringFieldValue(['layer'], ['图层', '类型']),
+      code: getStringValue('code', 'CODE')
+        ?? findStringFieldValue(['code'], ['编码', '代码', '区划']),
+      grade: getStringValue('grade', 'GRADE')
+        ?? findStringFieldValue(['grade'], ['等级']),
+      GDP: latestGDP,
+      POP: latestPOP,
+      GDP_2015: gdp2015 ?? gdpField2015?.value ?? null,
+      GDP_2020: gdp2020 ?? gdpField2020?.value ?? null,
+      GDP_2023: gdp2023 ?? gdpField2023?.value ?? null,
+      POP_2015: pop2015 ?? popField2015?.value ?? null,
+      POP_2020: pop2020 ?? popField2020?.value ?? null,
+      POP_2023: pop2023 ?? popField2023?.value ?? null,
+      area_km2: areaValue,
+      rawProperties: properties
     }
   } catch (error) {
     console.error('解析经济数据失败:', error)
@@ -431,6 +702,19 @@ const parseEngineeringData = (data) => {
       }
       return null // 返回null，让前端组件处理
     }
+
+    const parseNumberValue = (properties, ...keys) => {
+      for (const key of keys) {
+        const value = properties[key]
+        if (value !== null && value !== undefined && value !== '') {
+          const parsed = Number.parseFloat(value)
+          if (!Number.isNaN(parsed)) {
+            return parsed
+          }
+        }
+      }
+      return null
+    }
     
     return data.features.map((feature, index) => {
       const properties = feature.properties || {}
@@ -442,12 +726,33 @@ const parseEngineeringData = (data) => {
       }
       
       return {
-        proj_name: getStringValue(properties, 'proj_name', 'PROJ_NAME', 'name', 'NAME', 'project_name', 'PROJECT_NAME'),
-        proj_type: getStringValue(properties, 'proj_type', 'PROJ_TYPE', 'type', 'TYPE', 'project_type', 'PROJECT_TYPE'),
+        proj_name: getStringValue(
+          properties,
+          'proj_name', 'PROJ_NAME',
+          'project_name', 'PROJECT_NAME',
+          'name', 'NAME',
+          '地名'
+        ),
+        proj_segment: getStringValue(
+          properties,
+          'proj_segment', 'PROJ_SEGMENT',
+          'project_segment', 'PROJECT_SEGMENT',
+          'segment', 'SEGMENT',
+          '项目段'
+        ),
+        proj_type: getStringValue(
+          properties,
+          'proj_type', 'PROJ_TYPE',
+          'project_type', 'PROJECT_TYPE',
+          'type', 'TYPE',
+          'category', 'CATEGORY',
+          '项目类'
+        ),
         status: getStringValue(properties, 'status', 'STATUS', 'state', 'STATE'),
         start_date: getStringValue(properties, 'start_date', 'START_DATE', 'start_time', 'START_TIME', 'begin_date', 'BEGIN_DATE') || '',
         end_date: getStringValue(properties, 'end_date', 'END_DATE', 'end_time', 'END_TIME', 'finish_date', 'FINISH_DATE') || '',
-        area_km2: parseFloat(properties.area_km2 || properties.AREA_KM2 || properties.area || properties.AREA || 0)
+        area_km2: parseNumberValue(properties, 'area_km2', 'AREA_KM2', 'area', 'AREA'),
+        rawProperties: properties
       }
     })
   } catch (error) {

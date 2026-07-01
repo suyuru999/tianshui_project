@@ -16,6 +16,7 @@
           :file-name="fileName"
           :uploading="uploading"
           :has-cached-result="!!getCachedResult(currentImageId, selectedIndex)"
+          :disabled-indices="disabledIndices"
           @file-change="handleFileChange"
           @start-analysis="handleStartAnalysis"
           @index-change="handleIndexChange"
@@ -76,12 +77,14 @@ import { remoteSensingService } from '../services/api.js';
 import { useLoadingStore } from '../store/loading.js';
 import { useMessageStore } from '../store/message.js';
 
+const OVERLAY_RSEI_REFRESH_KEY = 'overlay_rsei_refresh_signal';
+
 // 状态管理
 const loadingStore = useLoadingStore();
 const messageStore = useMessageStore();
 
 // 组件状态
-const selectedIndex = ref('ndvi');
+const selectedIndex = ref('rsei');
 const fileName = ref('');
 const uploading = ref(false);
 const status = ref('waiting'); // waiting | analyzing | done | error
@@ -115,12 +118,24 @@ const backendIndexMap = {
 };
 const fourBandSupportedIndices = ['ndvi', 'ndwi'];
 
+const disabledIndices = computed(() => {
+  if (!currentFile.value?.name) {
+    return []
+  }
+
+  const lowerName = currentFile.value.name.toLowerCase()
+  if (lowerName.includes('4band') || /gf\d.*pms/.test(lowerName)) {
+    return ['heat', 'dryness', 'rsei']
+  }
+
+  return []
+})
+
 // 计算属性
 const globalLoading = computed(() => loadingStore.globalLoading);
 
 // 组件挂载时检查用户登录状态
 onMounted(() => {
-  checkAuthStatus();
   loadCacheFromStorage();
   
   // 调试信息
@@ -134,8 +149,19 @@ onMounted(() => {
 // 检查认证状态
 function checkAuthStatus() {
   const token = localStorage.getItem('access_token');
-  if (!token) {
-    messageStore.warning('当前未登录，系统将以匿名方式提交分析任务');
+  return !!token;
+}
+
+function notifyOverlayRSEIUpdate(payload = {}) {
+  try {
+    localStorage.setItem(OVERLAY_RSEI_REFRESH_KEY, JSON.stringify({
+      timestamp: Date.now(),
+      remote_sensing_image_id: payload.remote_sensing_image_id || '',
+      remote_sensing_image_name: payload.remote_sensing_image_name || '',
+      index_type: selectedIndex.value || '',
+    }));
+  } catch (error) {
+    console.warn('写入叠加分析刷新信号失败:', error);
   }
 }
 
@@ -648,7 +674,7 @@ function handleFileChange(file) {
     currentTaskId.value = null;
     analysisProgress.value = 0;
 
-    if (/4band/i.test(file.name) && !fourBandSupportedIndices.includes(selectedIndex.value)) {
+    if ((/4band/i.test(file.name) || /gf\d.*pms/i.test(file.name)) && !fourBandSupportedIndices.includes(selectedIndex.value)) {
       selectedIndex.value = 'ndvi';
       messageStore.info('检测到4波段影像，已切换为NDVI。热度/RSEI需要热红外或更多波段。');
     }
@@ -729,6 +755,19 @@ async function handleStartAnalysis() {
       throw new Error(`不支持的指数类型: ${selectedIndex.value}`);
     }
 
+    if ((/4band/i.test(currentFile.value?.name || '') || /gf\d.*pms/i.test(currentFile.value?.name || '')) && !fourBandSupportedIndices.includes(selectedIndex.value)) {
+      uploading.value = false;
+      status.value = 'waiting';
+      messageStore.warning('当前4波段影像仅支持 NDVI 和 NDWI，请先切换后再分析。');
+      return;
+    }
+
+    console.log('本次提交的实际指数类型:', {
+      selectedIndex: selectedIndex.value,
+      backendIndex,
+      fileName: currentFile.value?.name || ''
+    });
+
     startProgressSimulator();
     const analyzeResult = await remoteSensingService.analyzeUpload(currentFile.value, backendIndex, {
       name: fileName.value || '未命名影像'
@@ -739,12 +778,18 @@ async function handleStartAnalysis() {
     currentStep.value = '分析完成';
     stepDetail.value = '计算结果已生成';
     currentTaskId.value = analyzeResult?.result?.id || null;
-    currentImageId.value = `${fileName.value}_${backendIndex}`;
+    currentImageId.value = analyzeResult?.remote_sensing_image_id || `${fileName.value}_${backendIndex}`;
     resultData.value = {
       ...analyzeResult,
       remote_sensing_image_id: currentImageId.value
     };
     status.value = 'done';
+    if (backendIndex === 'rsei' && analyzeResult?.remote_sensing_image_id) {
+      notifyOverlayRSEIUpdate({
+        remote_sensing_image_id: analyzeResult.remote_sensing_image_id,
+        remote_sensing_image_name: analyzeResult.remote_sensing_image_name
+      });
+    }
     if (analyzeResult?.preview_message) {
       messageStore.warning(analyzeResult.preview_message);
     }
@@ -779,12 +824,9 @@ async function handleStartAnalysis() {
       if (data?.bands_count) {
         errorDetails = `${errorDetails} 当前影像识别到 ${data.bands_count} 个波段。`.trim();
       }
-      if (Array.isArray(data?.supported_indices) && data.supported_indices.includes('ndvi')) {
-        selectedIndex.value = 'ndvi';
-      } else if (Array.isArray(data?.supported_indices) && data.supported_indices.length > 0) {
-        selectedIndex.value = data.supported_indices[0];
+      if (selectedIndex.value === 'rsei' && data?.bands_count === 1) {
+        errorDetails = `${errorDetails} RSEI 需要原始多波段遥感影像，单波段成果栅格不会被系统作为可同步的 RSEI 结果保存。`.trim();
       }
-      
       console.log('错误响应详情:', { status: responseStatus, data });
     } else if (error.request) {
       // 请求已发出但没有收到响应

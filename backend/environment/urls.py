@@ -12,6 +12,7 @@ from .views import (
     EcologicalProjectFileViewSet,
     OverlayAnalysisTaskViewSet,
     analyze_remote_sensing_upload,
+    calculate_ecological_landuse_indices,
     calculate_ecological_structure_indices,
     calculate_ecological_stress_indices,
     upload_climate_data,
@@ -50,6 +51,7 @@ urlpatterns = [
     
     # 生态环境指数计算API
     path('remote-sensing/analyze-upload/', analyze_remote_sensing_upload, name='analyze_remote_sensing_upload'),
+    path('ecological-landuse-indices/', calculate_ecological_landuse_indices, name='calculate_ecological_landuse_indices'),
     path('ecological-structure-indices/', calculate_ecological_structure_indices, name='calculate_ecological_structure_indices'),
     path('ecological-stress-indices/', calculate_ecological_stress_indices, name='calculate_ecological_stress_indices'),
     

@@ -5,7 +5,8 @@ $backendDir = Join-Path $root 'backend'
 $frontendDir = Join-Path $root 'frontend'
 $backendScript = Join-Path $backendDir 'start_dev.ps1'
 $frontendScript = Join-Path $frontendDir 'start_dev.ps1'
-$backendCondaPython = 'C:\Users\74749\miniforge3\envs\tianshui-gis\python.exe'
+$userProfile = [Environment]::GetFolderPath('UserProfile')
+$backendCondaPython = Join-Path $userProfile 'miniforge3\envs\tianshui-gis\python.exe'
 
 if (-not (Test-Path $backendScript)) {
     throw "找不到后端启动脚本: $backendScript"
@@ -16,7 +17,7 @@ if (-not (Test-Path $frontendScript)) {
 }
 
 if (-not (Test-Path $backendCondaPython)) {
-    Write-Warning "未找到推荐的后端 GIS 环境: $backendCondaPython"
+    Write-Warning "未找到推荐的后端 GIS 环境: $backendCondaPython。可改用 backend\\.venv 或设置环境变量 TIANSHUI_PYTHON。"
 }
 
 $frontendPackage = Join-Path $frontendDir 'package.json'
