@@ -69,51 +69,20 @@
       <div class="index-group">
         <div class="group-title">生态指数类型</div>
         <div class="index-buttons">
-          <button 
-            class="index-btn"
-            :class="{ active: localIndex === 'heat' }"
-            :disabled="disabledIndices.includes('heat')"
-            @click="onIndexChange('heat')"
-          >
-            <span class="btn-text">热度指数 (LST)</span>
-            <el-tag v-if="hasCachedResult && localIndex === 'heat'" size="small" type="success" class="cache-tag">已缓存</el-tag>
-          </button>
-          <button 
-            class="index-btn"
-            :class="{ active: localIndex === 'ndvi' }"
-            :disabled="disabledIndices.includes('ndvi')"
-            @click="onIndexChange('ndvi')"
-          >
-            <span class="btn-text">绿化指数 (NDVI)</span>
-            <el-tag v-if="hasCachedResult && localIndex === 'ndvi'" size="small" type="success" class="cache-tag">已缓存</el-tag>
-          </button>
-          <button 
-            class="index-btn"
-            :class="{ active: localIndex === 'ndwi' }"
-            :disabled="disabledIndices.includes('ndwi')"
-            @click="onIndexChange('ndwi')"
-          >
-            <span class="btn-text">湿度指数 (NDWI)</span>
-            <el-tag v-if="hasCachedResult && localIndex === 'ndwi'" size="small" type="success" class="cache-tag">已缓存</el-tag>
-          </button>
-          <button 
-            class="index-btn"
-            :class="{ active: localIndex === 'dryness' }"
-            :disabled="disabledIndices.includes('dryness')"
-            @click="onIndexChange('dryness')"
-          >
-            <span class="btn-text">干度指数 (NDBSI)</span>
-            <el-tag v-if="hasCachedResult && localIndex === 'dryness'" size="small" type="success" class="cache-tag">已缓存</el-tag>
-          </button>
           <button
+            v-for="option in indexOptions"
+            :key="option.key"
             class="index-btn"
-            :class="{ active: localIndex === 'rsei' }"
-            :disabled="disabledIndices.includes('rsei')"
-            @click="onIndexChange('rsei')"
+            :class="{ active: localIndex === option.key }"
+            :disabled="disabledIndices.includes(option.key)"
+            @click="onIndexChange(option.key)"
           >
-            <span class="btn-text">遥感生态指数 (RSEI)</span>
-            <el-tag v-if="hasCachedResult && localIndex === 'rsei'" size="small" type="success" class="cache-tag">已缓存</el-tag>
+            <span class="btn-text">{{ option.label }}</span>
+            <el-tag v-if="cachedIndices.includes(option.key)" size="small" type="success" class="cache-tag">已缓存</el-tag>
           </button>
+        </div>
+        <div v-if="capabilitiesKnown" class="supported-hint">
+          {{ supportedIndexLabels.length > 0 ? `当前影像支持：${supportedIndexLabels.join('、')}` : '当前影像暂不支持多波段生态指数计算，请确认上传的是原始多波段遥感影像。' }}
         </div>
       </div>
     </div>
@@ -143,10 +112,25 @@ const props = defineProps({
   selectedIndex: String,
   fileName: String,
   uploading: Boolean,
-  hasCachedResult: Boolean,
+  indexOptions: {
+    type: Array,
+    default: () => []
+  },
+  cachedIndices: {
+    type: Array,
+    default: () => []
+  },
   disabledIndices: {
     type: Array,
     default: () => []
+  },
+  supportedIndexLabels: {
+    type: Array,
+    default: () => []
+  },
+  capabilitiesKnown: {
+    type: Boolean,
+    default: false
   }
 });
 const emit = defineEmits(['file-change', 'start-analysis', 'index-change', 'clear-cache']);
@@ -370,6 +354,17 @@ function onIndexChange(val) {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.supported-hint {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f6fbff;
+  border: 1px solid #d6e9f8;
+  color: #4b6580;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .index-btn {

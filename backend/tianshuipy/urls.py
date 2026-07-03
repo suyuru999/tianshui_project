@@ -16,21 +16,14 @@ Including another URLconf
 """
 
 from django.contrib import admin
-from django.urls import path, include, re_path
 from django.conf import settings
 from django.conf.urls.static import static
+from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.generic.base import RedirectView
 from django.views.static import serve
-import logging
-
-logger = logging.getLogger(__name__)
-
-try:
-    from rest_framework.documentation import include_docs_urls
-except Exception as exc:
-    include_docs_urls = None
-    logger.warning(f"REST framework docs 不可用，将跳过 /api/docs/ 路由: {exc}")
+from django.urls import path, include, re_path, reverse
+from rest_framework.schemas.openapi import SchemaGenerator
 
 def home_view(request):
     """首页视图 - 显示系统信息"""
@@ -40,25 +33,37 @@ def overlay_analysis_demo_view(request):
     """叠加分析演示页面"""
     return render(request, 'overlay_analysis_demo.html')
 
+
+def api_docs_view(request):
+    """API 文档首页"""
+    return render(request, 'api_docs.html', {
+        'schema_url': reverse('api-schema'),
+    })
+
+
+def api_schema_view(request):
+    """输出 OpenAPI schema JSON"""
+    generator = SchemaGenerator(
+        title='天水平台 API 文档',
+        description='天水平台后端接口的 OpenAPI 描述。',
+        url=request.build_absolute_uri('/'),
+    )
+    schema = generator.get_schema(request=request, public=True)
+    return JsonResponse(schema, json_dumps_params={'ensure_ascii': False})
+
 urlpatterns = [
     re_path(r"^media/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
     path("", home_view, name="home"),  # 根路径显示首页
     path("admin/", admin.site.urls),
     path("overlay-analysis-demo/", overlay_analysis_demo_view, name="overlay-analysis-demo"),  # 叠加分析演示页面
+    path("api/docs/", api_docs_view, name="api-docs"),
+    path("api/schema/", api_schema_view, name="api-schema"),
     path("api/v1/", include([
         path("users/", include('users.urls')),
         path("environment/", include('environment.urls')),
     ])),
     path("api/", RedirectView.as_view(url='/api/v1/', permanent=False)),
 ]
-
-if include_docs_urls is not None:
-    try:
-        urlpatterns.append(
-            path("api/docs/", include_docs_urls(title='天水平台 API 文档'), name="api-docs")
-        )
-    except Exception as exc:
-        logger.warning(f"REST framework docs 初始化失败，已跳过 /api/docs/ 路由: {exc}")
 
 # 开发环境下提供媒体文件服务
 if settings.DEBUG:

@@ -10,6 +10,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
+from .band_mapping import get_band_scale_offset, infer_standard_band_mapping
 
 
 SHAPEFILE_REQUIRED_EXTENSIONS = {'.shp', '.shx', '.dbf'}
@@ -193,34 +194,40 @@ def raster_band_statistics(path, band_index=1, include_classes=True):
 def preview_array(path, band_index=1, max_size=2000):
     with rasterio.open(path) as dataset:
         scale = max(1, int(np.ceil(max(dataset.width, dataset.height) / max_size)))
-        data = dataset.read(
+        return _read_scaled_band(
+            dataset,
             band_index,
             out_shape=(max(1, dataset.height // scale), max(1, dataset.width // scale)),
-            resampling=Resampling.bilinear
-        ).astype('float32')
-        if dataset.nodata is not None:
-            data[data == dataset.nodata] = np.nan
-        return data
+            resampling=Resampling.bilinear,
+        )
+
+
+def _read_scaled_band(dataset, band_index, window=None, out_shape=None, resampling=Resampling.bilinear):
+    raw_data = dataset.read(
+        band_index,
+        window=window,
+        out_shape=out_shape,
+        resampling=resampling,
+    )
+    data = raw_data.astype('float32')
+    nodata = dataset.nodata
+    if nodata is not None:
+        data[raw_data == nodata] = np.nan
+    scale, offset = get_band_scale_offset(dataset, band_index - 1, band_count=int(dataset.count))
+    return data * np.float32(scale) + np.float32(offset)
 
 
 def _remote_band_pair(dataset, index_type):
-    band_count = dataset.count
+    band_count = int(dataset.count)
+    mapping = infer_standard_band_mapping(dataset=dataset, band_count=band_count)
     if index_type == 'ndvi':
-        if band_count >= 8:
-            return 8, 4
-        if band_count >= 5:
-            return 5, 4
-        if band_count == 4:
-            return 4, 3
+        if mapping.get('nir') is not None and mapping.get('red') is not None:
+            return mapping['nir'] + 1, mapping['red'] + 1
         if band_count == 3:
             return 2, 1
     if index_type == 'ndwi':
-        if band_count >= 8:
-            return 3, 8
-        if band_count >= 5:
-            return 3, 5
-        if band_count == 4:
-            return 2, 4
+        if mapping.get('green') is not None and mapping.get('nir') is not None:
+            return mapping['green'] + 1, mapping['nir'] + 1
         if band_count == 3:
             return 2, 1
     raise ValueError(f'当前波段配置不支持 {index_type.upper()} 分块计算')
@@ -251,8 +258,8 @@ def calculate_normalized_index_windowed(input_path, output_path, index_type):
 
         with rasterio.open(output_path, 'w', **meta) as dst:
             for _, window in src.block_windows(1):
-                a = src.read(numerator_band, window=window).astype('float32')
-                b = src.read(denominator_band, window=window).astype('float32')
+                a = _read_scaled_band(src, numerator_band, window=window)
+                b = _read_scaled_band(src, denominator_band, window=window)
                 denominator = a + b
                 result = np.full(a.shape, np.nan, dtype='float32')
                 mask = denominator != 0
@@ -289,8 +296,8 @@ def calculate_normalized_index_preview_stats(input_path, index_type, max_preview
         max_value = None
 
         for _, window in src.block_windows(1):
-            a = src.read(numerator_band, window=window).astype('float32')
-            b = src.read(denominator_band, window=window).astype('float32')
+            a = _read_scaled_band(src, numerator_band, window=window)
+            b = _read_scaled_band(src, denominator_band, window=window)
             denominator = a + b
             result = np.full(a.shape, np.nan, dtype='float32')
             mask = denominator != 0
@@ -312,8 +319,8 @@ def calculate_normalized_index_preview_stats(input_path, index_type, max_preview
 
         scale = max(1, int(np.ceil(max(src.width, src.height) / max_preview_size)))
         out_shape = (max(1, src.height // scale), max(1, src.width // scale))
-        a_preview = src.read(numerator_band, out_shape=out_shape, resampling=Resampling.bilinear).astype('float32')
-        b_preview = src.read(denominator_band, out_shape=out_shape, resampling=Resampling.bilinear).astype('float32')
+        a_preview = _read_scaled_band(src, numerator_band, out_shape=out_shape, resampling=Resampling.bilinear)
+        b_preview = _read_scaled_band(src, denominator_band, out_shape=out_shape, resampling=Resampling.bilinear)
         denominator = a_preview + b_preview
         preview = np.full(a_preview.shape, np.nan, dtype='float32')
         mask = denominator != 0

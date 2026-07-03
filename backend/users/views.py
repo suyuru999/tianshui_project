@@ -46,18 +46,20 @@ class UserViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
     
     def get_queryset(self):
-        if _is_admin_user(self.request.user):
+        request_user = getattr(self.request, 'user', None)
+        if _is_admin_user(request_user):
             return User.objects.all().order_by('-date_joined')
-        if self.request.user.is_authenticated:
-            return User.objects.filter(id=self.request.user.id)
+        if getattr(request_user, 'is_authenticated', False):
+            return User.objects.filter(id=request_user.id)
         return User.objects.none()
 
     def get_serializer_class(self):
         """根据操作类型选择序列化器"""
+        request_user = getattr(self.request, 'user', None)
         if self.action == 'create':
             return UserCreateSerializer
         elif self.action in ['update', 'partial_update']:
-            if _is_admin_user(self.request.user):
+            if _is_admin_user(request_user):
                 return AdminUserUpdateSerializer
             return UserUpdateSerializer
         return UserSerializer

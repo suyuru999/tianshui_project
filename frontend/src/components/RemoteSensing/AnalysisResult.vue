@@ -171,6 +171,7 @@ const indexLabelMap = computed(() => ({
   ndvi: '绿化指数 (NDVI)',
   heat: '热度指数 (LST)',
   ndwi: '湿度指数 (NDWI)',
+  ndbi: '建筑指数 (NDBI)',
   dryness: '干度指数 (NDBSI)',
   wetness: '湿度指数',
   greenness: '绿度指数',

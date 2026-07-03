@@ -15,8 +15,11 @@
           :selected-index="selectedIndex"
           :file-name="fileName"
           :uploading="uploading"
-          :has-cached-result="!!getCachedResult(currentImageId, selectedIndex)"
+          :index-options="indexOptions"
+          :cached-indices="cachedIndices"
           :disabled-indices="disabledIndices"
+          :supported-index-labels="supportedIndexLabels"
+          :capabilities-known="capabilitiesKnown"
           @file-change="handleFileChange"
           @start-analysis="handleStartAnalysis"
           @index-change="handleIndexChange"
@@ -78,6 +81,17 @@ import { useLoadingStore } from '../store/loading.js';
 import { useMessageStore } from '../store/message.js';
 
 const OVERLAY_RSEI_REFRESH_KEY = 'overlay_rsei_refresh_signal';
+const INDEX_OPTIONS = [
+  { key: 'rsei', label: '遥感生态指数 (RSEI)' },
+  { key: 'ndvi', label: '绿化指数 (NDVI)' },
+  { key: 'greenness', label: '绿度指数' },
+  { key: 'ndwi', label: '湿度指数 (NDWI)' },
+  { key: 'wetness', label: '湿度指数 (Tasseled Cap)' },
+  { key: 'ndbi', label: '建筑指数 (NDBI)' },
+  { key: 'dryness', label: '干度指数 (NDBSI)' },
+  { key: 'heat', label: '热度指数 (LST)' }
+];
+const INDEX_LABEL_MAP = Object.fromEntries(INDEX_OPTIONS.map((item) => [item.key, item.label]));
 
 // 状态管理
 const loadingStore = useLoadingStore();
@@ -107,29 +121,49 @@ const analysisEta = ref('');
 const currentStep = ref('准备分析环境...');
 const stepDetail = ref('正在初始化分析参数');
 const isPaused = ref(false);
+const capabilitiesResolvedFromBackend = ref(false);
+const supportedIndicesFromBackend = ref([]);
+const supportedIndexLabelsFromBackend = ref([]);
 const backendIndexMap = {
   ndvi: 'ndvi',
   ndwi: 'ndwi',
+  ndbi: 'ndbi',
   heat: 'heat',
   dryness: 'dryness',
   wetness: 'wetness',
   greenness: 'greenness',
   rsei: 'rsei'
 };
-const fourBandSupportedIndices = ['ndvi', 'ndwi'];
+const indexOptions = INDEX_OPTIONS;
+const allIndexKeys = INDEX_OPTIONS.map((item) => item.key);
+const capabilitiesKnown = computed(() => capabilitiesResolvedFromBackend.value);
+const supportedIndexLabels = computed(() => {
+  if (supportedIndexLabelsFromBackend.value.length > 0) {
+    return supportedIndexLabelsFromBackend.value;
+  }
+  return supportedIndicesFromBackend.value.map((key) => INDEX_LABEL_MAP[key] || key.toUpperCase());
+});
 
 const disabledIndices = computed(() => {
-  if (!currentFile.value?.name) {
-    return []
+  if (!capabilitiesKnown.value) {
+    return [];
   }
 
-  const lowerName = currentFile.value.name.toLowerCase()
-  if (lowerName.includes('4band') || /gf\d.*pms/.test(lowerName)) {
-    return ['heat', 'dryness', 'rsei']
+  const supported = new Set(supportedIndicesFromBackend.value);
+  return allIndexKeys.filter((key) => !supported.has(key));
+});
+
+const cachedIndices = computed(() => {
+  if (!currentImageId.value) {
+    return [];
   }
 
-  return []
-})
+  const now = Date.now();
+  return allIndexKeys.filter((key) => {
+    const cached = analysisResultsCache.value.get(`${currentImageId.value}_${key}`);
+    return cached && now - cached.timestamp <= 24 * 60 * 60 * 1000;
+  });
+});
 
 // 计算属性
 const globalLoading = computed(() => loadingStore.globalLoading);
@@ -163,6 +197,42 @@ function notifyOverlayRSEIUpdate(payload = {}) {
   } catch (error) {
     console.warn('写入叠加分析刷新信号失败:', error);
   }
+}
+
+function resetRemoteCapabilities() {
+  capabilitiesResolvedFromBackend.value = false;
+  supportedIndicesFromBackend.value = [];
+  supportedIndexLabelsFromBackend.value = [];
+}
+
+function normalizeSupportedIndices(payload) {
+  const rawIndices = payload?.supported_indices ?? payload?.source?.supported_indices ?? [];
+  if (!Array.isArray(rawIndices)) {
+    return [];
+  }
+
+  return [...new Set(
+    rawIndices
+      .map((item) => String(item || '').toLowerCase().trim())
+      .filter((item) => allIndexKeys.includes(item))
+  )];
+}
+
+function syncRemoteCapabilities(payload) {
+  const hasIndices = Array.isArray(payload?.supported_indices) || Array.isArray(payload?.source?.supported_indices);
+  const hasLabels = Array.isArray(payload?.supported_index_labels) || Array.isArray(payload?.source?.supported_index_labels);
+  const normalizedIndices = normalizeSupportedIndices(payload);
+  capabilitiesResolvedFromBackend.value = hasIndices || hasLabels;
+  supportedIndicesFromBackend.value = normalizedIndices;
+
+  const rawLabels = payload?.supported_index_labels ?? payload?.source?.supported_index_labels;
+  if (Array.isArray(rawLabels) && rawLabels.length > 0) {
+    supportedIndexLabelsFromBackend.value = rawLabels;
+    return normalizedIndices;
+  }
+
+  supportedIndexLabelsFromBackend.value = normalizedIndices.map((key) => INDEX_LABEL_MAP[key] || key.toUpperCase());
+  return normalizedIndices;
 }
 
 // 缓存管理函数
@@ -669,15 +739,13 @@ function handleFileChange(file) {
     
     currentFile.value = file;
     fileName.value = file.name;
+    currentImageId.value = null;
     status.value = 'waiting';
     resultData.value = null;
     currentTaskId.value = null;
     analysisProgress.value = 0;
+    resetRemoteCapabilities();
 
-    if ((/4band/i.test(file.name) || /gf\d.*pms/i.test(file.name)) && !fourBandSupportedIndices.includes(selectedIndex.value)) {
-      selectedIndex.value = 'ndvi';
-      messageStore.info('检测到4波段影像，已切换为NDVI。热度/RSEI需要热红外或更多波段。');
-    }
     messageStore.success('文件选择成功');
   }
 }
@@ -686,6 +754,16 @@ function handleFileChange(file) {
 async function handleStartAnalysis() {
   if (!currentFile.value) {
     messageStore.error('请先选择文件');
+    return;
+  }
+
+  if (capabilitiesKnown.value && disabledIndices.value.includes(selectedIndex.value)) {
+    const supportedText = supportedIndexLabels.value.join('、');
+    messageStore.warning(
+      supportedText
+        ? `当前影像不支持 ${INDEX_LABEL_MAP[selectedIndex.value] || selectedIndex.value}，请改选：${supportedText}`
+        : '当前影像不支持所选指数，请切换后重试'
+    );
     return;
   }
   
@@ -755,13 +833,6 @@ async function handleStartAnalysis() {
       throw new Error(`不支持的指数类型: ${selectedIndex.value}`);
     }
 
-    if ((/4band/i.test(currentFile.value?.name || '') || /gf\d.*pms/i.test(currentFile.value?.name || '')) && !fourBandSupportedIndices.includes(selectedIndex.value)) {
-      uploading.value = false;
-      status.value = 'waiting';
-      messageStore.warning('当前4波段影像仅支持 NDVI 和 NDWI，请先切换后再分析。');
-      return;
-    }
-
     console.log('本次提交的实际指数类型:', {
       selectedIndex: selectedIndex.value,
       backendIndex,
@@ -779,9 +850,12 @@ async function handleStartAnalysis() {
     stepDetail.value = '计算结果已生成';
     currentTaskId.value = analyzeResult?.result?.id || null;
     currentImageId.value = analyzeResult?.remote_sensing_image_id || `${fileName.value}_${backendIndex}`;
+    const normalizedSupportedIndices = syncRemoteCapabilities(analyzeResult);
     resultData.value = {
       ...analyzeResult,
-      remote_sensing_image_id: currentImageId.value
+      remote_sensing_image_id: currentImageId.value,
+      supported_indices: normalizedSupportedIndices,
+      supported_index_labels: supportedIndexLabels.value,
     };
     status.value = 'done';
     if (backendIndex === 'rsei' && analyzeResult?.remote_sensing_image_id) {
@@ -809,6 +883,7 @@ async function handleStartAnalysis() {
     if (error.response) {
       // 服务器响应了错误状态码
       const { status: responseStatus, data } = error.response;
+      syncRemoteCapabilities(data);
       errorMessage = `服务器错误 (${responseStatus})`;
       
       if (data && data.error) {
@@ -844,8 +919,8 @@ async function handleStartAnalysis() {
       error: errorMessage,
       details: errorDetails,
       bands_count: error.response?.data?.bands_count,
-      supported_indices: error.response?.data?.supported_indices,
-      supported_index_labels: error.response?.data?.supported_index_labels,
+      supported_indices: supportedIndicesFromBackend.value,
+      supported_index_labels: supportedIndexLabels.value,
     };
     
     // 显示错误消息

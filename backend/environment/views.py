@@ -68,6 +68,14 @@ from .serializers import (
 )
 from .tasks import calculate_ecological_indices, calculate_rsei_only
 from .ecological_indices import EcologicalIndexCalculator
+from .band_mapping import (
+    get_band_scale_offset,
+    get_tasseled_cap_coefficients,
+    infer_rgb_bands,
+    infer_standard_band_mapping,
+    supported_remote_indices as infer_supported_remote_indices,
+    thermal_band_is_calibrated,
+)
 from .raster_processing import (
     calculate_normalized_index_windowed,
     calculate_normalized_index_preview_stats,
@@ -726,26 +734,15 @@ REMOTE_INDEX_LABELS = {
 }
 
 
-def _supported_remote_indices(band_count):
-    if band_count is None:
-        return sorted([*REMOTE_INDEX_METHODS.keys(), 'rsei'])
-    if band_count == 1:
-        return ['uploaded_raster']
-    if band_count >= 7:
-        return sorted([*REMOTE_INDEX_METHODS.keys(), 'rsei'])
-    if band_count == 6:
-        return sorted([*REMOTE_INDEX_METHODS.keys()])
-    if band_count == 5:
-        return ['ndvi', 'ndwi']
-    if band_count == 4:
-        return ['ndvi', 'ndwi']
-    if band_count == 3:
-        return ['ndvi', 'ndwi', 'ndbi']
-    return []
+def _supported_remote_indices(band_count=None, dataset=None, band_mapping=None):
+    if band_count is None and dataset is not None:
+        band_count = int(getattr(dataset, 'count', 0) or 0)
+    mapping = band_mapping or infer_standard_band_mapping(dataset=dataset, band_count=band_count)
+    return infer_supported_remote_indices(mapping=mapping, band_count=band_count, dataset=dataset)
 
 
-def _unsupported_remote_index_response(index_type, band_count):
-    supported_indices = _supported_remote_indices(band_count)
+def _unsupported_remote_index_response(index_type, band_count, band_mapping=None, dataset=None):
+    supported_indices = infer_supported_remote_indices(mapping=band_mapping, band_count=band_count, dataset=dataset)
     requested_label = REMOTE_INDEX_LABELS.get(index_type, index_type.upper())
     supported_labels = [
         REMOTE_INDEX_LABELS.get(item, item.upper())
@@ -753,13 +750,47 @@ def _unsupported_remote_index_response(index_type, band_count):
         if item != 'uploaded_raster'
     ]
 
-    if band_count == 4:
+    if index_type == 'rsei' and band_mapping and band_mapping.get('thermal') is None:
+        detail = (
+            f'当前影像为{band_count}波段，但缺少热红外/LST波段，不支持{requested_label}。'
+            '标准RSEI除了绿度、湿度、干度，还必须有热度分量。'
+        )
+    elif index_type == 'rsei' and band_mapping and not get_tasseled_cap_coefficients(band_mapping.get('profile')):
+        detail = (
+            f'当前影像已识别出常用反射波段，但暂缺该传感器的标准湿度系数，不支持{requested_label}。'
+            '如果要做严谨的RSEI，请为该传感器补充对应的Tasseled Cap / 湿度模型参数。'
+        )
+    elif index_type == 'rsei' and band_mapping and band_mapping.get('thermal') is not None and dataset is not None and not thermal_band_is_calibrated(mapping=band_mapping, dataset=dataset):
+        detail = (
+            f'当前影像包含热红外波段，但缺少可靠的温度量纲信息，不支持{requested_label}。'
+            '请上传带有LST/温度scale-offset的标准产品，或先完成温度反演。'
+        )
+    elif index_type == 'wetness' and band_mapping and band_mapping.get('swir2') is None:
+        detail = (
+            f'当前影像为{band_count}波段，但缺少SWIR2波段，不支持{requested_label}。'
+            'Tasseled Cap湿度分量需要 Blue/Green/Red/NIR/SWIR1/SWIR2 六个语义波段。'
+        )
+    elif index_type == 'wetness' and band_mapping and band_mapping.get('swir2') is not None and not get_tasseled_cap_coefficients(band_mapping.get('profile')):
+        detail = (
+            f'当前影像具备计算{requested_label}所需波段，但暂缺该传感器的标准湿度系数。'
+            '请补充对应传感器系数后再计算，避免把其他卫星的系数直接套用到当前数据。'
+        )
+    elif index_type == 'heat' and band_mapping and band_mapping.get('thermal') is None:
+        detail = (
+            f'当前影像为{band_count}波段，但缺少热红外/LST波段，不支持{requested_label}。'
+        )
+    elif index_type == 'heat' and band_mapping and band_mapping.get('thermal') is not None and dataset is not None and not thermal_band_is_calibrated(mapping=band_mapping, dataset=dataset):
+        detail = (
+            f'当前影像包含热红外波段，但缺少可靠的温度量纲信息，不支持{requested_label}。'
+            '请使用带温度scale/offset或LST单位的标准热红外产品。'
+        )
+    elif band_count == 4:
         detail = (
             f'当前影像为4波段，不支持{requested_label}。'
             '这类GF/PMS四波段影像通常可计算NDVI或NDWI；'
             '热度指数、干度指数和RSEI需要包含短波红外/热红外等更多有效波段的数据。'
         )
-    elif band_count == 6 and index_type == 'rsei':
+    elif index_type == 'rsei' and band_count == 6:
         detail = (
             f'当前影像为6波段反射波段数据，不支持{requested_label}。'
             '标准RSEI除绿度、湿度、干度外，还需要热度（LST/热红外）分量；'
@@ -1296,22 +1327,33 @@ def _remote_preview_scale(width, height):
 
 
 def _preview_multiband_index(raster_path, index_type):
+    def read_scaled_band(dataset, band_index, out_height, out_width):
+        raw_data = dataset.read(
+            band_index,
+            out_shape=(out_height, out_width),
+            resampling=rasterio.enums.Resampling.bilinear,
+        )
+        band_data = raw_data.astype('float32')
+        nodata_value = dataset.nodata
+        if nodata_value is not None:
+            band_data[raw_data == nodata_value] = np.nan
+        scale_value, offset_value = get_band_scale_offset(dataset, band_index - 1, band_count=int(dataset.count))
+        return band_data * np.float32(scale_value) + np.float32(offset_value)
+
     with rasterio.open(raster_path) as dataset:
         band_count = int(dataset.count)
+        mapping = infer_standard_band_mapping(dataset=dataset, band_count=band_count)
         scale = _remote_preview_scale(dataset.width, dataset.height)
         out_height = max(1, dataset.height // scale)
         out_width = max(1, dataset.width // scale)
 
         if index_type == 'ndbi':
-            if band_count >= 11:
-                swir_band = dataset.read(11, out_shape=(out_height, out_width), resampling=rasterio.enums.Resampling.bilinear).astype('float32')
-                nir_band = dataset.read(8, out_shape=(out_height, out_width), resampling=rasterio.enums.Resampling.bilinear).astype('float32')
-            elif band_count >= 6:
-                swir_band = dataset.read(6, out_shape=(out_height, out_width), resampling=rasterio.enums.Resampling.bilinear).astype('float32')
-                nir_band = dataset.read(5, out_shape=(out_height, out_width), resampling=rasterio.enums.Resampling.bilinear).astype('float32')
+            if mapping.get('swir1') is not None and mapping.get('nir') is not None:
+                swir_band = read_scaled_band(dataset, mapping['swir1'] + 1, out_height, out_width)
+                nir_band = read_scaled_band(dataset, mapping['nir'] + 1, out_height, out_width)
             elif band_count == 3:
-                swir_band = dataset.read(3, out_shape=(out_height, out_width), resampling=rasterio.enums.Resampling.bilinear).astype('float32')
-                nir_band = dataset.read(1, out_shape=(out_height, out_width), resampling=rasterio.enums.Resampling.bilinear).astype('float32')
+                swir_band = read_scaled_band(dataset, 3, out_height, out_width)
+                nir_band = read_scaled_band(dataset, 1, out_height, out_width)
             else:
                 raise ValueError(f'当前波段配置不支持 {index_type.upper()} 预览计算')
             denominator = swir_band + nir_band
@@ -1319,20 +1361,27 @@ def _preview_multiband_index(raster_path, index_type):
             valid_mask = denominator != 0
             index_data[valid_mask] = (swir_band[valid_mask] - nir_band[valid_mask]) / denominator[valid_mask]
         else:
-            numerator_band, denominator_band = {
-                'ndvi': (8, 4) if band_count >= 8 else (5, 4) if band_count >= 5 else (4, 3) if band_count == 4 else (2, 1),
-                'ndwi': (3, 8) if band_count >= 8 else (3, 5) if band_count >= 5 else (2, 4) if band_count == 4 else (2, 1),
-            }[index_type]
-            numerator = dataset.read(numerator_band, out_shape=(out_height, out_width), resampling=rasterio.enums.Resampling.bilinear).astype('float32')
-            denominator = dataset.read(denominator_band, out_shape=(out_height, out_width), resampling=rasterio.enums.Resampling.bilinear).astype('float32')
-            base = numerator + denominator
+            if index_type == 'ndvi':
+                if mapping.get('nir') is not None and mapping.get('red') is not None:
+                    numerator_band, denominator_band = mapping['nir'] + 1, mapping['red'] + 1
+                elif band_count == 3:
+                    numerator_band, denominator_band = 2, 1
+                else:
+                    raise ValueError(f'当前波段配置不支持 {index_type.upper()} 预览计算')
+            else:
+                if mapping.get('green') is not None and mapping.get('nir') is not None:
+                    numerator_band, denominator_band = mapping['green'] + 1, mapping['nir'] + 1
+                elif band_count == 3:
+                    numerator_band, denominator_band = 2, 1
+                else:
+                    raise ValueError(f'当前波段配置不支持 {index_type.upper()} 预览计算')
+            numerator = read_scaled_band(dataset, numerator_band, out_height, out_width)
+            denominator_band_data = read_scaled_band(dataset, denominator_band, out_height, out_width)
+            base = numerator + denominator_band_data
             index_data = np.full_like(numerator, np.nan, dtype=np.float32)
             valid_mask = base != 0
-            index_data[valid_mask] = (numerator[valid_mask] - denominator[valid_mask]) / base[valid_mask]
+            index_data[valid_mask] = (numerator[valid_mask] - denominator_band_data[valid_mask]) / base[valid_mask]
 
-        nodata = dataset.nodata
-        if nodata is not None:
-            index_data[index_data == nodata] = np.nan
         return np.clip(index_data, -1.0, 1.0)
 
 
@@ -1572,34 +1621,9 @@ def _infer_raster_rgb_bands(dataset):
     band_count = int(getattr(dataset, 'count', 0) or 0)
     if band_count < 3:
         return None
-
-    colorinterp = [str(item).lower() for item in getattr(dataset, 'colorinterp', ()) or ()]
-    if colorinterp:
-        rgb_mapping = {}
-        for index, name in enumerate(colorinterp, start=1):
-            if 'red' in name:
-                rgb_mapping['red_band'] = index
-            elif 'green' in name:
-                rgb_mapping['green_band'] = index
-            elif 'blue' in name:
-                rgb_mapping['blue_band'] = index
-        if len(rgb_mapping) == 3:
-            return rgb_mapping
-
-    descriptions = [((desc or '').strip().lower()) for desc in (getattr(dataset, 'descriptions', None) or ())]
-    if descriptions:
-        rgb_mapping = {}
-        for index, desc in enumerate(descriptions, start=1):
-            if desc in {'r', 'red', 'band_r', 'band_red'} or 'red' in desc:
-                rgb_mapping['red_band'] = index
-            elif desc in {'g', 'green', 'band_g', 'band_green'} or 'green' in desc:
-                rgb_mapping['green_band'] = index
-            elif desc in {'b', 'blue', 'band_b', 'band_blue'} or 'blue' in desc:
-                rgb_mapping['blue_band'] = index
-        if len(rgb_mapping) == 3:
-            return rgb_mapping
-
-    # 常见遥感多光谱影像通常按 B,G,R,(NIR) 存储，默认回退为 3,2,1 真彩色。
+    rgb_mapping = infer_rgb_bands(dataset=dataset)
+    if rgb_mapping:
+        return rgb_mapping
     return {'red_band': 3, 'green_band': 2, 'blue_band': 1}
 
 
@@ -2138,13 +2162,20 @@ def analyze_remote_sensing_upload(request):
         if extension in ['.tif', '.tiff']:
             with rasterio.open(raster_abs) as probe_dataset:
                 band_count = int(probe_dataset.count)
+                probe_mapping = infer_standard_band_mapping(dataset=probe_dataset, band_count=band_count)
                 preview_mode = _should_use_remote_preview(probe_dataset)
+                supported_indices = _supported_remote_indices(
+                    band_count=band_count,
+                    dataset=probe_dataset,
+                    band_mapping=probe_mapping,
+                )
         else:
             band_count = None
+            probe_mapping = None
+            supported_indices = _supported_remote_indices(band_count=band_count, band_mapping=probe_mapping)
         results = []
-        supported_indices = _supported_remote_indices(band_count)
         if index_type not in supported_indices and band_count != 1:
-            return _unsupported_remote_index_response(index_type, band_count)
+            return _unsupported_remote_index_response(index_type, band_count, probe_mapping)
         if preview_mode and band_count and band_count > 1 and index_type not in ['ndvi', 'ndwi', 'ndbi']:
             return Response({
                 'error': '当前影像尺寸过大，已为稳定性限制为预览模式。超大影像暂仅支持 NDVI、NDWI、NDBI 预览分析；如需计算热度、干度、湿度、绿度或 RSEI，请先裁剪研究区域后再上传。',
@@ -2183,10 +2214,11 @@ def analyze_remote_sensing_upload(request):
             if not calculator.load_image():
                 return Response({'error': '影像加载失败，请检查文件格式、波段数或坐标信息'}, status=400)
             band_count = int(calculator.bands.shape[0])
+            active_mapping = calculator._get_sensor_band_mapping()
             if index_type == 'rsei':
                 rsei_result = calculator.calculate_rsei()
                 if not rsei_result:
-                    return _unsupported_remote_index_response(index_type, band_count)
+                    return _unsupported_remote_index_response(index_type, band_count, active_mapping, calculator.dataset)
                 index_data = rsei_result['rsei']
                 stats = calculator.calculate_statistics(index_data)
                 label = 'RSEI'
@@ -2201,7 +2233,7 @@ def analyze_remote_sensing_upload(request):
                 label, method_name = method_info
                 index_data = getattr(calculator, method_name)()
                 if index_data is None:
-                    return _unsupported_remote_index_response(index_type, band_count)
+                    return _unsupported_remote_index_response(index_type, band_count, active_mapping, calculator.dataset)
                 stats = calculator.calculate_statistics(index_data)
                 index_result_type = index_type
             if preview_mode:
@@ -2299,15 +2331,20 @@ def analyze_remote_sensing_upload(request):
                 visualization_rel=result_png_rel,
             ))
 
+        supported_labels = [REMOTE_INDEX_LABELS.get(item, item.upper()) for item in supported_indices]
+
         return Response({
             'message': '分析完成',
             'preview_mode': preview_mode,
             'preview_message': preview_message,
+            'supported_indices': supported_indices,
+            'supported_index_labels': supported_labels,
             'source': {
                 'filename': uploaded_file.name,
                 'uploaded_file_url': _media_url(request, upload_rel),
                 'bands_count': band_count,
-                'supported_indices': _supported_remote_indices(band_count),
+                'supported_indices': supported_indices,
+                'supported_index_labels': supported_labels,
             },
             'remote_sensing_image_id': persisted_remote_sensing_image_id,
             'remote_sensing_image_name': persisted_remote_sensing_image_name,
@@ -2953,7 +2990,8 @@ class BusinessLayerViewSet(viewsets.ModelViewSet):
 
     def get_serializer_class(self):
         if self.action == 'create':
-            if self.request.data.get('service_url'):
+            request_data = getattr(self.request, 'data', None)
+            if request_data and request_data.get('service_url'):
                 return BusinessLayerServiceSerializer
             return BusinessLayerUploadSerializer
         return BusinessLayerSerializer

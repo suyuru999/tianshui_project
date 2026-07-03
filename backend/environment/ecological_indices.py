@@ -19,6 +19,15 @@ import pandas as pd
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 import logging
+from .band_mapping import (
+    get_band_descriptions,
+    get_band_scale_offset,
+    get_tasseled_cap_coefficients,
+    infer_standard_band_mapping,
+    thermal_band_is_calibrated,
+    thermal_conversion_parameters,
+    uses_approximate_tasseled_cap,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +46,8 @@ class EcologicalIndexCalculator:
         self.dataset = None
         self.bands = None
         self.metadata = None
+        self._sensor_band_mapping = None
+        self._scaled_band_cache = {}
         
     def load_image(self):
         """加载遥感影像"""
@@ -56,6 +67,8 @@ class EcologicalIndexCalculator:
                 # rasterio成功，正常读取
                 self.bands = self.dataset.read()
                 self.metadata = self.dataset.meta
+                self._sensor_band_mapping = None
+                self._scaled_band_cache = {}
                 
                 # 安全检查数组形状
                 if self.bands is not None and hasattr(self.bands, 'shape') and len(self.bands.shape) >= 3:
@@ -88,6 +101,8 @@ class EcologicalIndexCalculator:
                             'crs': None,
                             'transform': None
                         }
+                        self._sensor_band_mapping = None
+                        self._scaled_band_cache = {}
                         logger.info(f"PIL加载成功，转置后波段数: {self.bands.shape[0]}, 形状: {self.bands.shape}")
                     else:
                         logger.error(f"PIL图像不是3D数组，形状: {pil_array.shape}")
@@ -139,15 +154,10 @@ class EcologicalIndexCalculator:
 
     def _normalized_band_descriptions(self):
         """返回标准化后的波段描述到0基索引的映射。"""
-        if self.dataset is None:
-            return {}
-
-        descriptions = getattr(self.dataset, 'descriptions', None) or []
+        descriptions = get_band_descriptions(self.dataset)
         mapping = {}
         for index, description in enumerate(descriptions):
-            if not description:
-                continue
-            normalized = str(description).strip().upper()
+            normalized = str(description or '').strip().upper()
             if normalized:
                 mapping[normalized] = index
         return mapping
@@ -157,102 +167,28 @@ class EcologicalIndexCalculator:
         if self.bands is None or not hasattr(self.bands, 'shape') or len(self.bands.shape) < 3:
             return None
 
-        band_count = int(self.bands.shape[0])
-        description_mapping = self._normalized_band_descriptions()
+        if self._sensor_band_mapping is None:
+            self._sensor_band_mapping = infer_standard_band_mapping(
+                dataset=self.dataset,
+                band_count=int(self.bands.shape[0]),
+            )
+            if self._sensor_band_mapping:
+                logger.info(f"识别到波段映射: {self._sensor_band_mapping}")
+        return self._sensor_band_mapping
 
-        # Landsat Collection 2 Level-2 SR/ST 产品，带有明确波段描述
-        if all(
-            band_name in description_mapping
-            for band_name in ['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7']
-        ):
-            return {
-                'profile': 'landsat_c2_l2_st' if 'ST_B10' in description_mapping else 'landsat_c2_l2_sr',
-                'blue': description_mapping['SR_B2'],
-                'green': description_mapping['SR_B3'],
-                'red': description_mapping['SR_B4'],
-                'nir': description_mapping['SR_B5'],
-                'swir1': description_mapping['SR_B6'],
-                'swir2': description_mapping['SR_B7'],
-                'thermal': description_mapping.get('ST_B10'),
-            }
+    def _get_scaled_band_by_index(self, band_index):
+        """按scale/offset还原指定0基波段数据。"""
+        if band_index in self._scaled_band_cache:
+            return self._scaled_band_cache[band_index]
 
-        # Landsat 8/9 常见原始堆叠：B1-B11
-        if band_count >= 10:
-            return {
-                'profile': 'landsat_oli_tirs',
-                'blue': 1,
-                'green': 2,
-                'red': 3,
-                'nir': 4,
-                'swir1': 5,
-                'swir2': 6,
-                'thermal': 9,
-            }
+        if self.bands is None or band_index < 0 or band_index >= self.bands.shape[0]:
+            return None
 
-        # Landsat 5/7 常见堆叠：B1-B7，部分数据额外附带全色波段
-        if band_count in (7, 8):
-            return {
-                'profile': 'landsat_tm_etm',
-                'blue': 0,
-                'green': 1,
-                'red': 2,
-                'nir': 3,
-                'swir1': 4,
-                'thermal': 5,
-                'swir2': 6,
-            }
-
-        # 已预处理成6个反射波段的多光谱数据：Blue, Green, Red, NIR, SWIR1, SWIR2
-        if band_count == 6:
-            return {
-                'profile': 'reflective_6band',
-                'blue': 0,
-                'green': 1,
-                'red': 2,
-                'nir': 3,
-                'swir1': 4,
-                'swir2': 5,
-                'thermal': None,
-            }
-
-        # 5波段多光谱数据：Blue, Green, Red, NIR, SWIR1
-        if band_count == 5:
-            return {
-                'profile': 'reflective_5band',
-                'blue': 0,
-                'green': 1,
-                'red': 2,
-                'nir': 3,
-                'swir1': 4,
-                'swir2': None,
-                'thermal': None,
-            }
-
-        if band_count == 4:
-            return {
-                'profile': 'generic_4band',
-                'blue': 0,
-                'green': 1,
-                'red': 2,
-                'nir': 3,
-                'swir1': None,
-                'swir2': None,
-                'thermal': None,
-            }
-
-        if band_count == 3:
-            return {
-                'profile': 'rgb',
-                'blue': 2,
-                'green': 1,
-                'red': 0,
-                'nir': None,
-                'swir1': None,
-                'swir2': None,
-                'thermal': None,
-            }
-
-        return None
+        raw_band = self.bands[band_index].astype(np.float32, copy=False)
+        scale, offset = get_band_scale_offset(self.dataset, band_index, band_count=self.bands.shape[0])
+        scaled_band = raw_band * np.float32(scale) + np.float32(offset)
+        self._scaled_band_cache[band_index] = scaled_band
+        return scaled_band
 
     def _get_band_array(self, band_name):
         """获取指定波段数组。"""
@@ -264,10 +200,7 @@ class EcologicalIndexCalculator:
         if band_index is None:
             return None
 
-        if band_index < 0 or band_index >= self.bands.shape[0]:
-            return None
-
-        return self.bands[band_index].astype(np.float32)
+        return self._get_scaled_band_by_index(band_index)
 
     def _safe_normalized_difference(self, band_a, band_b):
         """安全计算归一化差值指数。"""
@@ -321,8 +254,8 @@ class EcologicalIndexCalculator:
             if nir is None or red is None:
                 available_bands = self.bands.shape[0]
                 if available_bands == 3:
-                    nir = self.bands[1].astype(np.float32)
-                    red = self.bands[0].astype(np.float32)
+                    nir = self._get_scaled_band_by_index(1)
+                    red = self._get_scaled_band_by_index(0)
                     logger.info("使用RGB波段近似计算NDVI")
                 else:
                     logger.error(f"当前波段配置不支持NDVI计算: {available_bands}波段")
@@ -359,8 +292,8 @@ class EcologicalIndexCalculator:
             if green is None or nir is None:
                 available_bands = self.bands.shape[0]
                 if available_bands == 3:
-                    green = self.bands[1].astype(np.float32)
-                    nir = self.bands[0].astype(np.float32)
+                    green = self._get_scaled_band_by_index(1)
+                    nir = self._get_scaled_band_by_index(0)
                     logger.info("使用RGB波段近似计算NDWI")
                 else:
                     logger.error(f"当前波段配置不支持NDWI计算: {available_bands}波段")
@@ -397,8 +330,8 @@ class EcologicalIndexCalculator:
             if swir is None or nir is None:
                 available_bands = self.bands.shape[0]
                 if available_bands == 3:
-                    swir = self.bands[2].astype(np.float32)
-                    nir = self.bands[0].astype(np.float32)
+                    swir = self._get_scaled_band_by_index(2)
+                    nir = self._get_scaled_band_by_index(0)
                     logger.info("使用RGB波段近似计算NDBI")
                 else:
                     logger.error(f"当前波段配置不支持NDBI计算: {available_bands}波段")
@@ -421,48 +354,29 @@ class EcologicalIndexCalculator:
     def calculate_ndsi(self):
         """计算NDSI（归一化积雪指数）"""
         try:
-            # 检查波段数
             if not self._check_band_availability(3):
                 logger.warning("波段数不足，无法计算NDSI")
                 return None
-            
-            # 对于RGB影像，使用绿波段和蓝波段作为替代
-            if self.bands.shape[0] == 3:
-                # RGB影像：使用绿波段(1)和蓝波段(0)
-                green_band = self.bands[1].astype(float)  # 绿波段
-                blue_band = self.bands[0].astype(float)  # 蓝波段
-                
-                # 简化的NDSI计算（基于绿蓝比值）
-                denominator = green_band + blue_band
-                denominator[denominator == 0] = 1e-10
-                
-                ndsi = (green_band - blue_band) / denominator
-                logger.info("使用RGB影像计算简化NDSI")
+
+            green_band = self._get_band_array('green')
+            swir_band = self._get_band_array('swir1')
+            blue_band = self._get_band_array('blue')
+            red_band = self._get_band_array('red')
+
+            if green_band is not None and swir_band is not None:
+                ndsi = self._safe_normalized_difference(green_band, swir_band)
+                logger.info("使用 Green/SWIR1 计算标准NDSI")
+            elif self.bands.shape[0] == 4 and green_band is not None and red_band is not None:
+                ndsi = self._safe_normalized_difference(green_band, red_band)
+                logger.info("当前影像缺少SWIR1，使用 Green/Red 近似计算NDSI")
+            elif self.bands.shape[0] == 3 and green_band is not None and blue_band is not None:
+                ndsi = self._safe_normalized_difference(green_band, blue_band)
+                logger.info("当前影像为RGB，使用 Green/Blue 近似计算NDSI")
             else:
-                # 多光谱影像：根据可用波段数选择合适的波段
-                available_bands = self.bands.shape[0]
-                if available_bands >= 5:
-                    # 使用绿波段(1)和中红外波段(4)
-                    green_band = self.bands[1].astype(float)  # 绿波段
-                    swir_band = self.bands[4].astype(float)  # 中红外波段
-                    logger.info("使用标准NDSI计算: 绿波段(1)和中红外波段(4)")
-                elif available_bands == 4:
-                    # 4波段数据：使用绿波段(1)和红波段(2)作为替代
-                    green_band = self.bands[1].astype(float)  # 绿波段
-                    swir_band = self.bands[2].astype(float)  # 红波段作为替代
-                    logger.info("使用4波段数据计算简化NDSI: 绿波段(1)和红波段(2)")
-                else:
-                    logger.warning(f"波段数不足，无法计算NDSI，当前波段数: {available_bands}")
-                    return None
-                
-                denominator = green_band + swir_band
-                denominator[denominator == 0] = 1e-10
-                
-                ndsi = (green_band - swir_band) / denominator
-                logger.info("使用多光谱影像计算标准NDSI")
-            
-            ndsi = np.clip(ndsi, -1, 1)
-            return ndsi
+                logger.warning(f"当前波段配置不支持NDSI计算: {self.bands.shape[0]}波段")
+                return None
+
+            return np.clip(ndsi, -1, 1) if ndsi is not None else None
         except Exception as e:
             logger.error(f"计算NDSI失败: {e}")
             return None
@@ -486,10 +400,16 @@ class EcologicalIndexCalculator:
                 logger.warning("当前影像缺少计算WET所需的Blue/Green/Red/NIR/SWIR1/SWIR2波段")
                 return None
 
-            if mapping.get('profile') == 'landsat_tm_etm':
-                coefficients = [0.1509, 0.1973, 0.3279, 0.3406, -0.7112, -0.4572]
-            else:
-                coefficients = [0.1511, 0.1973, 0.3283, 0.3407, -0.7117, -0.4559]
+            tc_coefficients = get_tasseled_cap_coefficients(mapping.get('profile'))
+            if not tc_coefficients or 'wetness' not in tc_coefficients:
+                logger.warning("当前影像缺少可用的Tasseled Cap系数，无法计算标准WET")
+                return None
+
+            coefficients = tc_coefficients['wetness']
+            if uses_approximate_tasseled_cap(mapping.get('profile')):
+                logger.warning(
+                    "当前影像使用通用6波段近似系数计算WET，结果可用于参考，但不同传感器间不建议直接对比"
+                )
 
             wetness = (
                 coefficients[0] * blue +
@@ -550,11 +470,21 @@ class EcologicalIndexCalculator:
                 logger.warning("当前影像缺少热红外/LST波段，无法计算标准热度指数")
                 return None
 
-            heat = np.where(np.isfinite(thermal), thermal, np.nan).astype(np.float32)
+            if not thermal_band_is_calibrated(mapping=mapping, dataset=self.dataset):
+                logger.warning("当前影像热红外波段缺少可靠的温度量纲信息，无法计算标准热度指数")
+                return None
 
-            # Landsat Collection 2 ST_B10 需要按官方比例因子还原到温度量纲。
-            if mapping.get('profile') == 'landsat_c2_l2_st':
-                heat = heat * np.float32(0.00341802) + np.float32(149.0)
+            heat = np.where(np.isfinite(thermal), thermal, np.nan).astype(np.float32)
+            scale, offset = thermal_conversion_parameters(mapping.get('profile'))
+            if scale is not None and offset is not None:
+                raw_scale, raw_offset = get_band_scale_offset(
+                    self.dataset,
+                    mapping['thermal'],
+                    band_count=self.bands.shape[0],
+                )
+                if abs(raw_scale - 1.0) <= 1e-12 and abs(raw_offset) <= 1e-12:
+                    heat = heat * np.float32(scale) + np.float32(offset)
+                    logger.info("当前热红外波段缺少scale/offset元数据，已按已知传感器参数补充还原")
 
             logger.info(f"热度指数计算完成，形状: {heat.shape}")
             return heat
@@ -935,6 +865,8 @@ class EcologicalIndexCalculator:
             if hasattr(self, 'bands'):
                 del self.bands
                 self.bands = None
+                self._scaled_band_cache = {}
+                self._sensor_band_mapping = None
             
             if hasattr(self, 'metadata'):
                 del self.metadata
