@@ -568,14 +568,14 @@ class RasterioLandUseAnalyzer:
         if self.preview_data is None:
             raise ValueError('土地利用数据未加载')
         colors = ['#FFFFFF']
-        bounds = [0]
         labels = []
         for class_id, info in self.landuse_classes.items():
             colors.append(info['color'])
-            bounds.append(class_id)
             labels.append(f"{class_id} {info['name']}")
         cmap = ListedColormap(colors)
-        data = np.where(self.preview_data == -9999, 0, self.preview_data)
+        cmap = cmap.copy()
+        cmap.set_bad((1, 1, 1, 0))
+        data = np.ma.masked_where(self.preview_data == -9999, self.preview_data)
         fig, ax = plt.subplots(figsize=(12, 7))
         ax.imshow(data, cmap=cmap, interpolation='nearest', vmin=0, vmax=max(self.landuse_classes.keys()))
         ax.set_title('土地利用分类分布图', fontsize=16)

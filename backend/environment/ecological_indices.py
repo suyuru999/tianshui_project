@@ -741,6 +741,14 @@ class EcologicalIndexCalculator:
             colors_list = ['#8B0000', '#FF0000', '#FFA500', '#FFFF00', '#00FF00', '#006400']
             n_bins = 256
             cmap = LinearSegmentedColormap.from_list('custom', colors_list, N=n_bins)
+            cmap = cmap.copy()
+            cmap.set_bad((1, 1, 1, 0))
+
+            masked_data = np.ma.masked_invalid(index_data)
+            valid_mask = ~np.ma.getmaskarray(masked_data)
+            if not np.any(valid_mask):
+                logger.warning("没有有效像元用于生成可视化")
+                return False
 
             height, width = index_data.shape
             if width >= height:
@@ -765,7 +773,23 @@ class EcologicalIndexCalculator:
             
             try:
                 # 绘制指数图
-                im = ax.imshow(index_data, cmap=cmap, aspect='equal', interpolation='nearest')
+                valid_values = masked_data.compressed()
+                vmin = float(np.nanpercentile(valid_values, 2)) if valid_values.size else None
+                vmax = float(np.nanpercentile(valid_values, 98)) if valid_values.size else None
+                if vmin is None or vmax is None or not np.isfinite(vmin) or not np.isfinite(vmax) or abs(vmax - vmin) < 1e-12:
+                    vmin = float(np.nanmin(valid_values)) if valid_values.size else 0.0
+                    vmax = float(np.nanmax(valid_values)) if valid_values.size else 1.0
+                if abs(vmax - vmin) < 1e-12:
+                    vmax = vmin + 1e-6
+
+                im = ax.imshow(
+                    masked_data,
+                    cmap=cmap,
+                    aspect='equal',
+                    interpolation='nearest',
+                    vmin=vmin,
+                    vmax=vmax,
+                )
                 ax.set_box_aspect(height / width)
                 
                 # 添加颜色条
@@ -774,16 +798,16 @@ class EcologicalIndexCalculator:
                 
                 # 设置标题和标签
                 ax.set_title(f'{index_name} 分布图', fontsize=16, fontweight='bold')
-                ax.set_xlabel('像素列', fontsize=12)
-                ax.set_ylabel('像素行', fontsize=12)
                 
                 # 去除坐标轴刻度
                 ax.set_xticks([])
                 ax.set_yticks([])
+                for spine in ax.spines.values():
+                    spine.set_visible(False)
                 
                 # 保存图片
                 plt.tight_layout()
-                plt.savefig(output_path, dpi=300, bbox_inches='tight')
+                plt.savefig(output_path, dpi=300, bbox_inches='tight', pad_inches=0.08)
                 plt.close(fig)  # 明确关闭图形
                 
                 logger.info(f"成功创建可视化图片: {output_path}")

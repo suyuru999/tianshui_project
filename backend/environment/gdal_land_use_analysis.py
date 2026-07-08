@@ -526,8 +526,7 @@ class LandUseAnalyzer:
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             
             # 准备数据
-            valid_data = self.landuse_data.copy()
-            valid_data[valid_data == -9999] = 0
+            masked_data = np.ma.masked_where(self.landuse_data == -9999, self.landuse_data)
             
             # 创建颜色映射
             colors_list = []
@@ -538,12 +537,14 @@ class LandUseAnalyzer:
                 labels.append(f"{class_id}: {class_info['name']}")
             
             cmap = ListedColormap(colors_list)
+            cmap = cmap.copy()
+            cmap.set_bad((1, 1, 1, 0))
             
             # 创建图形
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
             
             # 主图：土地利用分布
-            im1 = ax1.imshow(valid_data, cmap=cmap, vmin=1, vmax=len(self.landuse_classes))
+            im1 = ax1.imshow(masked_data, cmap=cmap, vmin=1, vmax=len(self.landuse_classes), interpolation='nearest')
             ax1.set_title('土地利用分布图')
             ax1.axis('off')
             
