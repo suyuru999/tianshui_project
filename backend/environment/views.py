@@ -24,6 +24,10 @@ import numpy as np
 import rasterio
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from PIL import Image
+from matplotlib import colors as mpl_colors
+from matplotlib import colormaps as mpl_colormaps
+from rasterio.enums import Resampling
 from rasterio.warp import transform_bounds
 
 # 取消注释必要的导入
@@ -510,7 +514,7 @@ class RemoteSensingImageViewSet(viewsets.ModelViewSet):
 
             # 手动添加正确的中文显示文本
             indices_data = serializer.data
-            for index_data in indices_data:
+            for index_obj, index_data in zip(indices, indices_data):
                 # 修复index_type_display
                 index_type = index_data.get('index_type', '')
                 index_type_display_map = {
@@ -536,6 +540,19 @@ class RemoteSensingImageViewSet(viewsets.ModelViewSet):
                         'failed': '失败',
                     }
                     index_data['remote_sensing_image']['processing_status_display'] = status_display_map.get(processing_status, processing_status)
+
+                try:
+                    index_data['compare_overlay'] = _build_compare_overlay_payload(
+                        request=request,
+                        raster_abs=index_obj.result_file.path if getattr(index_obj, 'result_file', None) else None,
+                        result_file_rel=index_obj.result_file.name if getattr(index_obj, 'result_file', None) else None,
+                        visualization_rel=index_obj.visualization_file.name if getattr(index_obj, 'visualization_file', None) else None,
+                        source_filename=Path(index_obj.result_file.name).name if getattr(index_obj, 'result_file', None) else None,
+                        style_hint=index_type,
+                    )
+                except Exception as overlay_exc:
+                    logger.warning(f"补充 compare_overlay 失败: {overlay_exc}")
+                    index_data['compare_overlay'] = None
 
             response = Response({
                 'message': '获取生态指数成功',
@@ -1258,7 +1275,12 @@ def _run_landuse_index_analysis(request, uploaded_file, analysis_type):
             results, summary = _landuse_stress_payload(analyzer)
             message = '生态环境胁迫指数计算完成'
 
-        visualization = _landuse_visualization_payload(request, analyzer, uploaded_file.name)
+        visualization = _landuse_visualization_payload(
+            request,
+            analyzer,
+            uploaded_file.name,
+            raster_abs=prepared.get('raster_input'),
+        )
         return Response({
             'message': message,
             'results': results,
@@ -1433,9 +1455,18 @@ def _build_remote_analysis_payload(
     label,
     stats,
     result_file_rel=None,
+    result_file_abs=None,
     visualization_rel=None,
     extra=None,
 ):
+    compare_overlay = _build_compare_overlay_payload(
+        request=request,
+        raster_abs=result_file_abs,
+        result_file_rel=result_file_rel,
+        visualization_rel=visualization_rel,
+        source_filename=Path(result_file_rel).name if result_file_rel else None,
+        style_hint=index_type,
+    )
     payload = {
         'id': uuid.uuid4().hex,
         'index_type': index_type,
@@ -1443,6 +1474,7 @@ def _build_remote_analysis_payload(
         **_statistics_payload(stats),
         'result_file_url': _media_url(request, result_file_rel) if result_file_rel else None,
         'visualization_file_url': _media_url(request, visualization_rel) if visualization_rel else None,
+        'compare_overlay': compare_overlay,
     }
     if extra:
         payload.update(extra)
@@ -1613,7 +1645,262 @@ def _raster_layer_metadata(path):
             })
     except Exception as exc:
         logger.warning(f"读取栅格元数据失败: {exc}")
+        try:
+            from osgeo import gdal, osr
+
+            dataset = gdal.Open(path, gdal.GA_ReadOnly)
+            if dataset is None:
+                return metadata
+
+            geotransform = dataset.GetGeoTransform(can_return_null=True)
+            projection = dataset.GetProjection()
+            band_count = int(dataset.RasterCount or 0)
+            width = int(dataset.RasterXSize or 0)
+            height = int(dataset.RasterYSize or 0)
+
+            crs = None
+            if projection:
+                spatial_ref = osr.SpatialReference()
+                spatial_ref.ImportFromWkt(projection)
+                auth_name = spatial_ref.GetAuthorityName(None)
+                auth_code = spatial_ref.GetAuthorityCode(None)
+                if auth_name and auth_code:
+                    crs = f'{auth_name}:{auth_code}'
+                else:
+                    crs = projection
+
+            bounds = None
+            if geotransform and width > 0 and height > 0:
+                origin_x, pixel_width, _, origin_y, _, pixel_height = geotransform
+                min_x = origin_x
+                max_x = origin_x + pixel_width * width
+                max_y = origin_y
+                min_y = origin_y + pixel_height * height
+                bounds = [min(min_x, max_x), min(min_y, max_y), max(min_x, max_x), max(min_y, max_y)]
+
+            metadata.update({
+                'bounds': bounds,
+                'crs': crs or 'EPSG:4326',
+                'width': width,
+                'height': height,
+                'band_count': band_count,
+                'dtype': gdal.GetDataTypeName(dataset.GetRasterBand(1).DataType) if band_count > 0 else None,
+            })
+        except Exception as gdal_exc:
+            logger.warning(f"使用GDAL读取栅格元数据也失败: {gdal_exc}")
     return metadata
+
+
+def _build_compare_overlay_payload(
+    request,
+    raster_abs=None,
+    result_file_rel=None,
+    visualization_rel=None,
+    source_filename=None,
+    style_hint=None,
+    class_color_map=None,
+):
+    """构建前端结果叠加展示所需的标准空间信息。"""
+    if not raster_abs or not os.path.exists(raster_abs):
+        return None
+
+    metadata = _raster_layer_metadata(raster_abs)
+    bounds = metadata.get('bounds')
+    crs = metadata.get('crs') or 'EPSG:4326'
+    if not bounds or len(bounds) != 4:
+        return None
+
+    bounds_3857 = None
+    try:
+        if crs == 'EPSG:3857':
+            bounds_3857 = bounds
+        else:
+            transformed = transform_bounds(crs, 'EPSG:3857', *bounds, densify_pts=21)
+            bounds_3857 = [transformed[0], transformed[1], transformed[2], transformed[3]]
+    except Exception as exc:
+        logger.warning(f"转换结果叠加范围到 EPSG:3857 失败: {exc}")
+
+    overlay_image_rel = None
+    overlay_image_url = None
+    base_rel = result_file_rel or visualization_rel
+    if base_rel:
+        overlay_image_rel = str(Path(base_rel).with_name(f'{Path(base_rel).stem}_overlay.png')).replace('\\', '/')
+        overlay_image_abs = os.path.join(settings.MEDIA_ROOT, overlay_image_rel)
+        if _generate_compare_overlay_png(
+            raster_abs=raster_abs,
+            output_abs=overlay_image_abs,
+            style_hint=style_hint,
+            class_color_map=class_color_map,
+        ):
+            overlay_image_url = _media_url(request, overlay_image_rel)
+
+    return {
+        'source_filename': source_filename,
+        'crs': crs,
+        'bounds': bounds,
+        'bounds_3857': bounds_3857,
+        'width': metadata.get('width'),
+        'height': metadata.get('height'),
+        'band_count': metadata.get('band_count'),
+        'result_file_url': _media_url(request, result_file_rel) if result_file_rel else None,
+        'visualization_file_url': _media_url(request, visualization_rel) if visualization_rel else None,
+        'overlay_image_url': overlay_image_url,
+    }
+
+
+def _continuous_overlay_colormap(style_hint=None):
+    style = str(style_hint or '').lower()
+    if style in {'ndwi', 'wetness'}:
+        return mpl_colormaps['Blues']
+    if style in {'heat', 'lst'}:
+        return mpl_colormaps['inferno']
+    if style in {'dryness', 'ndbi', 'ndbsi'}:
+        return mpl_colormaps['YlOrBr']
+    return mpl_colormaps['RdYlGn']
+
+
+def _rgba_from_compare_overlay_data(data, valid_mask, class_color_map=None, style_hint=None):
+    rgba = np.zeros((data.shape[0], data.shape[1], 4), dtype=np.uint8)
+    is_categorical = bool(class_color_map)
+
+    if is_categorical:
+        rounded = np.rint(data).astype(np.int32, copy=False)
+        for class_id, color in class_color_map.items():
+            try:
+                rgba_color = mpl_colors.to_rgba(color, alpha=0.78)
+            except Exception:
+                rgba_color = mpl_colors.to_rgba('#999999', alpha=0.78)
+            class_mask = valid_mask & (rounded == int(class_id))
+            if not np.any(class_mask):
+                continue
+            rgba[class_mask] = (np.array(rgba_color) * 255).astype(np.uint8)
+    else:
+        valid_values = data[valid_mask]
+        vmin = float(np.nanpercentile(valid_values, 2))
+        vmax = float(np.nanpercentile(valid_values, 98))
+        if not np.isfinite(vmin) or not np.isfinite(vmax) or abs(vmax - vmin) < 1e-12:
+            vmin = float(np.nanmin(valid_values))
+            vmax = float(np.nanmax(valid_values))
+        if abs(vmax - vmin) < 1e-12:
+            vmax = vmin + 1e-6
+        normalized = np.clip((data - vmin) / (vmax - vmin), 0, 1)
+        cmap = _continuous_overlay_colormap(style_hint)
+        rgba = (cmap(normalized) * 255).astype(np.uint8)
+        rgba[..., 3] = np.where(valid_mask, 190, 0).astype(np.uint8)
+
+    rgba[~valid_mask] = (0, 0, 0, 0)
+    return rgba
+
+
+def _generate_compare_overlay_png_with_gdal(
+    raster_abs,
+    output_abs,
+    style_hint=None,
+    class_color_map=None,
+    max_dimension=1600,
+):
+    try:
+        from osgeo import gdal
+    except Exception as import_exc:
+        logger.warning(f"GDAL导入失败，无法执行叠加图回退生成: {import_exc}")
+        return False
+
+    try:
+        dataset = gdal.Open(raster_abs, gdal.GA_ReadOnly)
+        if dataset is None:
+            return False
+
+        width = int(dataset.RasterXSize or 0)
+        height = int(dataset.RasterYSize or 0)
+        if width <= 0 or height <= 0 or int(dataset.RasterCount or 0) <= 0:
+            return False
+
+        scale = min(1.0, max_dimension / max(width, height))
+        out_width = max(1, int(round(width * scale)))
+        out_height = max(1, int(round(height * scale)))
+
+        band = dataset.GetRasterBand(1)
+        is_categorical = bool(class_color_map)
+        resample_alg = gdal.GRA_NearestNeighbour if is_categorical else gdal.GRA_Bilinear
+        band_data = band.ReadAsArray(
+            buf_xsize=out_width,
+            buf_ysize=out_height,
+            resample_alg=resample_alg,
+        )
+        if band_data is None:
+            return False
+
+        data = band_data.astype(np.float32, copy=False)
+        valid_mask = np.isfinite(data)
+        nodata_value = band.GetNoDataValue()
+        if nodata_value is not None and np.isfinite(nodata_value):
+            valid_mask &= data != np.float32(nodata_value)
+
+        if not np.any(valid_mask):
+            return False
+
+        rgba = _rgba_from_compare_overlay_data(
+            data=data,
+            valid_mask=valid_mask,
+            class_color_map=class_color_map,
+            style_hint=style_hint,
+        )
+        Image.fromarray(rgba, mode='RGBA').save(output_abs)
+        return True
+    except Exception as exc:
+        logger.warning(f"使用GDAL回退生成透明结果叠加图失败: {exc}")
+        return False
+
+
+def _generate_compare_overlay_png(raster_abs, output_abs, style_hint=None, class_color_map=None, max_dimension=1600):
+    """生成适合地图叠加的透明PNG，不包含白底、标题、坐标轴和图例。"""
+    if not raster_abs or not os.path.exists(raster_abs):
+        return False
+
+    try:
+        os.makedirs(os.path.dirname(output_abs), exist_ok=True)
+        with rasterio.open(raster_abs) as dataset:
+            width = int(dataset.width or 0)
+            height = int(dataset.height or 0)
+            if width <= 0 or height <= 0:
+                return False
+
+            scale = min(1.0, max_dimension / max(width, height))
+            out_width = max(1, int(round(width * scale)))
+            out_height = max(1, int(round(height * scale)))
+
+            is_categorical = bool(class_color_map)
+            resampling = Resampling.nearest if is_categorical else Resampling.bilinear
+            band = dataset.read(
+                1,
+                masked=True,
+                out_shape=(out_height, out_width),
+                resampling=resampling,
+            )
+
+        mask = np.ma.getmaskarray(band)
+        data = np.ma.filled(band, np.nan).astype(np.float32)
+        valid_mask = np.isfinite(data) & (~mask)
+        if not np.any(valid_mask):
+            return False
+
+        rgba = _rgba_from_compare_overlay_data(
+            data=data,
+            valid_mask=valid_mask,
+            class_color_map=class_color_map,
+            style_hint=style_hint,
+        )
+        Image.fromarray(rgba, mode='RGBA').save(output_abs)
+        return True
+    except Exception as exc:
+        logger.warning(f"生成透明结果叠加图失败，将尝试GDAL回退: {exc}")
+        return _generate_compare_overlay_png_with_gdal(
+            raster_abs=raster_abs,
+            output_abs=output_abs,
+            style_hint=style_hint,
+            class_color_map=class_color_map,
+            max_dimension=max_dimension,
+        )
 
 
 def _infer_raster_rgb_bands(dataset):
@@ -2107,7 +2394,7 @@ def geoserver_ows_proxy(request):
     return response
 
 
-def _landuse_visualization_payload(request, analyzer, source_file_name):
+def _landuse_visualization_payload(request, analyzer, source_file_name, raster_abs=None):
     result_dir_rel = f'landuse_results/{uuid.uuid4().hex}'
     result_dir_abs = os.path.join(settings.MEDIA_ROOT, result_dir_rel)
     os.makedirs(result_dir_abs, exist_ok=True)
@@ -2118,6 +2405,17 @@ def _landuse_visualization_payload(request, analyzer, source_file_name):
         'source_filename': source_file_name,
         'visualization_file_url': _media_url(request, visualization_rel),
         'landuse_statistics': analyzer.get_landuse_statistics(),
+        'compare_overlay': _build_compare_overlay_payload(
+            request=request,
+            raster_abs=raster_abs,
+            visualization_rel=visualization_rel,
+            source_filename=source_file_name,
+            style_hint='landuse',
+            class_color_map={
+                int(class_id): class_info.get('color', '#999999')
+                for class_id, class_info in getattr(analyzer, 'landuse_classes', {}).items()
+            } or None,
+        ),
     }
 
 
@@ -2304,6 +2602,7 @@ def analyze_remote_sensing_upload(request):
                     label=label_map[item_type],
                     stats=stats_map[item_type],
                     result_file_rel=persisted_index.result_file.name,
+                    result_file_abs=persisted_index.result_file.path,
                     visualization_rel=persisted_index.visualization_file.name,
                 ))
             result_file_url = _media_url(request, persisted_indices['rsei'].result_file.name)
@@ -2328,6 +2627,7 @@ def analyze_remote_sensing_upload(request):
                 label=label,
                 stats=stats,
                 result_file_rel=result_tif_rel,
+                result_file_abs=result_tif_abs if result_tif_rel else None,
                 visualization_rel=result_png_rel,
             ))
 
@@ -2434,7 +2734,12 @@ def calculate_ecological_landuse_indices(request):
 
         structure_results, structure_summary = _landuse_structure_payload(analyzer)
         stress_results, stress_summary = _landuse_stress_payload(analyzer)
-        visualization = _landuse_visualization_payload(request, analyzer, landuse_file.name)
+        visualization = _landuse_visualization_payload(
+            request,
+            analyzer,
+            landuse_file.name,
+            raster_abs=prepared.get('raster_input'),
+        )
 
         return Response({
             'message': '生态环境指数计算完成',

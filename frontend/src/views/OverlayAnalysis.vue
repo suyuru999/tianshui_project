@@ -21,9 +21,32 @@
           </div>
           <div class="section-content">
             <div class="layer-control">
+              <div class="layer-item layer-item--stacked">
+                <div class="layer-item-main">
+                  <div class="layer-info">
+                    <span>遥感影像底图</span>
+                  </div>
+                  <div class="layer-controls">
+                    <label class="toggle-switch">
+                      <input
+                        type="checkbox"
+                        v-model="layerVisibility.referenceImagery"
+                        @change="handleLayerToggle('referenceImagery')"
+                      />
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="layer-item-extra">
+                  <label class="mini-opacity-control">
+                    <span>透明度</span>
+                    <input v-model="layerOpacity.referenceImagery" type="range" min="35" max="100" step="5" />
+                    <strong>{{ layerOpacity.referenceImagery }}%</strong>
+                  </label>
+                </div>
+              </div>
               <div class="layer-item">
                 <div class="layer-info">
-                  
                   <span>生态指数栅格</span>
                 </div>
                 <div class="layer-controls">
@@ -39,7 +62,6 @@
               </div>
               <div class="layer-item">
                 <div class="layer-info">
-                  
                   <span>经济数据矢量</span>
                 </div>
                 <div class="layer-controls">
@@ -55,7 +77,6 @@
               </div>
               <div class="layer-item">
                 <div class="layer-info">
-                 
                   <span>工程项目矢量</span>
                 </div>
                 <div class="layer-controls">
@@ -68,6 +89,57 @@
                     <span class="slider"></span>
                   </label>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-content">
+            <div class="history-card">
+              <div class="history-card__title-row">
+                <FolderOpened class="history-card__icon" />
+                <span class="history-card__title">最近结果</span>
+              </div>
+              <div class="history-card__summary-row">
+                <span class="history-card__count">{{ historyItems.length }} 条</span>
+                <div class="history-card__actions">
+                  <button
+                    v-if="historyExpanded && historyItems.length > 0"
+                    type="button"
+                    class="history-action-btn"
+                    @click="clearHistoryItems"
+                  >
+                    清空
+                  </button>
+                  <button
+                    type="button"
+                    class="history-action-btn primary"
+                    @click="historyExpanded = !historyExpanded"
+                  >
+                    {{ historyExpanded ? '收起' : '展开' }}
+                  </button>
+                </div>
+              </div>
+              <div class="history-card__description">
+                这里会保留最近几次可直接回看的结果
+              </div>
+              <div v-if="historyExpanded && historyItems.length > 0" class="history-list">
+                <div
+                  v-for="item in historyItems"
+                  :key="item.id"
+                  class="history-item"
+                >
+                  <button type="button" class="history-item-main" @click="restoreHistoryItem(item)">
+                    <div class="history-item-title">{{ item.title }}</div>
+                    <div class="history-item-subtitle">{{ item.subtitle }}</div>
+                    <div class="history-item-time">{{ formatHistoryTime(item.timestamp) }}</div>
+                  </button>
+                  <button type="button" class="history-delete-btn" @click="deleteHistoryItem(item)">删除</button>
+                </div>
+              </div>
+              <div v-else-if="historyExpanded" class="history-empty">
+                打开或关闭图层后，这里会保留你最近一次的叠加视图
               </div>
             </div>
           </div>
@@ -106,9 +178,10 @@
 
       <!-- 右侧地图区域 -->
       <div class="map-area">
-        <OverlayMapContainer 
+        <OverlayMapContainer
           ref="mapContainerRef"
           :layer-visibility="layerVisibility"
+          :layer-opacity="layerOpacity"
         />
       </div>
     </div>
@@ -116,25 +189,103 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
-import { ArrowLeft, InfoFilled, MapLocation, Upload } from '@element-plus/icons-vue'
+import { ref, reactive, onMounted, watch } from 'vue'
+import { ArrowLeft, FolderOpened, InfoFilled, MapLocation, Upload } from '@element-plus/icons-vue'
 import OverlayMapContainer from '../components/Map/OverlayMapContainer.vue'
 import DataUploadPanel from '../components/Map/DataUploadPanel.vue'
+import { clearResultHistory, formatHistoryTime, loadResultHistory, removeResultHistory, saveResultHistory } from '../utils/resultHistory.js'
 
 const mapContainerRef = ref(null)
+const historyItems = ref([])
+const historyExpanded = ref(false)
+const HISTORY_KEY = 'overlay_analysis_view'
 
 // 图层可见性控制
 const layerVisibility = reactive({
+  referenceImagery: false,
   ecology: true,
   economy: true,
   engineering: true
 })
+
+const layerOpacity = reactive({
+  referenceImagery: 100,
+  ecology: 70,
+  economy: 60,
+  engineering: 80
+})
+
+const persistCurrentView = () => {
+  historyItems.value = saveResultHistory(HISTORY_KEY, {
+    id: 'latest_overlay_view',
+    title: '上次叠加视图',
+    subtitle: buildHistorySubtitle(),
+    timestamp: Date.now(),
+    payload: {
+      layerVisibility: { ...layerVisibility },
+      layerOpacity: { ...layerOpacity }
+    }
+  }, { maxItems: 1 })
+}
+
+const restoreHistoryItem = (item) => {
+  const visibility = item?.payload?.layerVisibility
+  if (!visibility) {
+    return
+  }
+  const opacity = item?.payload?.layerOpacity || {}
+
+  Object.assign(layerVisibility, {
+    referenceImagery: !!visibility.referenceImagery,
+    ecology: !!visibility.ecology,
+    economy: !!visibility.economy,
+    engineering: !!visibility.engineering
+  })
+
+  Object.assign(layerOpacity, {
+    referenceImagery: Number(opacity.referenceImagery) || 100,
+    ecology: Number(opacity.ecology) || 70,
+    economy: Number(opacity.economy) || 60,
+    engineering: Number(opacity.engineering) || 80
+  })
+
+  if (mapContainerRef.value) {
+    mapContainerRef.value.refreshMap()
+  }
+}
+
+const deleteHistoryItem = (item) => {
+  historyItems.value = removeResultHistory(HISTORY_KEY, item.id)
+}
+
+const clearHistoryItems = () => {
+  if (historyItems.value.length === 0) {
+    return
+  }
+
+  if (!window.confirm('确定要清空当前所有历史记录吗？')) {
+    return
+  }
+
+  clearResultHistory(HISTORY_KEY)
+  historyItems.value = []
+}
+
+const buildHistorySubtitle = () => {
+  const labels = []
+  if (layerVisibility.referenceImagery) labels.push('遥感影像底图')
+  if (layerVisibility.ecology) labels.push('生态指数栅格')
+  if (layerVisibility.economy) labels.push('经济数据矢量')
+  if (layerVisibility.engineering) labels.push('工程项目矢量')
+  return labels.length > 0 ? labels.join('、') : '当前未开启任何业务图层'
+}
 
 // 处理图层切换
 const handleLayerToggle = (layerType) => {
   if (mapContainerRef.value) {
     mapContainerRef.value.toggleLayer(layerType)
   }
+  persistCurrentView()
 }
 
 // 处理地图刷新
@@ -148,7 +299,16 @@ const handleRefreshMap = (payload = {}) => {
   if (mapContainerRef.value) {
     mapContainerRef.value.refreshMap()
   }
+  persistCurrentView()
 }
+
+onMounted(() => {
+  historyItems.value = loadResultHistory(HISTORY_KEY)
+})
+
+watch(layerOpacity, () => {
+  persistCurrentView()
+}, { deep: true })
 </script>
 
 <style scoped>
@@ -306,6 +466,25 @@ const handleRefreshMap = (payload = {}) => {
   border-bottom: none;
 }
 
+.layer-item--stacked {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.layer-item-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.layer-item-extra {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .layer-info {
   display: flex;
   align-items: center;
@@ -316,18 +495,12 @@ const handleRefreshMap = (payload = {}) => {
   min-width: 0;
 }
 
-.layer-icon {
-  font-size: 15px;
-  flex-shrink: 0;
-}
-
 .layer-controls {
   display: flex;
   align-items: center;
   flex-shrink: 0;
 }
 
-/* 切换开关样式 */
 .toggle-switch {
   position: relative;
   display: inline-block;
@@ -371,6 +544,170 @@ input:checked + .slider {
 
 input:checked + .slider:before {
   transform: translateX(20px);
+}
+
+.mini-opacity-control {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #d5e1ed;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #556779;
+  background: #fff;
+  font-size: 12px;
+}
+
+.mini-opacity-control input {
+  width: 90px;
+}
+
+.mini-opacity-control strong {
+  min-width: 34px;
+  text-align: right;
+}
+
+.history-card {
+  padding: 14px;
+  border: 1px solid #dbe6f0;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.history-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.history-card__icon {
+  width: 18px;
+  height: 18px;
+  color: #4f79b5;
+}
+
+.history-card__title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1f3c63;
+}
+
+.history-card__summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.history-card__count,
+.history-card__actions {
+  font-size: 14px;
+  color: #6f8192;
+}
+
+.history-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.history-card__description {
+  margin-top: 12px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #7a8fa5;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 220px;
+  margin-top: 16px;
+  overflow-y: auto;
+}
+
+.history-action-btn {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #4a7db2;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.history-action-btn.primary {
+  color: #1f78d1;
+}
+
+.history-item {
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #dbe6f0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.history-item:hover {
+  border-color: #bfd5e8;
+  background: #eef5fb;
+}
+
+.history-item-main {
+  flex: 1;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.history-item-main:hover {
+  transform: translateY(-1px);
+}
+
+.history-delete-btn {
+  align-self: center;
+  min-width: 44px;
+  padding: 6px 0;
+  border: none;
+  background: transparent;
+  color: #d95c5c;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.history-item-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #2f455c;
+}
+
+.history-item-subtitle,
+.history-item-time {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6f8192;
+  line-height: 1.5;
+}
+
+.history-empty {
+  margin-top: 16px;
+  padding: 16px 12px;
+  border: 1px dashed #dbe6f0;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #8a98a8;
+  font-size: 13px;
+  text-align: center;
 }
 
 /* 使用说明 */

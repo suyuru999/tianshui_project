@@ -90,6 +90,8 @@ export const API_ENDPOINTS = {
     WMS_MAP: '/environment/spatial/wms/map/',
     WFS_CAPABILITIES: '/environment/spatial/wfs/capabilities/',
     SPATIAL_LAYERS: '/environment/spatial/layers/',
+    HIGHRES_IMAGERY_LIST: '/environment/spatial/highres-imagery/',
+    HIGHRES_IMAGERY_PUBLISH: '/environment/spatial/highres-imagery/publish/',
     BUSINESS_LAYERS: '/environment/business-layers/',
     BUSINESS_LAYER_DETAIL: (id) => `/environment/business-layers/${id}/`,
     BUSINESS_LAYER_PUBLISH: (id) => `/environment/business-layers/${id}/publish/`,

@@ -52,8 +52,24 @@
 
             <div v-show="baseMapExpanded" class="basemap-grid">
               <label v-for="type in mapTypes" :key="type.id" class="basemap-option">
-                <input type="radio" name="baseMap" :value="type.id" v-model="currentMapType" />
+                <input
+                  type="radio"
+                  name="baseMap"
+                  :value="type.id"
+                  v-model="currentMapType"
+                />
                 <span>{{ type.name }}</span>
+              </label>
+
+              <label class="basemap-option basemap-action-btn" :class="{ disabled: highResImageryLoading || highResImageryPublishing }">
+                <input
+                  type="checkbox"
+                  name="referenceImageryToggle"
+                  :checked="isReferenceImageryActive"
+                  :disabled="highResImageryLoading || highResImageryPublishing"
+                  @change="togglePreferredHighResImagery"
+                />
+                <span>{{ highResImageryPublishing ? '影像加载中...' : '遥感影像底图' }}</span>
               </label>
             </div>
           </div>
@@ -68,10 +84,10 @@
             </button>
 
             <div v-show="layerControlExpanded" class="layer-order-list">
-              <div v-if="managedLayers.length === 0" class="layer-empty">暂无可控制图层</div>
+              <div v-if="layerControlItems.length === 0" class="layer-empty">暂无可控制图层</div>
               <div
-                v-for="(layer, index) in managedLayers"
-                :key="layer.id"
+                v-for="(item, index) in layerControlItems"
+                :key="item.layer.id"
                 class="managed-layer"
                 draggable="true"
                 @dragstart="startLayerDrag(index)"
@@ -79,17 +95,17 @@
                 @drop="dropLayer(index)"
               >
                 <label class="checkbox-label">
-                  <input type="checkbox" v-model="layer.visible" @change="setManagedLayerVisible(layer)" />
-                  <span>{{ layer.name }}</span>
+                  <input type="checkbox" v-model="item.layer.visible" @change="setManagedLayerVisible(item.layer)" />
+                  <span>{{ item.layer.name }}</span>
                 </label>
                 <div class="layer-actions">
                   <button class="mini-btn" @click="moveLayer(index, -1)" :disabled="index === 0" title="上移">
                     <ArrowUp />
                   </button>
-                  <button class="mini-btn" @click="moveLayer(index, 1)" :disabled="index === managedLayers.length - 1" title="下移">
+                  <button class="mini-btn" @click="moveLayer(index, 1)" :disabled="index === layerControlItems.length - 1" title="下移">
                     <ArrowDown />
                   </button>
-                  <button v-if="layer.temporary" class="mini-btn danger" @click="removeManagedLayer(layer)" title="移除">
+                  <button v-if="item.layer.temporary" class="mini-btn danger" @click="removeManagedLayer(item.layer)" title="移除">
                     <Close />
                   </button>
                 </div>
@@ -188,7 +204,14 @@ import { getArea as getGeodesicArea, getLength as getGeodesicLength } from 'ol/s
 import Feature from 'ol/Feature'
 import shp from 'shpjs'
 import { MapUtils } from '../../utils/mapUtils'
+import {
+  fetchPreferredHighResImageryRecord,
+  ensurePreferredHighResImageryRecord,
+  getHighResImageryQualifiedLayerName,
+  PREFERRED_HIGHRES_IMAGERY_FILE
+} from '../../utils/highResImagery.js'
 import { API_CONFIG } from '../../config/api.js'
+import { spatialService } from '../../services/api.js'
 
 const REAL_LAYER_DEFINITIONS = [
   {
@@ -231,10 +254,17 @@ const layerControlExpanded = ref(true)
 const selectionToolbar = reactive({ visible: false, x: 0, y: 0 })
 const textEditor = reactive({ visible: false, x: 0, y: 0, value: '', feature: null })
 const textEditorInput = ref(null)
-
+const highResImageryList = ref([])
+const highResImageryLoading = ref(false)
+const highResImageryPublishing = ref(false)
+const highResImageryError = ref('')
+const selectedHighResImageryId = ref('')
+const loadedHighResImageryId = ref('')
 const defaultCenter = [114.3162, 30.5810]
 const defaultZoom = 8
+const referenceImageryLayerId = 'system-remote-imagery'
 const mapTypes = [
+  { id: 'blank', name: '无底图' },
   { id: 'tdt_vec', name: '天地图-标准' },
   { id: 'tdt_img', name: '天地图-影像' },
   { id: 'tdt_ter', name: '天地图-地形' },
@@ -259,6 +289,18 @@ const activeToolLabel = computed(() => {
   const tool = drawingTools.find(item => item.id === activeTool.value)
   return tool ? `${tool.name}: 在地图上点击或拖拽绘制` : ''
 })
+const layerControlItems = computed(() => (
+  managedLayers
+    .map((layer, managedIndex) => ({ layer, managedIndex }))
+    .filter(item => !item.layer.referenceImagery)
+))
+const referenceImageryLayerItem = computed(() => (
+  managedLayers.find(item => item.id === referenceImageryLayerId) || null
+))
+const isReferenceImageryActive = computed(() => Boolean(referenceImageryLayerItem.value?.visible))
+const selectedHighResImagery = computed(() => (
+  highResImageryList.value.find(item => item.id === selectedHighResImageryId.value) || null
+))
 
 let map
 let baseLayer
@@ -281,6 +323,7 @@ drawLayer.setZIndex(1000)
 
 onMounted(() => {
   initMap()
+  fetchHighResImageryList()
 })
 
 onUnmounted(() => {
@@ -349,6 +392,155 @@ function initMap() {
   loadRealBusinessLayers()
   syncLayerZIndexes()
   bindMapEvents()
+}
+
+function mergeHighResImageryRecord(nextRecord) {
+  if (!nextRecord?.id) return
+  const nextList = [...highResImageryList.value]
+  const index = nextList.findIndex(item => item.id === nextRecord.id)
+  if (index >= 0) {
+    nextList[index] = { ...nextList[index], ...nextRecord }
+  } else {
+    nextList.push(nextRecord)
+  }
+  highResImageryList.value = nextList
+}
+
+async function fetchHighResImageryList() {
+  highResImageryLoading.value = true
+  highResImageryError.value = ''
+  try {
+    const preferredImagery = await fetchPreferredHighResImageryRecord()
+    highResImageryList.value = preferredImagery ? [preferredImagery] : []
+    if (!selectedHighResImageryId.value && preferredImagery?.id) {
+      selectedHighResImageryId.value = preferredImagery.id
+    }
+  } catch (error) {
+    console.error('获取系统遥感影像列表失败:', error)
+    highResImageryError.value = '系统遥感影像目录读取失败'
+  } finally {
+    highResImageryLoading.value = false
+  }
+}
+
+async function togglePreferredHighResImagery() {
+  if (highResImageryLoading.value || highResImageryPublishing.value) {
+    return
+  }
+
+  if (!selectedHighResImageryId.value) {
+    await fetchHighResImageryList()
+  }
+
+  if (!selectedHighResImageryId.value) {
+    ElMessage.warning('未找到指定的遥感影像底图')
+    return
+  }
+
+  if (isReferenceImageryActive.value) {
+    setReferenceImageryVisible(false)
+    return
+  }
+
+  if (setReferenceImageryVisible(true)) {
+    return
+  }
+
+  await loadSelectedHighResImagery({ silentSuccess: true })
+}
+
+function buildReferenceImageryLayerRecord(imageryRecord, visible = true) {
+  const layerName = getHighResImageryQualifiedLayerName(imageryRecord)
+  const layer = imageryRecord.source_kind === 'business_layer'
+    ? MapUtils.loadWMS(geoserverProxyUrl, layerName, {
+      visible,
+      opacity: 1,
+      serverType: 'geoserver',
+      metadata: imageryRecord.metadata
+    })
+    : MapUtils.loadStaticWMSImage(geoserverProxyUrl, layerName, {
+      visible,
+      opacity: 1,
+      serverType: 'geoserver',
+      metadata: imageryRecord.metadata,
+      imageUrl: imageryRecord.preview_image_url || undefined
+    })
+
+  return {
+    id: referenceImageryLayerId,
+    name: imageryRecord.file_name || imageryRecord.name || '遥感影像底图',
+    group: '参考影像',
+    visible,
+    layer,
+    serviceLayer: imageryRecord,
+    referenceImagery: true
+  }
+}
+
+function upsertReferenceImageryLayer(imageryRecord, visible = true) {
+  const existingIndex = managedLayers.findIndex(item => item.id === referenceImageryLayerId)
+  if (existingIndex >= 0) {
+    const existing = managedLayers[existingIndex]
+    map.removeLayer(existing.layer)
+    managedLayers.splice(existingIndex, 1)
+  }
+
+  const nextItem = buildReferenceImageryLayerRecord(imageryRecord, visible)
+  map.addLayer(nextItem.layer)
+  managedLayers.splice(0, 0, nextItem)
+  loadedHighResImageryId.value = imageryRecord.id
+  syncLayerZIndexes()
+  if (visible) {
+    fitServiceLayer(nextItem)
+  }
+}
+
+async function loadSelectedHighResImagery(options = {}) {
+  if (!selectedHighResImageryId.value) {
+    ElMessage.warning('请先选择一景系统遥感影像')
+    return
+  }
+
+  highResImageryPublishing.value = true
+  try {
+    let imageryRecord = selectedHighResImagery.value
+    if (!imageryRecord || imageryRecord.file_name === PREFERRED_HIGHRES_IMAGERY_FILE || imageryRecord.source_kind === 'business_layer') {
+      imageryRecord = await ensurePreferredHighResImageryRecord()
+    } else if (!imageryRecord.geoserver_layer_name || imageryRecord.status !== 'published') {
+      const response = await spatialService.publishHighResImagery({
+        imagery_id: selectedHighResImageryId.value
+      })
+      imageryRecord = response?.result || imageryRecord
+    }
+    mergeHighResImageryRecord(imageryRecord)
+
+    upsertReferenceImageryLayer(imageryRecord, true)
+    if (!options.silentSuccess) {
+      ElMessage.success('遥感影像底图已加载，可在图层控制中开关对比')
+    }
+  } catch (error) {
+    console.error('加载系统遥感影像失败:', error)
+    ElMessage.error('系统遥感影像加载失败')
+  } finally {
+    highResImageryPublishing.value = false
+  }
+}
+
+function clearReferenceImagery() {
+  const existing = managedLayers.find(item => item.id === referenceImageryLayerId)
+  if (!existing) return
+  removeManagedLayer(existing)
+}
+
+function setReferenceImageryVisible(visible) {
+  const existing = referenceImageryLayerItem.value
+  if (!existing) return false
+  existing.visible = visible
+  existing.layer.setVisible(visible)
+  if (visible) {
+    fitServiceLayer(existing)
+  }
+  return true
 }
 
 function updateFallbackBaseLayer(forceVisible = false) {
@@ -1052,10 +1244,14 @@ function setLayerVisibleById(layerId, visible) {
 }
 
 function moveLayer(index, direction) {
+  const visibleItems = layerControlItems.value
   const targetIndex = index + direction
-  if (targetIndex < 0 || targetIndex >= managedLayers.length) return
-  const [item] = managedLayers.splice(index, 1)
-  managedLayers.splice(targetIndex, 0, item)
+  if (targetIndex < 0 || targetIndex >= visibleItems.length) return
+  const fromManagedIndex = visibleItems[index]?.managedIndex
+  const toManagedIndex = visibleItems[targetIndex]?.managedIndex
+  if (fromManagedIndex === undefined || toManagedIndex === undefined) return
+  const [item] = managedLayers.splice(fromManagedIndex, 1)
+  managedLayers.splice(toManagedIndex, 0, item)
   syncLayerZIndexes()
 }
 
@@ -1065,8 +1261,15 @@ function startLayerDrag(index) {
 
 function dropLayer(index) {
   if (draggedLayerIndex === null || draggedLayerIndex === index) return
-  const [item] = managedLayers.splice(draggedLayerIndex, 1)
-  managedLayers.splice(index, 0, item)
+  const visibleItems = layerControlItems.value
+  const fromManagedIndex = visibleItems[draggedLayerIndex]?.managedIndex
+  const toManagedIndex = visibleItems[index]?.managedIndex
+  if (fromManagedIndex === undefined || toManagedIndex === undefined) {
+    draggedLayerIndex = null
+    return
+  }
+  const [item] = managedLayers.splice(fromManagedIndex, 1)
+  managedLayers.splice(toManagedIndex, 0, item)
   draggedLayerIndex = null
   syncLayerZIndexes()
 }
@@ -1075,6 +1278,9 @@ function removeManagedLayer(item) {
   map.removeLayer(item.layer)
   const index = managedLayers.findIndex(layer => layer.id === item.id)
   if (index > -1) managedLayers.splice(index, 1)
+  if (item.referenceImagery) {
+    loadedHighResImageryId.value = ''
+  }
 }
 
 function removeLayerById(layerId) {
@@ -1290,6 +1496,7 @@ defineExpose({
 }
 
 .basemap-option {
+  position: relative;
   min-height: 34px;
   padding: 7px 8px;
   border: 1px solid #dbe3ec;
@@ -1303,6 +1510,12 @@ defineExpose({
   cursor: pointer;
 }
 
+.basemap-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .basemap-option:hover {
   border-color: #9bb6cf;
   background: #f7fafc;
@@ -1312,6 +1525,21 @@ defineExpose({
   border-color: #5f7f9d;
   background: #eef5fb;
   color: #315f8c;
+}
+
+.basemap-action-btn {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.basemap-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.basemap-action-btn.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .checkbox-label {

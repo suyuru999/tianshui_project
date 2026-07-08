@@ -4,10 +4,11 @@ import VectorLayer from 'ol/layer/Vector'
 import XYZ from 'ol/source/XYZ'
 import ImageWMS from 'ol/source/ImageWMS'
 import TileWMS from 'ol/source/TileWMS'
+import ImageStatic from 'ol/source/ImageStatic'
 import VectorSource from 'ol/source/Vector'
 import KML from 'ol/format/KML'
 import GeoJSON from 'ol/format/GeoJSON'
-import { transform } from 'ol/proj'
+import { transform, transformExtent } from 'ol/proj'
 
 // 天地图token（请替换为你自己的）
 const TDT_TOKEN = '69874af7f35c741d7132c50f80acad29'
@@ -126,11 +127,16 @@ export class MapUtils {
 
   // 加载WMS服务
   static loadWMS(url, layers, options = {}) {
+    const layerExtent = this.resolveMetadataExtent(options.metadata)
     const source = new TileWMS({
       url: url,
       params: {
         'LAYERS': layers,
-        'TILED': true
+        'VERSION': options.version || '1.1.1',
+        'FORMAT': options.format || 'image/png',
+        'TRANSPARENT': options.transparent !== false,
+        'TILED': options.tiled !== false,
+        ...(options.params || {})
       },
       serverType: options.serverType || 'geoserver',
       crossOrigin: 'anonymous'
@@ -139,17 +145,22 @@ export class MapUtils {
     return new TileLayer({
       source: source,
       visible: options.visible !== false,
-      opacity: options.opacity !== undefined ? options.opacity : 1
+      opacity: options.opacity !== undefined ? options.opacity : 1,
+      extent: layerExtent || undefined
     })
   }
 
   // 加载ImageWMS服务（用于叠加分析的栅格图层）
   static loadImageWMS(url, layers, options = {}) {
+    const layerExtent = this.resolveMetadataExtent(options.metadata)
     const source = new ImageWMS({
       url: url,
       params: {
         'LAYERS': layers,
-        'VERSION': '1.3.0'
+        'VERSION': options.version || '1.1.1',
+        'FORMAT': options.format || 'image/png',
+        'TRANSPARENT': options.transparent !== false,
+        ...(options.params || {})
       },
       serverType: options.serverType || 'geoserver',
       crossOrigin: 'anonymous',
@@ -159,7 +170,8 @@ export class MapUtils {
     const layer = new ImageLayer({
       source: source,
       visible: options.visible !== false,
-      opacity: options.opacity !== undefined ? options.opacity : 0.7
+      opacity: options.opacity !== undefined ? options.opacity : 0.7,
+      extent: layerExtent || undefined
     })
 
     // 设置图层ID（用于管理）
@@ -170,6 +182,87 @@ export class MapUtils {
     }
 
     return layer
+  }
+
+  static resolveMetadataExtent(metadata = {}) {
+    const bounds = Array.isArray(metadata.bounds) ? metadata.bounds.map(Number) : null
+    if (!bounds || bounds.length !== 4 || bounds.some(value => !Number.isFinite(value))) {
+      return null
+    }
+
+    const sourceCrs = metadata.crs || 'EPSG:4326'
+    try {
+      return sourceCrs === 'EPSG:3857' ? bounds : transformExtent(bounds, sourceCrs, 'EPSG:3857')
+    } catch (error) {
+      console.warn('图层范围转换失败，按经纬度处理:', error)
+      return transformExtent(bounds, 'EPSG:4326', 'EPSG:3857')
+    }
+  }
+
+  // 加载固定范围的WMS影像，作为服务不可用时的降级显示。
+  static loadStaticWMSImage(url, layers, options = {}) {
+    const metadata = options.metadata || {}
+    const bounds = Array.isArray(metadata.bounds) ? metadata.bounds.map(Number) : null
+    if (!bounds || bounds.length !== 4 || bounds.some(value => !Number.isFinite(value))) {
+      return this.loadImageWMS(url, layers, options)
+    }
+
+    const sourceCrs = metadata.crs || 'EPSG:4326'
+    let imageExtent = bounds
+    try {
+      imageExtent = sourceCrs === 'EPSG:3857' ? bounds : transformExtent(bounds, sourceCrs, 'EPSG:3857')
+    } catch (error) {
+      console.warn('静态WMS影像范围转换失败，按经纬度处理:', error)
+      imageExtent = transformExtent(bounds, 'EPSG:4326', 'EPSG:3857')
+    }
+
+    const extentWidth = Math.max(1, imageExtent[2] - imageExtent[0])
+    const extentHeight = Math.max(1, imageExtent[3] - imageExtent[1])
+    const aspectRatio = extentWidth / extentHeight
+    const imageWidth = options.width || 2048
+    const imageHeight = Math.max(256, Math.round(imageWidth / aspectRatio))
+    const requestUrl = new URL(url, window.location.origin)
+    requestUrl.searchParams.set('SERVICE', 'WMS')
+    requestUrl.searchParams.set('VERSION', options.version || '1.1.1')
+    requestUrl.searchParams.set('REQUEST', 'GetMap')
+    requestUrl.searchParams.set('LAYERS', layers)
+    requestUrl.searchParams.set('STYLES', options.styles || '')
+    requestUrl.searchParams.set('SRS', 'EPSG:3857')
+    requestUrl.searchParams.set('BBOX', imageExtent.join(','))
+    requestUrl.searchParams.set('WIDTH', String(imageWidth))
+    requestUrl.searchParams.set('HEIGHT', String(imageHeight))
+    requestUrl.searchParams.set('FORMAT', options.format || 'image/png')
+    requestUrl.searchParams.set('TRANSPARENT', String(options.transparent !== false))
+
+    const source = new ImageStatic({
+      url: options.imageUrl || requestUrl.toString(),
+      imageExtent,
+      projection: 'EPSG:3857',
+      crossOrigin: 'anonymous'
+    })
+
+    source.on('imageloaderror', (event) => {
+      console.error('静态遥感影像加载失败:', {
+        layers,
+        url: options.imageUrl || requestUrl.toString(),
+        extent: imageExtent,
+        event
+      })
+    })
+
+    source.on('imageloadend', () => {
+      console.log('静态遥感影像加载完成:', {
+        layers,
+        url: options.imageUrl || requestUrl.toString(),
+        extent: imageExtent
+      })
+    })
+
+    return new ImageLayer({
+      source,
+      visible: options.visible !== false,
+      opacity: options.opacity !== undefined ? options.opacity : 1
+    })
   }
 
   // 获取WMS GetFeatureInfo（用于点击获取信息）

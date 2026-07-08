@@ -42,7 +42,7 @@
                 <div class="upload-types">支持 .csv/.xlsx/.xls 表格，.tif/.tiff 气候栅格，或ADF文件夹ZIP</div>
               </div>
               <div class="file-status">
-                {{ selectedFile ? selectedFile.name : '未选择文件' }}
+                {{ selectedFileLabel }}
               </div>
               <div v-if="fileCapabilities" class="capability-card">
                 <div class="capability-title">文件识别结果</div>
@@ -100,6 +100,56 @@
             >
               {{ isAnalyzing ? '分析中...' : isClimateAnalysisBlocked ? '当前文件不适用于本模块' : '开始分析' }}
             </button>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-header">
+            <Files class="section-icon" />
+            <span>最近结果</span>
+          </div>
+          <div class="section-content">
+            <div class="history-toolbar">
+              <span>{{ historyItems.length }} 条</span>
+              <div class="history-toolbar-actions">
+                <button
+                  v-if="historyItems.length > 0"
+                  type="button"
+                  class="history-action-btn"
+                  @click="clearHistoryItems"
+                >
+                  清空
+                </button>
+                <button
+                  type="button"
+                  class="history-action-btn primary"
+                  @click="historyExpanded = !historyExpanded"
+                >
+                  {{ historyExpanded ? '收起' : '展开' }}
+                </button>
+              </div>
+            </div>
+            <div v-if="historyExpanded && historyItems.length > 0" class="history-list">
+              <div
+                v-for="item in historyItems"
+                :key="item.id"
+                class="history-item"
+              >
+                <button type="button" class="history-item-main" @click="restoreHistoryItem(item)">
+                  <div class="history-item-title">{{ item.title }}</div>
+                  <div class="history-item-subtitle">{{ item.subtitle }}</div>
+                  <div class="history-item-time">{{ formatHistoryTime(item.timestamp) }}</div>
+                </button>
+                <button type="button" class="history-delete-btn" @click="deleteHistoryItem(item)">删除</button>
+              </div>
+            </div>
+            <div v-else-if="historyExpanded" class="history-empty">
+              这里会保留最近几次可直接查看的统计结果
+            </div>
+            <div v-else class="history-collapsed-tip">
+              <span v-if="historyItems.length > 0">点击展开查看历史结果，不会再挤占左侧主操作区域</span>
+              <span v-else>这里会保留最近几次可直接查看的统计结果</span>
+            </div>
           </div>
         </div>
 
@@ -214,10 +264,12 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { ArrowLeft, CircleCheck, CircleClose, Files, Search } from '@element-plus/icons-vue'
 import { climateMonitoringService } from '../services/api.js'
+import { clearResultHistory, formatHistoryTime, loadResultHistory, removeResultHistory, saveResultHistory } from '../utils/resultHistory.js'
 
 // 响应式数据
 const fileInput = ref(null)
 const selectedFile = ref(null)
+const restoredFileName = ref('')
 const isAnalyzing = ref(false)
 const uploadProgress = ref(0)
 const analysisStatus = ref('')
@@ -229,6 +281,8 @@ const statistics = ref([])
 const analysisNotice = ref('')
 const fileCapabilities = ref(null)
 const selectedMetric = ref('')
+const historyItems = ref([])
+const historyExpanded = ref(false)
 const chartData = ref({
   temperature: [],
   precipitation: [],
@@ -244,6 +298,7 @@ const windSpeedChart = ref(null)
 
 // 状态轮询间隔
 let statusCheckInterval = null
+const HISTORY_KEY = 'climate_monitoring'
 
 // 文件选择处理
 const handleFileSelect = (event) => {
@@ -253,6 +308,7 @@ const handleFileSelect = (event) => {
     const validationResult = validateClimateDataFile(file)
     if (validationResult.isValid) {
       selectedFile.value = file
+      restoredFileName.value = ''
       fileCapabilities.value = null
       selectedMetric.value = ''
       errorMessage.value = ''
@@ -333,6 +389,15 @@ const climateMetricBadges = [
 
 const isClimateAnalysisBlocked = computed(() => !!fileCapabilities.value?.unsupported_for_climate)
 const showMetricSelector = computed(() => !!fileCapabilities.value?.manual_selection_required)
+const selectedFileLabel = computed(() => {
+  if (selectedFile.value?.name) {
+    return selectedFile.value.name
+  }
+  if (restoredFileName.value) {
+    return `历史结果: ${restoredFileName.value}`
+  }
+  return '未选择文件'
+})
 const selectedMetricLabel = computed(() => {
   const current = climateMetricBadges.find(metric => metric.key === selectedMetric.value)
   return current ? current.label : ''
@@ -352,6 +417,7 @@ const capabilityModeText = computed(() => {
 const removeFile = () => {
   selectedFile.value = null
   fileInput.value.value = ''
+  restoredFileName.value = ''
   selectedMetric.value = ''
   fileCapabilities.value = null
   clearAnalysisState()
@@ -368,6 +434,77 @@ const clearAnalysisState = () => {
     humidity: [],
     windSpeed: []
   }
+}
+
+const buildHistoryPayload = () => ({
+  fileName: selectedFile.value?.name || restoredFileName.value || '气候统计结果',
+  fileCapabilities: fileCapabilities.value,
+  selectedMetric: selectedMetric.value,
+  statistics: statistics.value,
+  analysisNotice: analysisNotice.value,
+  chartData: chartData.value
+})
+
+const persistCurrentResult = () => {
+  if (statistics.value.length === 0) {
+    return
+  }
+
+  const payload = buildHistoryPayload()
+  historyItems.value = saveResultHistory(HISTORY_KEY, {
+    id: `${payload.fileName}_${Date.now()}`,
+    title: payload.fileName,
+    subtitle: `${statistics.value.length} 组统计结果`,
+    timestamp: Date.now(),
+    payload
+  })
+}
+
+const restoreHistoryItem = (item) => {
+  const payload = item?.payload
+  if (!payload?.statistics || !payload?.chartData) {
+    errorMessage.value = '该历史结果已失效，请重新分析'
+    return
+  }
+
+  selectedFile.value = null
+  restoredFileName.value = payload.fileName || item.title || ''
+  fileCapabilities.value = payload.fileCapabilities || null
+  selectedMetric.value = payload.selectedMetric || ''
+  statistics.value = Array.isArray(payload.statistics) ? payload.statistics : []
+  analysisNotice.value = payload.analysisNotice || ''
+  chartData.value = {
+    temperature: Array.isArray(payload.chartData.temperature) ? payload.chartData.temperature : [],
+    precipitation: Array.isArray(payload.chartData.precipitation) ? payload.chartData.precipitation : [],
+    humidity: Array.isArray(payload.chartData.humidity) ? payload.chartData.humidity : [],
+    windSpeed: Array.isArray(payload.chartData.windSpeed) ? payload.chartData.windSpeed : []
+  }
+  hasData.value = true
+  errorMessage.value = ''
+  successMessage.value = '已恢复历史统计结果'
+
+  setTimeout(() => {
+    generateCharts()
+  }, 100)
+}
+
+const deleteHistoryItem = (item) => {
+  historyItems.value = removeResultHistory(HISTORY_KEY, item.id)
+  successMessage.value = '历史记录已删除'
+}
+
+const clearHistoryItems = () => {
+  if (historyItems.value.length === 0) {
+    return
+  }
+
+  if (!window.confirm('确定要清空当前所有历史记录吗？')) {
+    return
+  }
+
+  clearResultHistory(HISTORY_KEY)
+  historyItems.value = []
+  successMessage.value = '历史记录已清空'
 }
 
 // 清除错误信息
@@ -762,6 +899,8 @@ const loadAnalysisResults = async () => {
     if (statistics.value.length === 0) {
       throw new Error('当前文件未解析出可展示的气候指标')
     }
+
+    persistCurrentResult()
     
     // 生成图表
     setTimeout(() => {
@@ -795,6 +934,7 @@ const cleanup = () => {
 // 组件挂载
 onMounted(() => {
   console.log('气候监测组件已挂载')
+  historyItems.value = loadResultHistory(HISTORY_KEY)
 })
 
 // 组件卸载时清理
@@ -1671,6 +1811,118 @@ const drawWindSpeedChart = () => {
   opacity: 0.6;
   transform: none;
   box-shadow: none;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.history-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: #6f8192;
+}
+
+.history-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.history-action-btn {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #4a7db2;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.history-action-btn.primary {
+  color: #1f78d1;
+}
+
+.history-item {
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #dbe6f0;
+  border-radius: 10px;
+  background: #f8fbfd;
+}
+
+.history-item:hover {
+  border-color: #bfd5e8;
+  background: #eef5fb;
+}
+
+.history-item-main {
+  flex: 1;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.history-item-main:hover {
+  transform: translateY(-1px);
+}
+
+.history-delete-btn {
+  align-self: center;
+  min-width: 44px;
+  padding: 6px 0;
+  border: none;
+  background: transparent;
+  color: #d95c5c;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.history-item-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #2f455c;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.history-item-subtitle,
+.history-item-time {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6f8192;
+}
+
+.history-empty {
+  margin-top: 10px;
+  padding: 16px 12px;
+  border: 1px dashed #dbe6f0;
+  border-radius: 10px;
+  background: #f8fbfd;
+  color: #8a98a8;
+  font-size: 13px;
+  text-align: center;
+}
+
+.history-collapsed-tip {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #7b8a99;
+  line-height: 1.6;
 }
 
 /* 进度指示器样式 */

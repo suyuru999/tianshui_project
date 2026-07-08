@@ -25,6 +25,8 @@ from .spatial_views import (
     wms_map,
     wfs_capabilities,
     spatial_layers,
+    highres_imagery_list,
+    publish_highres_imagery,
     publish_to_geoserver,
     geoserver_status,
     system_health
@@ -64,6 +66,8 @@ urlpatterns = [
     path('spatial/wms/map/', wms_map, name='wms_map'),
     path('spatial/wfs/capabilities/', wfs_capabilities, name='wfs_capabilities'),
     path('spatial/layers/', spatial_layers, name='spatial_layers'),
+    path('spatial/highres-imagery/', highres_imagery_list, name='highres_imagery_list'),
+    path('spatial/highres-imagery/publish/', publish_highres_imagery, name='publish_highres_imagery'),
     path('spatial/publish/', publish_to_geoserver, name='publish_to_geoserver'),
     path('spatial/geoserver/status/', geoserver_status, name='geoserver_status'),
     path('system/health/', system_health, name='system_health'),

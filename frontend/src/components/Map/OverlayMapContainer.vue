@@ -38,6 +38,10 @@ import XYZ from 'ol/source/XYZ'
 import TileWMS from 'ol/source/TileWMS'
 // 不再需要坐标转换，直接使用 EPSG:4326
 import { MapUtils } from '../../utils/mapUtils'
+import {
+  ensurePreferredHighResImageryRecord,
+  getHighResImageryQualifiedLayerName
+} from '../../utils/highResImagery.js'
 import { API_CONFIG } from '../../config/api.js'
 import OverlayAnalysisPopup from './OverlayAnalysisPopup.vue'
 
@@ -48,7 +52,17 @@ const props = defineProps({
     default: () => ({
       ecology: true,
       economy: true,
-      engineering: true
+      engineering: true,
+      referenceImagery: false
+    })
+  },
+  layerOpacity: {
+    type: Object,
+    default: () => ({
+      referenceImagery: 100,
+      ecology: 70,
+      economy: 60,
+      engineering: 80
     })
   }
 })
@@ -61,6 +75,7 @@ const TIANSHUI_CENTER = [105.7, 34.6] // 天水市中心坐标
 
 // 地图实例
 let map = null
+let referenceImageryLayer = null
 let ecologyRasterLayer = null
 let economyVectorLayer = null
 let engineeringVectorLayer = null
@@ -163,6 +178,7 @@ const getEcologyClassification = (rawValue, sourceField = '') => {
 
 // 监听图层可见性变化
 watch(() => props.layerVisibility, (newVal) => {
+  syncReferenceImageryVisibility(newVal.referenceImagery)
   if (ecologyRasterLayer) {
     ecologyRasterLayer.setVisible(newVal.ecology)
   }
@@ -172,6 +188,10 @@ watch(() => props.layerVisibility, (newVal) => {
   if (engineeringVectorLayer) {
     engineeringVectorLayer.setVisible(newVal.engineering)
   }
+}, { deep: true })
+
+watch(() => props.layerOpacity, (newVal) => {
+  applyLayerOpacity(newVal)
 }, { deep: true })
 
 // 创建高德底图（稳定可靠）
@@ -211,7 +231,7 @@ const createWMSLayers = () => {
     crossOrigin: 'anonymous'
     }),
     visible: props.layerVisibility.ecology,
-    opacity: 0.7,
+    opacity: Number(props.layerOpacity?.ecology ?? 70) / 100,
     zIndex: 2
   })
   
@@ -227,7 +247,7 @@ const createWMSLayers = () => {
     crossOrigin: 'anonymous'
     }),
     visible: props.layerVisibility.economy,
-    opacity: 0.6,
+    opacity: Number(props.layerOpacity?.economy ?? 60) / 100,
     zIndex: 3
   })
   
@@ -243,11 +263,70 @@ const createWMSLayers = () => {
     crossOrigin: 'anonymous'
     }),
     visible: props.layerVisibility.engineering,
-    opacity: 0.8,
+    opacity: Number(props.layerOpacity?.engineering ?? 80) / 100,
     zIndex: 4
   })
   
   return [ecologyRasterLayer, economyVectorLayer, engineeringVectorLayer]
+}
+
+const applyLayerOpacity = (opacityConfig = {}) => {
+  if (referenceImageryLayer) {
+    referenceImageryLayer.setOpacity(Number(opacityConfig.referenceImagery ?? 100) / 100)
+  }
+  if (ecologyRasterLayer) {
+    ecologyRasterLayer.setOpacity(Number(opacityConfig.ecology ?? 70) / 100)
+  }
+  if (economyVectorLayer) {
+    economyVectorLayer.setOpacity(Number(opacityConfig.economy ?? 60) / 100)
+  }
+  if (engineeringVectorLayer) {
+    engineeringVectorLayer.setOpacity(Number(opacityConfig.engineering ?? 80) / 100)
+  }
+  map?.render()
+}
+
+const ensureReferenceImageryLayer = async () => {
+  if (!map) return
+  if (referenceImageryLayer) {
+    referenceImageryLayer.setVisible(true)
+    return
+  }
+
+  const imageryRecord = await ensurePreferredHighResImageryRecord()
+  const layerName = getHighResImageryQualifiedLayerName(imageryRecord)
+  referenceImageryLayer = imageryRecord.source_kind === 'business_layer'
+    ? MapUtils.loadWMS(GEOSERVER_OWS_PROXY, layerName, {
+      visible: true,
+      opacity: Number(props.layerOpacity?.referenceImagery ?? 100) / 100,
+      serverType: 'geoserver',
+      metadata: imageryRecord.metadata
+    })
+    : MapUtils.loadStaticWMSImage(GEOSERVER_OWS_PROXY, layerName, {
+      visible: true,
+      opacity: Number(props.layerOpacity?.referenceImagery ?? 100) / 100,
+      serverType: 'geoserver',
+      metadata: imageryRecord.metadata,
+      imageUrl: imageryRecord.preview_image_url || undefined
+    })
+  referenceImageryLayer.setZIndex(1)
+  map.addLayer(referenceImageryLayer)
+}
+
+const syncReferenceImageryVisibility = async (visible) => {
+  if (!map) return
+  if (!visible) {
+    if (referenceImageryLayer) {
+      referenceImageryLayer.setVisible(false)
+    }
+    return
+  }
+
+  try {
+    await ensureReferenceImageryLayer()
+  } catch (error) {
+    console.error('加载叠加分析遥感影像底图失败:', error)
+  }
 }
 
 // 初始化地图
@@ -312,6 +391,9 @@ const initMap = () => {
         console.log('✅ 地图渲染完成')
     }
   }, 200)
+
+    syncReferenceImageryVisibility(props.layerVisibility.referenceImagery)
+    applyLayerOpacity(props.layerOpacity)
   
     // 再次刷新（确保底图显示）
   setTimeout(() => {

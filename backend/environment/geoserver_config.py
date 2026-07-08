@@ -194,6 +194,56 @@ class GeoServerManager:
         
         logger.warning(f"数据存储 {datastore_name} 创建失败或已存在")
         return False
+
+    def _extract_coverage_names(self, coverage_list: Optional[Dict[str, Any]]) -> list[str]:
+        """兼容 GeoServer 多种 coverages.json 返回结构。"""
+        if not coverage_list or 'coverages' not in coverage_list:
+            return []
+
+        coverages_node = coverage_list.get('coverages')
+        if isinstance(coverages_node, str):
+            return []
+        if not isinstance(coverages_node, dict):
+            return []
+
+        raw_coverage = coverages_node.get('coverage', [])
+        if isinstance(raw_coverage, dict):
+            raw_coverage = [raw_coverage]
+        elif not isinstance(raw_coverage, list):
+            return []
+
+        names = []
+        for item in raw_coverage:
+            if isinstance(item, dict):
+                name = item.get('name')
+                if name:
+                    names.append(name)
+            elif isinstance(item, str) and item:
+                names.append(item)
+        return names
+
+    def resolve_raster_layer_name(self, coverage_store_name: str, preferred_layer_name: Optional[str] = None) -> Optional[str]:
+        """根据 CoverageStore 解析 GeoServer 实际可用的栅格图层名。"""
+        candidates = []
+        if preferred_layer_name:
+            candidates.append(preferred_layer_name)
+        if coverage_store_name:
+            candidates.append(coverage_store_name)
+
+        for candidate in candidates:
+            layer_info = self._make_request('GET', f'layers/{self.workspace}:{candidate}.json')
+            if layer_info:
+                return candidate
+
+        coverage_list = self._make_request(
+            'GET',
+            f'workspaces/{self.workspace}/coveragestores/{coverage_store_name}/coverages.json'
+        )
+        coverage_names = self._extract_coverage_names(coverage_list)
+        if coverage_names:
+            return coverage_names[0]
+
+        return coverage_store_name or preferred_layer_name
     
     def publish_raster(self, coverage_store_name: str, layer_name: str, file_path: str, style_type: str = 'default') -> bool:
         """发布栅格图层（使用CoverageStore）"""
@@ -205,52 +255,51 @@ class GeoServerManager:
                 return False
             
             # 对于用户上传的GeoTIFF，优先使用REST文件上传方式。
-            # 这比让GeoServer读取Django本地路径更稳，尤其是在Windows、中文文件名或服务权限受限时。
-            try:
-                self.delete_coveragestore(coverage_store_name, recurse=True)
-                upload_url = (
-                    f"{self.base_url}/rest/workspaces/{self.workspace}/coveragestores/"
-                    f"{coverage_store_name}/file.geotiff"
-                )
-                logger.info(f"直接上传GeoTIFF到GeoServer: {upload_url}")
-                with open(file_path, 'rb') as raster_file:
-                    response = requests.put(
-                        upload_url,
-                        auth=self.auth,
-                        params={
-                            'coverageName': layer_name,
-                            'configure': 'all',
-                            'update': 'overwrite',
-                        },
-                        data=raster_file,
-                        headers={'Content-Type': 'image/tiff'},
-                        timeout=600
+            # 真彩参考影像体积很大时，直接切换为文件路径引用，避免重复传输数GB数据。
+            if style_type != 'imagery_rgb':
+                try:
+                    self.delete_coveragestore(coverage_store_name, recurse=True)
+                    upload_url = (
+                        f"{self.base_url}/rest/workspaces/{self.workspace}/coveragestores/"
+                        f"{coverage_store_name}/file.geotiff"
                     )
+                    logger.info(f"直接上传GeoTIFF到GeoServer: {upload_url}")
+                    with open(file_path, 'rb') as raster_file:
+                        response = requests.put(
+                            upload_url,
+                            auth=self.auth,
+                            params={
+                                'coverageName': layer_name,
+                                'configure': 'all',
+                                'update': 'overwrite',
+                            },
+                            data=raster_file,
+                            headers={'Content-Type': 'image/tiff'},
+                            timeout=600
+                        )
 
-                logger.info(f"GeoTIFF上传响应: HTTP {response.status_code}")
-                if response.status_code in [200, 201, 202]:
-                    import time
-                    time.sleep(2)
-                    layer_check = self._make_request('GET', f'layers/{self.workspace}:{layer_name}.json')
-                    if layer_check:
-                        logger.info(f"✅ 栅格图层 {layer_name} 上传并发布成功")
-                        try:
-                            min_val, max_val = self._get_raster_statistics(file_path)
-                        except Exception as stats_error:
-                            logger.warning(f"读取栅格统计信息失败: {stats_error}，使用默认值域")
-                            min_val, max_val = (0.0, 5.0)
-                        style_name = f"{layer_name}_style"
-                        sld_content = self._build_raster_style(style_type, min_val, max_val)
-                        if self.create_style(style_name, sld_content):
-                            self.apply_style_to_layer(layer_name, style_name)
+                    logger.info(f"GeoTIFF上传响应: HTTP {response.status_code}")
+                    if response.status_code in [200, 201, 202]:
+                        import time
+                        time.sleep(2)
+                        layer_check = self._make_request('GET', f'layers/{self.workspace}:{layer_name}.json')
+                        if layer_check:
+                            logger.info(f"✅ 栅格图层 {layer_name} 上传并发布成功")
+                            min_val, max_val = self._resolve_raster_style_range(style_type, file_path)
+                            style_name = f"{layer_name}_style"
+                            sld_content = self._build_raster_style(style_type, min_val, max_val)
+                            if self.create_style(style_name, sld_content):
+                                self.apply_style_to_layer(layer_name, style_name)
+                            return True
+                        logger.warning(f"GeoTIFF已上传，但图层 {layer_name} 暂未查询到")
                         return True
-                    logger.warning(f"GeoTIFF已上传，但图层 {layer_name} 暂未查询到")
-                    return True
 
-                logger.warning(f"直接上传GeoTIFF失败: HTTP {response.status_code}")
-                logger.warning(f"响应内容: {response.text[:1000]}")
-            except Exception as direct_upload_error:
-                logger.warning(f"直接上传GeoTIFF异常，回退到路径引用方式: {direct_upload_error}")
+                    logger.warning(f"直接上传GeoTIFF失败: HTTP {response.status_code}")
+                    logger.warning(f"响应内容: {response.text[:1000]}")
+                except Exception as direct_upload_error:
+                    logger.warning(f"直接上传GeoTIFF异常，回退到路径引用方式: {direct_upload_error}")
+            else:
+                logger.info("检测到高分真彩参考影像，跳过GeoTIFF直传，优先使用文件路径引用方式")
 
             # 对于GeoTIFF，使用CoverageStore而不是DataStore
             # 方法1: 检查并删除旧的CoverageStore（如果存在但类型不对）
@@ -381,14 +430,16 @@ class GeoServerManager:
                 
                 # 检查Coverage是否存在
                 coverage_list = self._make_request('GET', f'workspaces/{self.workspace}/coveragestores/{coverage_store_name}/coverages.json')
+                coverage_names = self._extract_coverage_names(coverage_list)
                 
                 # 如果Coverage不存在，手动创建
-                if not coverage_list or not coverage_list.get('coverages'):
+                if not coverage_names:
                     logger.info("Coverage不存在，手动创建...")
+                    native_coverage_name = Path(file_path).stem
                     coverage_data = {
                         "coverage": {
                             "name": layer_name,
-                            "nativeName": layer_name,
+                            "nativeName": native_coverage_name,
                             "title": layer_name,
                             "enabled": True
                         }
@@ -408,19 +459,11 @@ class GeoServerManager:
                 
                 # 检查CoverageStore中的Coverage
                     coverage_list = self._make_request('GET', f'workspaces/{self.workspace}/coveragestores/{coverage_store_name}/coverages.json')
+                    coverage_names = self._extract_coverage_names(coverage_list)
                     
                     actual_layer_name = None
-                    if coverage_list and 'coverages' in coverage_list:
-                        coverages = coverage_list['coverages'].get('coverage', [])
-                        if isinstance(coverages, list) and len(coverages) > 0:
-                            # 获取第一个coverage的名称
-                            coverage_obj = coverages[0]
-                            if isinstance(coverage_obj, dict):
-                                actual_layer_name = coverage_obj.get('name', layer_name)
-                            else:
-                                actual_layer_name = layer_name
-                        elif isinstance(coverages, dict):
-                            actual_layer_name = coverages.get('name', layer_name)
+                    if coverage_names:
+                        actual_layer_name = coverage_names[0]
                     
                     # 如果找到了coverage，检查图层名称是否匹配期望的名称
                     if actual_layer_name:
@@ -461,34 +504,28 @@ class GeoServerManager:
                                                 final_check = self._make_request('GET', f'layers/{self.workspace}:{layer_name}.json')
                                                 if final_check:
                                                     logger.info(f"✅ 栅格图层 {layer_name} 验证成功")
-                                                    
+
                                                     # 为图层创建并应用默认样式
                                                     style_name = f"{layer_name}_style"
-                                                    
-                                                    # 从栅格文件读取统计信息，以创建合适的样式
-                                                    try:
-                                                        min_val, max_val = self._get_raster_statistics(file_path)
-                                                        logger.info(f"使用栅格值域创建样式: {min_val} - {max_val}")
-                                                    except Exception as stats_error:
-                                                        logger.warning(f"读取栅格统计信息失败: {stats_error}，使用默认值域")
-                                                        min_val, max_val = (0.0, 5.0)
-                                                    
+
+                                                    min_val, max_val = self._resolve_raster_style_range(style_type, file_path)
                                                     sld_content = self._build_raster_style(style_type, min_val, max_val)
                                                     if self.create_style(style_name, sld_content):
                                                         self.apply_style_to_layer(layer_name, style_name)
-                                                    
+
                                                     return True
-                                                else:
-                                                    logger.warning(f"⚠️ 图层 {layer_name} 验证失败，但文件已上传成功")
-                                                    
-                                                    # 即使验证失败，也尝试应用样式（使用实际图层名称）
-                                                    if actual_layer_name:
-                                                        style_name = f"{actual_layer_name}_style"
-                                                        sld_content = self._build_raster_style(style_type, 0.0, 5.0)
-                                                        if self.create_style(style_name, sld_content):
-                                                            self.apply_style_to_layer(actual_layer_name, style_name)
-                                                    
-                                                    return True  # 文件上传成功，即使验证失败也返回True
+
+                                                logger.warning(f"⚠️ 图层 {layer_name} 验证失败，但文件已上传成功")
+
+                                                # 即使验证失败，也尝试应用样式（使用实际图层名称）
+                                                if actual_layer_name:
+                                                    style_name = f"{actual_layer_name}_style"
+                                                    min_val, max_val = self._resolve_raster_style_range(style_type, file_path)
+                                                    sld_content = self._build_raster_style(style_type, min_val, max_val)
+                                                    if self.create_style(style_name, sld_content):
+                                                        self.apply_style_to_layer(actual_layer_name, style_name)
+
+                                                return True  # 文件上传成功，即使验证失败也返回True
                                         else:
                                             logger.warning(f"⚠️ Coverage重命名失败: HTTP {update_response.status_code}")
                                 except Exception as rename_error:
@@ -500,34 +537,13 @@ class GeoServerManager:
                                 # 为实际创建的图层创建并应用默认样式
                                 style_name = f"{actual_layer_name}_style"
                                 logger.info(f"为实际图层 {actual_layer_name} 创建样式: {style_name}")
-                                
-                                # 从栅格文件读取统计信息，以创建合适的样式
-                                # 为了确保不会卡住，直接使用默认值域（如果实际值域与默认值域差异较大，样式可能不够准确，但至少能显示）
-                                logger.info(f"快速模式：使用默认值域创建样式（避免长时间读取栅格数据）")
-                                min_val, max_val = (0.0, 5.0)
-                                logger.info(f"使用默认值域创建样式: {min_val} - {max_val}")
-                                
-                                # 可选：尝试快速读取统计信息（不阻塞）
-                                try:
-                                    import threading
-                                    result = [None]
-                                    def quick_get_stats():
-                                        try:
-                                            result[0] = self._get_raster_statistics(file_path)
-                                        except:
-                                            pass
-                                    
-                                    thread = threading.Thread(target=quick_get_stats)
-                                    thread.daemon = True
-                                    thread.start()
-                                    thread.join(timeout=3)  # 3秒超时
-                                    
-                                    if result[0] and thread.is_alive() == False:
-                                        min_val, max_val = result[0]
-                                        logger.info(f"✅ 快速获取到统计信息，更新值域: {min_val} - {max_val}")
-                                except:
-                                    pass
-                                
+
+                                min_val, max_val = self._resolve_raster_style_range(
+                                    style_type,
+                                    file_path,
+                                    default_range=(0.0, 5.0),
+                                    quick_timeout=3,
+                                )
                                 sld_content = self._build_raster_style(style_type, min_val, max_val)
                                 if self.create_style(style_name, sld_content):
                                     logger.info(f"样式 {style_name} 创建成功，开始应用到图层")
@@ -544,15 +560,8 @@ class GeoServerManager:
                                 
                                 # 为图层创建并应用默认样式
                                 style_name = f"{actual_layer_name}_style"
-                                
-                                # 从栅格文件读取统计信息，以创建合适的样式
-                                try:
-                                    min_val, max_val = self._get_raster_statistics(file_path)
-                                    logger.info(f"使用栅格值域创建样式: {min_val} - {max_val}")
-                                except Exception as stats_error:
-                                    logger.warning(f"读取栅格统计信息失败: {stats_error}，使用默认值域")
-                                    min_val, max_val = (0.0, 5.0)
-                                
+
+                                min_val, max_val = self._resolve_raster_style_range(style_type, file_path)
                                 sld_content = self._build_raster_style(style_type, min_val, max_val)
                                 if self.create_style(style_name, sld_content):
                                     self.apply_style_to_layer(actual_layer_name, style_name)
@@ -567,7 +576,12 @@ class GeoServerManager:
                             
                             # 为图层创建并应用默认样式
                             style_name = f"{layer_name}_style"
-                            sld_content = self._build_raster_style(style_type, 0.0, 5.0)
+                            min_val, max_val = self._resolve_raster_style_range(
+                                style_type,
+                                file_path,
+                                default_range=(0.0, 5.0),
+                            )
+                            sld_content = self._build_raster_style(style_type, min_val, max_val)
                             if self.create_style(style_name, sld_content):
                                 self.apply_style_to_layer(layer_name, style_name)
                             
@@ -978,7 +992,52 @@ class GeoServerManager:
         except Exception as e:
             logger.warning(f"读取栅格统计信息失败: {e}，使用默认值域: 0.0-5.0")
             return (0.0, 5.0)
-    
+
+    def _resolve_raster_style_range(
+        self,
+        style_type: str,
+        file_path: str,
+        default_range: tuple = (0.0, 5.0),
+        quick_timeout: Optional[int] = None,
+    ) -> tuple:
+        """为不同栅格样式选择值域，真彩影像无需扫描整幅数据。"""
+        if style_type == 'imagery_rgb':
+            return (0.0, 255.0)
+
+        if quick_timeout:
+            try:
+                import threading
+
+                result = [None]
+
+                def quick_get_stats():
+                    try:
+                        result[0] = self._get_raster_statistics(file_path)
+                    except Exception:
+                        result[0] = None
+
+                thread = threading.Thread(target=quick_get_stats)
+                thread.daemon = True
+                thread.start()
+                thread.join(timeout=quick_timeout)
+                if result[0] and not thread.is_alive():
+                    min_val, max_val = result[0]
+                    logger.info(f"✅ 快速获取到栅格统计信息: {min_val} - {max_val}")
+                    return min_val, max_val
+                logger.info(f"快速模式：使用默认值域创建样式: {default_range[0]} - {default_range[1]}")
+                return default_range
+            except Exception as exc:
+                logger.warning(f"快速获取栅格统计信息失败: {exc}")
+                return default_range
+
+        try:
+            min_val, max_val = self._get_raster_statistics(file_path)
+            logger.info(f"使用栅格值域创建样式: {min_val} - {max_val}")
+            return min_val, max_val
+        except Exception as stats_error:
+            logger.warning(f"读取栅格统计信息失败: {stats_error}，使用默认值域")
+            return default_range
+
     def _create_default_raster_sld(self, min_value: float = 0.0, max_value: float = 5.0) -> str:
         """创建默认的栅格SLD样式（彩色渐变）"""
         # 确保值域有效
@@ -1335,8 +1394,50 @@ class GeoServerManager:
 </StyledLayerDescriptor>'''
         return sld
 
+    def _create_rgb_imagery_raster_sld(self, red_band: int = 3, green_band: int = 2, blue_band: int = 1) -> str:
+        """创建适用于高分真彩影像的 RGB 通道样式。"""
+        sld = f'''<?xml version="1.0" encoding="UTF-8"?>
+<StyledLayerDescriptor version="1.0.0"
+    xmlns="http://www.opengis.net/sld"
+    xmlns:ogc="http://www.opengis.net/ogc"
+    xmlns:xlink="http://www.w3.org/1999/xlink"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.opengis.net/sld http://schemas.opengis.net/sld/1.0.0/StyledLayerDescriptor.xsd">
+    <NamedLayer>
+        <Name>imagery_rgb_style</Name>
+        <UserStyle>
+            <Title>高分真彩影像样式</Title>
+            <Abstract>基于RGB波段组合的真彩遥感影像显示样式</Abstract>
+            <FeatureTypeStyle>
+                <Rule>
+                    <RasterSymbolizer>
+                        <Opacity>1.0</Opacity>
+                        <ChannelSelection>
+                            <RedChannel>
+                                <SourceChannelName>{red_band}</SourceChannelName>
+                            </RedChannel>
+                            <GreenChannel>
+                                <SourceChannelName>{green_band}</SourceChannelName>
+                            </GreenChannel>
+                            <BlueChannel>
+                                <SourceChannelName>{blue_band}</SourceChannelName>
+                            </BlueChannel>
+                        </ChannelSelection>
+                        <ContrastEnhancement>
+                            <Normalize/>
+                        </ContrastEnhancement>
+                    </RasterSymbolizer>
+                </Rule>
+            </FeatureTypeStyle>
+        </UserStyle>
+    </NamedLayer>
+</StyledLayerDescriptor>'''
+        return sld
+
     def _build_raster_style(self, style_type: str, min_value: float, max_value: float) -> str:
         """根据栅格类型选择样式。"""
+        if style_type == 'imagery_rgb':
+            return self._create_rgb_imagery_raster_sld()
         if style_type == 'ecology_rsei':
             return self._create_ecology_rsei_raster_sld(min_value, max_value)
         return self._create_default_raster_sld(min_value, max_value)

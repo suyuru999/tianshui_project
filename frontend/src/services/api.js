@@ -218,6 +218,16 @@ export const spatialService = {
     return request.get(buildApiUrl(API_ENDPOINTS.SPATIAL.SPATIAL_LAYERS))
   },
 
+  // 获取系统高分影像列表
+  getHighResImageryList() {
+    return request.get(buildApiUrl(API_ENDPOINTS.SPATIAL.HIGHRES_IMAGERY_LIST), {}, { skipAuth: true })
+  },
+
+  // 发布系统高分影像到GeoServer
+  publishHighResImagery(data) {
+    return request.post(buildApiUrl(API_ENDPOINTS.SPATIAL.HIGHRES_IMAGERY_PUBLISH), data, { skipAuth: true })
+  },
+
   // 获取已发布/已上传业务图层
   getBusinessLayers(params = {}) {
     return request.get(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYERS), params, { skipAuth: true })

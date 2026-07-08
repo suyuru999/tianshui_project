@@ -17,7 +17,7 @@
             <el-icon><Download /></el-icon>
             下载数据
           </el-button>
-        </div>
+          </div>
 
         <div v-if="resultData?.preview_mode || resultData?.preview_message" class="result-notice is-preview">
           <div class="notice-title">当前为大文件预览分析</div>
@@ -41,6 +41,13 @@
           <div class="notice-title">可视化图片加载失败</div>
           <div class="notice-text">{{ visualizationLoadError }}</div>
         </div>
+
+        <ResultCompareMap
+          v-if="primaryCompareOverlay"
+          title="遥感结果叠加对比"
+          description="打开遥感影像底图后，可直接把当前彩色分析结果叠加在上面做对比。"
+          :compare-overlay="primaryCompareOverlay"
+        />
 
         <!-- 加载中 -->
         <div v-if="loading" class="loading-data-apple">
@@ -152,6 +159,7 @@ import { ElIcon, ElButton, ElTag, ElMessage } from 'element-plus';
 import { Loading, Download } from '@element-plus/icons-vue';
 import * as echarts from 'echarts';
 import { remoteSensingService } from '../../services/api.js';
+import ResultCompareMap from '../Map/ResultCompareMap.vue';
 
 const props = defineProps({
   status: String, // waiting | analyzing | done
@@ -187,6 +195,11 @@ const primaryIndex = computed(() => {
 const primaryVisualizationUrl = computed(() => {
   const primary = primaryIndex.value;
   return normalizeVisualizationUrl(primary?.visualization_file_url || primary?.visualization_file || null);
+});
+
+const primaryCompareOverlay = computed(() => {
+  const primary = primaryIndex.value;
+  return primary?.compare_overlay || null;
 });
 
 function normalizeVisualizationUrl(url) {

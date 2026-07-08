@@ -657,12 +657,29 @@ class GDALEcologicalIndexCalculator:
             valid_data = index_data[np.isfinite(index_data)]
             if len(valid_data) == 0:
                 raise ValueError("没有有效数据")
+
+            height, width = index_data.shape
+            raster_ratio = width / height if height else 1.0
+            map_panel_weight = min(max(raster_ratio, 1.0), 2.8)
             
             # 创建图形
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+            fig, (ax1, ax2) = plt.subplots(
+                1,
+                2,
+                figsize=(15, 6),
+                gridspec_kw={'width_ratios': [map_panel_weight, 1.0]},
+            )
             
             # 主图：指数分布
-            im1 = ax1.imshow(index_data, cmap=colormap, vmin=np.min(valid_data), vmax=np.max(valid_data))
+            im1 = ax1.imshow(
+                index_data,
+                cmap=colormap,
+                vmin=np.min(valid_data),
+                vmax=np.max(valid_data),
+                aspect='equal',
+                interpolation='nearest',
+            )
+            ax1.set_box_aspect(height / width)
             ax1.set_title(f'{index_name} 分布图')
             ax1.axis('off')
             

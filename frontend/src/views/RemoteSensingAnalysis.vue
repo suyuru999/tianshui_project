@@ -20,10 +20,16 @@
           :disabled-indices="disabledIndices"
           :supported-index-labels="supportedIndexLabels"
           :capabilities-known="capabilitiesKnown"
+          :history-items="historyItems"
+          :history-expanded="historyExpanded"
           @file-change="handleFileChange"
           @start-analysis="handleStartAnalysis"
           @index-change="handleIndexChange"
           @clear-cache="clearCache"
+          @toggle-history="historyExpanded = !historyExpanded"
+          @clear-history="clearHistoryItems"
+          @delete-history="deleteHistoryItem"
+          @restore-history="restoreHistoryItem"
         />
       </div>
       
@@ -84,10 +90,7 @@ const OVERLAY_RSEI_REFRESH_KEY = 'overlay_rsei_refresh_signal';
 const INDEX_OPTIONS = [
   { key: 'rsei', label: '遥感生态指数 (RSEI)' },
   { key: 'ndvi', label: '绿化指数 (NDVI)' },
-  { key: 'greenness', label: '绿度指数' },
   { key: 'ndwi', label: '湿度指数 (NDWI)' },
-  { key: 'wetness', label: '湿度指数 (Tasseled Cap)' },
-  { key: 'ndbi', label: '建筑指数 (NDBI)' },
   { key: 'dryness', label: '干度指数 (NDBSI)' },
   { key: 'heat', label: '热度指数 (LST)' }
 ];
@@ -106,6 +109,7 @@ const resultData = ref(null);
 const currentTaskId = ref(null);
 const currentFile = ref(null);
 const currentImageId = ref(null); // 存储当前影像ID
+const historyExpanded = ref(false);
 
 // 结果缓存管理
 const analysisResultsCache = ref(new Map()); // 存储不同指数类型的分析结果
@@ -163,6 +167,11 @@ const cachedIndices = computed(() => {
     const cached = analysisResultsCache.value.get(`${currentImageId.value}_${key}`);
     return cached && now - cached.timestamp <= 24 * 60 * 60 * 1000;
   });
+});
+const historyItems = computed(() => {
+  return Array.from(analysisResultsCache.value.values())
+    .filter((item) => item?.resultData)
+    .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
 });
 
 // 计算属性
@@ -457,6 +466,63 @@ function clearCache() {
   }
   
   messageStore.success('已清空所有缓存结果');
+}
+
+function clearHistoryItems() {
+  if (historyItems.value.length === 0) {
+    return;
+  }
+
+  if (!window.confirm('确定要清空当前所有历史记录吗？')) {
+    return;
+  }
+
+  clearCache();
+}
+
+function deleteHistoryItem(item) {
+  if (!item?.imageId || !item?.indexType) {
+    return;
+  }
+
+  const normalizedIndex = String(item.indexType).toLowerCase();
+  const cacheMapKey = `${item.imageId}_${normalizedIndex}`;
+  const storageKey = `analysis_result_${item.imageId}_${normalizedIndex}`;
+
+  analysisResultsCache.value.delete(cacheMapKey);
+
+  try {
+    localStorage.removeItem(storageKey);
+    const cacheIndex = JSON.parse(localStorage.getItem('analysis_cache_index') || '[]');
+    const nextCacheIndex = Array.isArray(cacheIndex)
+      ? cacheIndex.filter((key) => key !== storageKey)
+      : [];
+    localStorage.setItem('analysis_cache_index', JSON.stringify(nextCacheIndex));
+  } catch (error) {
+    console.warn('删除历史记录失败:', error);
+  }
+
+  messageStore.success('历史记录已删除');
+}
+
+function restoreHistoryItem(item) {
+  if (!item?.resultData) {
+    messageStore.warning('该历史结果已失效，请重新计算');
+    return;
+  }
+
+  selectedIndex.value = String(item.indexType || 'rsei').toLowerCase();
+  fileName.value = item.fileName || '';
+  currentFile.value = null;
+  currentImageId.value = item.imageId || null;
+  currentTaskId.value = item.resultData?.result?.id || null;
+  syncRemoteCapabilities(item.resultData);
+  resultData.value = item.resultData;
+  status.value = 'done';
+  analysisProgress.value = 100;
+  currentStep.value = '历史结果恢复完成';
+  stepDetail.value = '当前显示的是本地缓存结果，如需重新计算请重新选择文件';
+  messageStore.success('已恢复历史分析结果');
 }
 
 // 从localStorage加载缓存

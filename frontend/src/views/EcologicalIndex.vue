@@ -37,10 +37,10 @@
                 <div class="upload-types">支持 .tif/.tiff 土地利用分类栅格或 Shapefile ZIP；ADF需先转GeoTIFF</div>
               </div>
               <div class="file-status">
-                {{ fileList.length === 0 ? '未选择文件' : `已选择: ${fileList[0].name}` }}
+                {{ currentFileLabel }}
               </div>
               <el-button 
-                v-if="fileList.length > 0"
+                v-if="fileList.length > 0 || restoredFileName"
                 class="re-upload-btn" 
                 @click="clearFile"
                 size="small"
@@ -67,6 +67,57 @@
             >
               开始分析
             </el-button>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-content">
+            <div class="history-card">
+              <div class="history-card__title-row">
+                <FolderOpened class="history-card__icon" />
+                <span class="history-card__title">最近结果</span>
+              </div>
+              <div class="history-card__summary-row">
+                <span class="history-card__count">{{ historyItems.length }} 条</span>
+                <div class="history-card__actions">
+                  <button
+                    v-if="historyExpanded && historyItems.length > 0"
+                    type="button"
+                    class="history-action-btn"
+                    @click="clearHistoryItems"
+                  >
+                    清空
+                  </button>
+                  <button
+                    type="button"
+                    class="history-action-btn primary"
+                    @click="historyExpanded = !historyExpanded"
+                  >
+                    {{ historyExpanded ? '收起' : '展开' }}
+                  </button>
+                </div>
+              </div>
+              <div class="history-card__description">
+                这里会保留最近几次可直接回看的结果
+              </div>
+              <div v-if="historyExpanded && historyItems.length > 0" class="history-list">
+                <div
+                  v-for="item in historyItems"
+                  :key="item.id"
+                  class="history-item"
+                >
+                  <button type="button" class="history-item-main" @click="restoreHistoryItem(item)">
+                    <div class="history-item-title">{{ item.title }}</div>
+                    <div class="history-item-subtitle">{{ item.subtitle }}</div>
+                    <div class="history-item-time">{{ formatHistoryTime(item.timestamp) }}</div>
+                  </button>
+                  <button type="button" class="history-delete-btn" @click="deleteHistoryItem(item)">删除</button>
+                </div>
+              </div>
+              <div v-else-if="historyExpanded" class="history-empty">
+                这里会保留最近几次可直接回看的结果
+              </div>
+            </div>
           </div>
         </div>
         
@@ -127,6 +178,13 @@
               <div class="values-title">土地利用分布与面积比例</div>
               <img :src="landuseVisualizationUrl" alt="土地利用分布图" class="landuse-visualization" />
             </div>
+
+            <ResultCompareMap
+              v-if="compareOverlay"
+              title="上方土地利用图叠加对比"
+              description="这里对比的就是上方那张土地利用分布图，打开遥感影像底图后可直接叠加查看。"
+              :compare-overlay="compareOverlay"
+            />
 
             <!-- 指数值展示 -->
             <div class="index-values">
@@ -226,14 +284,20 @@
 <script>
 import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, Download, Files, Histogram, Search } from '@element-plus/icons-vue'
+import { ArrowLeft, Download, Files, FolderOpened, Histogram, Search } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { API_ENDPOINTS, buildApiUrl } from '../config/api.js'
 import http from '../utils/http.js'
+import ResultCompareMap from '../components/Map/ResultCompareMap.vue'
+import { clearResultHistory, formatHistoryTime, loadResultHistory, removeResultHistory, saveResultHistory } from '../utils/resultHistory.js'
 
 export default {
   name: 'EcologicalIndex',
+  components: {
+    ResultCompareMap
+  },
   setup() {
+    const HISTORY_KEY = 'ecological_index'
     const getRequestErrorMessage = (error, fallback = '服务器错误') => {
       const data = error?.response?.data
       if (Array.isArray(data?.details) && data.details.length > 0) {
@@ -246,9 +310,13 @@ export default {
     const fileList = ref([])
     const globalLoading = ref(false)
     const uploadLoading = ref(false)
+    const restoredFileName = ref('')
     const landuseVisualizationUrl = ref('')
     const landuseStatistics = ref(null)
     const analysisMeta = ref(null)
+    const compareOverlay = ref(null)
+    const historyItems = ref([])
+    const historyExpanded = ref(false)
     
     // 监听 globalLoading 的变化
     watch(globalLoading, (newVal, oldVal) => {
@@ -280,6 +348,15 @@ export default {
     
     // 计算属性
     const hasResults = computed(() => Object.keys(indexResults).length > 0)
+    const currentFileLabel = computed(() => {
+      if (fileList.value.length > 0) {
+        return `已选择: ${fileList.value[0].name}`
+      }
+      if (restoredFileName.value) {
+        return `历史结果: ${restoredFileName.value}`
+      }
+      return '未选择文件'
+    })
     const landuseClasses = computed(() => {
       const classes = landuseStatistics.value?.classes || {}
       return Object.entries(classes)
@@ -356,6 +433,7 @@ export default {
     const handleUploadSuccess = (response, file) => {
       ElMessage.success(`${file.name} 上传成功`)
       fileList.value = [file]
+      restoredFileName.value = ''
     }
     
     // 移除 handleFileChange 函数，因为不再需要
@@ -372,6 +450,7 @@ export default {
     
     const clearFile = () => {
       fileList.value = []
+      restoredFileName.value = ''
       // 清除计算结果
       Object.keys(indexResults).forEach(key => {
         delete indexResults[key]
@@ -379,6 +458,7 @@ export default {
       landuseVisualizationUrl.value = ''
       landuseStatistics.value = null
       analysisMeta.value = null
+      compareOverlay.value = null
       // 重置指数状态
       structureIndices.forEach(index => {
         index.calculated = false
@@ -398,6 +478,82 @@ export default {
         if (bar) bar.dispose()
       }
       ElMessage.info('已清除文件，请重新选择')
+    }
+
+    const syncCalculatedStates = () => {
+      const allIndices = [...structureIndices, ...stressIndices]
+      allIndices.forEach(index => {
+        index.calculated = indexResults[index.apiKey] !== undefined
+        index.loading = false
+      })
+    }
+
+    const buildHistoryPayload = () => ({
+      fileName: fileList.value[0]?.name || restoredFileName.value || '生态环境指数结果',
+      indexResults: { ...indexResults },
+      landuseVisualizationUrl: landuseVisualizationUrl.value,
+      landuseStatistics: landuseStatistics.value,
+      analysisMeta: analysisMeta.value,
+      compareOverlay: compareOverlay.value
+    })
+
+    const persistCurrentResult = () => {
+      if (Object.keys(indexResults).length === 0) {
+        return
+      }
+
+      const payload = buildHistoryPayload()
+      historyItems.value = saveResultHistory(HISTORY_KEY, {
+        id: `${payload.fileName}_${Date.now()}`,
+        title: payload.fileName,
+        subtitle: `${Object.keys(payload.indexResults).length} 项指标`,
+        timestamp: Date.now(),
+        payload
+      })
+    }
+
+    const restoreHistoryItem = (item) => {
+      const payload = item?.payload
+      if (!payload?.indexResults) {
+        ElMessage.warning('该历史结果已失效，请重新分析')
+        return
+      }
+
+      fileList.value = []
+      restoredFileName.value = payload.fileName || item.title || ''
+      Object.keys(indexResults).forEach(key => {
+        delete indexResults[key]
+      })
+      Object.assign(indexResults, payload.indexResults || {})
+      landuseVisualizationUrl.value = payload.landuseVisualizationUrl || ''
+      landuseStatistics.value = payload.landuseStatistics || null
+      analysisMeta.value = payload.analysisMeta || null
+      compareOverlay.value = payload.compareOverlay || null
+      syncCalculatedStates()
+
+      nextTick(() => {
+        updateCharts()
+      })
+      ElMessage.success('已恢复历史结果，当前为只读查看状态')
+    }
+
+    const deleteHistoryItem = (item) => {
+      historyItems.value = removeResultHistory(HISTORY_KEY, item.id)
+      ElMessage.success('历史记录已删除')
+    }
+
+    const clearHistoryItems = () => {
+      if (historyItems.value.length === 0) {
+        return
+      }
+
+      if (!window.confirm('确定要清空当前所有历史记录吗？')) {
+        return
+      }
+
+      clearResultHistory(HISTORY_KEY)
+      historyItems.value = []
+      ElMessage.success('历史记录已清空')
     }
     
     const startAnalysis = async () => {
@@ -427,6 +583,7 @@ export default {
           const visualization = analysisResponse.visualization
           landuseVisualizationUrl.value = visualization?.visualization_file_url || ''
           landuseStatistics.value = visualization?.landuse_statistics || null
+          compareOverlay.value = visualization?.compare_overlay || null
           analysisMeta.value = analysisResponse.meta || null
           
           // 更新指数状态
@@ -436,6 +593,8 @@ export default {
               index.calculated = true
             }
           })
+
+          persistCurrentResult()
           
           ElMessage.success('分析完成！')
           
@@ -508,11 +667,13 @@ export default {
           if (response.visualization) {
             landuseVisualizationUrl.value = response.visualization.visualization_file_url || landuseVisualizationUrl.value
             landuseStatistics.value = response.visualization.landuse_statistics || landuseStatistics.value
+            compareOverlay.value = response.visualization.compare_overlay || compareOverlay.value
           }
           if (response.meta) {
             analysisMeta.value = response.meta
           }
           index.calculated = true
+          persistCurrentResult()
           
           ElMessage.success(`${index.name} 计算完成`)
           
@@ -872,6 +1033,7 @@ export default {
     
     // 生命周期
     onMounted(() => {
+      historyItems.value = loadResultHistory(HISTORY_KEY)
       // 初始化图表
       nextTick(() => {
         updateCharts()
@@ -882,10 +1044,15 @@ export default {
       fileList,
       globalLoading,
       uploadLoading,
+      restoredFileName,
+      historyItems,
+      historyExpanded,
       structureIndices,
       stressIndices,
       indexResults,
       hasResults,
+      currentFileLabel,
+      compareOverlay,
       landuseVisualizationUrl,
       landuseClasses,
       analysisMeta,
@@ -895,6 +1062,10 @@ export default {
       beforeUpload,
       testButtonClick,
       clearFile,
+      clearHistoryItems,
+      deleteHistoryItem,
+      restoreHistoryItem,
+      formatHistoryTime,
       startAnalysis,
       calculateIndex,
       getIndexName,
@@ -1232,6 +1403,149 @@ export default {
   transform: none;
   box-shadow: none;
   cursor: not-allowed;
+}
+
+.history-card {
+  padding: 14px;
+  border: 1px solid #dbe6f0;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.history-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.history-card__icon {
+  width: 18px;
+  height: 18px;
+  color: #4f79b5;
+}
+
+.history-card__title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1f3c63;
+}
+
+.history-card__summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.history-card__count,
+.history-card__actions {
+  font-size: 14px;
+  color: #6f8192;
+}
+
+.history-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.history-card__description {
+  margin-top: 12px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #7a8fa5;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 240px;
+  margin-top: 16px;
+  overflow-y: auto;
+}
+
+.history-action-btn {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #4a7db2;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.history-action-btn.primary {
+  color: #1f78d1;
+}
+
+.history-item {
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #dbe6f0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.history-item:hover {
+  border-color: #bfd5e8;
+  background: #eef5fb;
+}
+
+.history-item-main {
+  flex: 1;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.history-item-main:hover {
+  transform: translateY(-1px);
+}
+
+.history-delete-btn {
+  align-self: center;
+  min-width: 44px;
+  padding: 6px 0;
+  border: none;
+  background: transparent;
+  color: #d95c5c;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.history-item-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #2f455c;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.history-item-subtitle,
+.history-item-time {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6f8192;
+}
+
+.history-empty {
+  margin-top: 16px;
+  padding: 16px 12px;
+  border: 1px dashed #dbe6f0;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #8a98a8;
+  font-size: 13px;
+  text-align: center;
 }
 
 /* 指数选择区域 */

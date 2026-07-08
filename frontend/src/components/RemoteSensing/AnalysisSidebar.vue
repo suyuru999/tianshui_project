@@ -89,17 +89,65 @@
 
     <!-- 缓存管理 -->
     <div class="section">
-      <div class="section-title">
-        <FolderOpened class="section-icon" />
-        <span>缓存管理</span>
-      </div>
+      <div class="history-card">
+        <div class="history-card__title-row">
+          <FolderOpened class="history-card__icon" />
+          <div class="history-card__title">最近结果</div>
+        </div>
+        <div class="history-card__summary-row">
+          <span class="history-card__count">{{ historyItems.length }} 条</span>
+          <div class="history-card__actions">
+            <button
+              v-if="historyExpanded && historyItems.length > 0"
+              type="button"
+              class="history-text-btn"
+              @click="$emit('clear-history')"
+            >
+              清空
+            </button>
+            <button
+              type="button"
+              class="history-toggle-btn"
+              @click="$emit('toggle-history')"
+            >
+              {{ historyExpanded ? '收起' : '展开' }}
+            </button>
+          </div>
+        </div>
+        <div class="history-card__description">
+          这里会保留最近几次可直接回看的结果
+        </div>
 
-      <button 
-        class="cache-btn" 
-        @click="$emit('clear-cache')"
-      >
-        清空缓存
-      </button>
+        <div v-if="historyExpanded && historyItems.length > 0" class="history-list">
+          <div
+            v-for="item in historyItems"
+            :key="`${item.imageId}_${item.indexType}_${item.timestamp}`"
+            class="history-item"
+          >
+            <button
+              type="button"
+              class="history-item__main"
+              @click="$emit('restore-history', item)"
+            >
+              <div class="history-item__title">{{ item.fileName || '未命名影像' }}</div>
+              <div class="history-item__meta">
+                <span>{{ getIndexLabel(item.indexType) }}</span>
+                <span>{{ formatHistoryTime(item.timestamp) }}</span>
+              </div>
+            </button>
+            <button
+              type="button"
+              class="history-delete-btn"
+              @click="$emit('delete-history', item)"
+            >
+              删除
+            </button>
+          </div>
+        </div>
+        <div v-else-if="historyExpanded" class="history-empty">
+          当前还没有可恢复的分析结果
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -107,6 +155,7 @@
 <script setup>
 import { ref, watch } from 'vue';
 import { ArrowLeft, FolderOpened, Files, Search, TrendCharts } from '@element-plus/icons-vue';
+import { formatHistoryTime } from '../../utils/resultHistory.js';
 
 const props = defineProps({
   selectedIndex: String,
@@ -131,9 +180,26 @@ const props = defineProps({
   capabilitiesKnown: {
     type: Boolean,
     default: false
+  },
+  historyItems: {
+    type: Array,
+    default: () => []
+  },
+  historyExpanded: {
+    type: Boolean,
+    default: false
   }
 });
-const emit = defineEmits(['file-change', 'start-analysis', 'index-change', 'clear-cache']);
+const emit = defineEmits([
+  'file-change',
+  'start-analysis',
+  'index-change',
+  'clear-cache',
+  'toggle-history',
+  'clear-history',
+  'delete-history',
+  'restore-history'
+]);
 
 const localIndex = ref(props.selectedIndex || 'rsei');
 watch(() => props.selectedIndex, (val) => {
@@ -158,6 +224,17 @@ function onIndexChange(val) {
     return;
   }
   emit('index-change', val);
+}
+
+function getIndexLabel(indexType) {
+  const map = {
+    rsei: '遥感生态指数 (RSEI)',
+    ndvi: '绿化指数 (NDVI)',
+    ndwi: '湿度指数 (NDWI)',
+    dryness: '干度指数 (NDBSI)',
+    heat: '热度指数 (LST)'
+  };
+  return map[String(indexType || '').toLowerCase()] || indexType || '未知指数';
 }
 </script>
 
@@ -425,22 +502,156 @@ function onIndexChange(val) {
 
 
 /* 缓存管理 */
-.cache-btn {
-  width: 100%;
-  background: #f5f5f5;
-  border: 1px solid #d9d9d9;
-  color: #666;
-  font-weight: 500;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-  padding: 10px 16px;
+.history-card {
+  padding: 14px;
+  border: 1px solid #dbe6f0;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.history-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.history-card__icon {
+  width: 18px;
+  height: 18px;
+  color: #4f79b5;
+}
+
+.history-card__summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.history-card__title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1f3c63;
+}
+
+.history-card__count,
+.history-card__actions {
+  font-size: 14px;
+  color: #6f8192;
+}
+
+.history-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.history-text-btn,
+.history-toggle-btn,
+.history-delete-btn,
+.history-item__main {
+  font: inherit;
+}
+
+.history-text-btn,
+.history-toggle-btn {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #4a7db2;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
 }
 
-.cache-btn:hover {
-  background: #e6f7ff;
-  border-color: #1890ff;
-  color: #1890ff;
+.history-toggle-btn {
+  color: #1f78d1;
+}
+
+.history-card__description {
+  margin-top: 12px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #7a8fa5;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 240px;
+  margin-top: 16px;
+  overflow-y: auto;
+}
+
+.history-item {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #dbe6f0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.history-item:hover {
+  border-color: #bfd5e8;
+  background: #eef5fb;
+}
+
+.history-item__main {
+  flex: 1;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.history-item__main:hover {
   transform: translateY(-1px);
+}
+
+.history-item__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #2f455c;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.history-item__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #6f8192;
+}
+
+.history-delete-btn {
+  align-self: center;
+  min-width: 44px;
+  padding: 6px 0;
+  border: none;
+  background: transparent;
+  color: #d95c5c;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.history-empty {
+  margin-top: 16px;
+  padding: 16px 12px;
+  border: 1px dashed #dbe6f0;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #8a98a8;
+  font-size: 13px;
+  text-align: center;
 }
 </style> 

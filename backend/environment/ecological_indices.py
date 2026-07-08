@@ -741,10 +741,21 @@ class EcologicalIndexCalculator:
             colors_list = ['#8B0000', '#FF0000', '#FFA500', '#FFFF00', '#00FF00', '#006400']
             n_bins = 256
             cmap = LinearSegmentedColormap.from_list('custom', colors_list, N=n_bins)
+
+            height, width = index_data.shape
+            if width >= height:
+                map_width = 10.0
+                map_height = max(4.5, map_width * height / width)
+            else:
+                map_height = 10.0
+                map_width = max(4.5, map_height * width / height)
+
+            # 为颜色条与标题预留少量空间，但保持主图严格按原始宽高比绘制。
+            figure_size = (map_width + 1.6, map_height + 1.2)
             
             # 创建图形 - 添加错误检查
             try:
-                fig, ax = plt.subplots(figsize=(12, 8))
+                fig, ax = plt.subplots(figsize=figure_size)
                 if fig is None or ax is None:
                     logger.error("matplotlib创建图形失败")
                     return False
@@ -754,7 +765,8 @@ class EcologicalIndexCalculator:
             
             try:
                 # 绘制指数图
-                im = ax.imshow(index_data, cmap=cmap, aspect='auto')
+                im = ax.imshow(index_data, cmap=cmap, aspect='equal', interpolation='nearest')
+                ax.set_box_aspect(height / width)
                 
                 # 添加颜色条
                 cbar = plt.colorbar(im, ax=ax, shrink=0.8)
