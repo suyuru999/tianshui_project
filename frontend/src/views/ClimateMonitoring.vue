@@ -39,7 +39,7 @@
                 </div>
                 <div class="upload-text">上传气候数据文件</div>
                 <div class="upload-hint">拖放文件到此处或点击选择文件</div>
-                <div class="upload-types">支持 .csv/.xlsx/.xls 表格，.tif/.tiff 气候栅格，或ADF文件夹ZIP</div>
+                <div class="upload-types">支持 .csv/.xlsx/.xls 表格，.tif/.tiff 气候栅格，ADF文件夹ZIP，或完整 Shapefile ZIP（含 .shp/.dbf/.shx，系统将自动读取属性表分析）</div>
               </div>
               <div class="file-status">
                 {{ selectedFileLabel }}
@@ -289,6 +289,7 @@ const chartData = ref({
   humidity: [],
   windSpeed: []
 })
+const chartYearLabels = ref([])
 
 // 图表ref
 const temperatureChart = ref(null)
@@ -351,10 +352,17 @@ const validateClimateDataFile = (file) => {
   // 3. 检查文件类型
   const allowedTypes = ['.csv', '.xlsx', '.xls', '.tif', '.tiff', '.zip']
   const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'))
+  const shapefileSidecars = ['.shp', '.dbf', '.shx', '.prj', '.cpg', '.sbn', '.sbx']
+  if (shapefileSidecars.includes(fileExtension)) {
+    return {
+      isValid: false,
+      errorMessage: '请不要单独上传 .shp/.dbf/.shx 等组件文件；请将完整 Shapefile 打包为一个 ZIP 后上传，系统会自动读取属性表进行气候统计分析。'
+    }
+  }
   if (!allowedTypes.includes(fileExtension)) {
     return {
       isValid: false,
-      errorMessage: '只支持CSV、Excel、GeoTIFF或ADF文件夹ZIP'
+      errorMessage: '只支持 CSV、Excel、GeoTIFF、ADF 文件夹 ZIP，或完整 Shapefile ZIP'
     }
   }
 
@@ -406,10 +414,19 @@ const selectedMetricLabel = computed(() => {
 const capabilityModeText = computed(() => {
   if (!fileCapabilities.value) return ''
   if (fileCapabilities.value.unsupported_for_climate) {
+    if (fileCapabilities.value.source_type === 'unknown_zip') {
+      return '未识别的 ZIP 数据'
+    }
+    if (fileCapabilities.value.detected_mode === 'vector_attribute_table') {
+      return 'Shapefile 属性表'
+    }
     return '检测为遥感指数栅格'
   }
   if (fileCapabilities.value.manual_selection_required) {
     return '单变量气候栅格，待手动指定变量'
+  }
+  if (fileCapabilities.value.detected_mode === 'vector_attribute_table') {
+    return 'Shapefile 属性表分析'
   }
   return fileCapabilities.value.detected_mode === 'single_metric_raster' ? '单变量气候栅格' : '综合气候表格'
 })
@@ -434,6 +451,7 @@ const clearAnalysisState = () => {
     humidity: [],
     windSpeed: []
   }
+  chartYearLabels.value = []
 }
 
 const buildHistoryPayload = () => ({
@@ -442,7 +460,8 @@ const buildHistoryPayload = () => ({
   selectedMetric: selectedMetric.value,
   statistics: statistics.value,
   analysisNotice: analysisNotice.value,
-  chartData: chartData.value
+  chartData: chartData.value,
+  chartYearLabels: chartYearLabels.value
 })
 
 const persistCurrentResult = () => {
@@ -479,6 +498,7 @@ const restoreHistoryItem = (item) => {
     humidity: Array.isArray(payload.chartData.humidity) ? payload.chartData.humidity : [],
     windSpeed: Array.isArray(payload.chartData.windSpeed) ? payload.chartData.windSpeed : []
   }
+  chartYearLabels.value = Array.isArray(payload.chartYearLabels) ? payload.chartYearLabels : []
   hasData.value = true
   errorMessage.value = ''
   successMessage.value = '已恢复历史统计结果'
@@ -874,6 +894,24 @@ const loadAnalysisResults = async () => {
         wind_speed: '风速'
       }
       analysisNotice.value = `当前上传的是单变量气候栅格，系统识别并计算了“${metricMap[rasterMeta.inferred_metric] || rasterMeta.inferred_metric}”指标；其余指标未包含在该文件中，因此不会显示为计算结果。`
+    } else if (data.chart_data?.vector_metadata?.source_type === 'vector_attribute_table') {
+      const metricMap = {
+        temperature: '温度',
+        precipitation: '降水量',
+        humidity: '湿度',
+        wind_speed: '风速'
+      }
+      const labels = (data.chart_data.vector_metadata.available_metrics || [])
+        .map(key => metricMap[key] || key)
+        .join('、')
+      const yearRange = data.chart_data.vector_metadata.year_range
+      const yearText = Array.isArray(yearRange) && yearRange.length === 2
+        ? `，年份范围 ${yearRange[0]}-${yearRange[1]}`
+        : ''
+      const layoutText = data.chart_data.vector_metadata.table_layout === 'year_wide'
+        ? '年份字段宽表'
+        : '属性表'
+      analysisNotice.value = `当前上传的是 Shapefile ${layoutText}，系统已自动识别并统计其中的 ${labels || '气候'} 数据${yearText}。`
     } else {
       analysisNotice.value = ''
     }
@@ -886,6 +924,9 @@ const loadAnalysisResults = async () => {
         humidity: Array.isArray(data.chart_data.humidity) ? data.chart_data.humidity : [],
         windSpeed: Array.isArray(data.chart_data.wind_speed) ? data.chart_data.wind_speed : []
       }
+      chartYearLabels.value = Array.isArray(data.chart_data.vector_metadata?.year_labels)
+        ? data.chart_data.vector_metadata.year_labels
+        : []
     } else {
       console.warn('图表数据不存在或格式无效，使用空数据')
       chartData.value = {
@@ -894,6 +935,7 @@ const loadAnalysisResults = async () => {
         humidity: [],
         windSpeed: []
       }
+      chartYearLabels.value = []
     }
 
     if (statistics.value.length === 0) {
@@ -922,6 +964,10 @@ const generateCharts = () => {
   drawWindSpeedChart()
 }
 
+const getTimeAxisLabel = (index) => {
+  const label = chartYearLabels.value[index]
+  return label !== undefined && label !== null ? String(label) : String(index + 1)
+}
 
 // 清理函数
 const cleanup = () => {
@@ -1033,7 +1079,7 @@ const drawTemperatureChart = () => {
   const step = Math.max(1, Math.floor(data.length / 8))
   for (let i = 0; i < data.length; i += step) {
     const x = margin.left + (chartWidth / (data.length - 1)) * i
-    ctx.fillText((i + 1).toString(), x, canvas.height - margin.bottom + 20)
+    ctx.fillText(getTimeAxisLabel(i), x, canvas.height - margin.bottom + 20)
   }
   
   // 绘制轴标签
@@ -1168,7 +1214,7 @@ const drawPrecipitationChart = () => {
   const step = Math.max(1, Math.floor(data.length / 8))
   for (let i = 0; i < data.length; i += step) {
     const x = margin.left + (chartWidth / data.length) * (i + 0.5)
-    ctx.fillText((i + 1).toString(), x, canvas.height - margin.bottom + 20)
+    ctx.fillText(getTimeAxisLabel(i), x, canvas.height - margin.bottom + 20)
   }
   
   // 绘制轴标签
@@ -1286,7 +1332,7 @@ const drawHumidityChart = () => {
   const step = Math.max(1, Math.floor(data.length / 8))
   for (let i = 0; i < data.length; i += step) {
     const x = margin.left + (chartWidth / (data.length - 1)) * i
-    ctx.fillText((i + 1).toString(), x, canvas.height - margin.bottom + 20)
+    ctx.fillText(getTimeAxisLabel(i), x, canvas.height - margin.bottom + 20)
   }
   
   // 绘制轴标签

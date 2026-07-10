@@ -397,6 +397,8 @@ const getEcologyRiskClass = (ecologyData) => {
   const level = getEcologyLevelClass(ecologyData)
   if (level === 'bad') return 'high-risk'
   if (level === 'poor' || level === 'moderate') return 'medium-risk'
+  if (level === 'good' || level === 'excellent') return 'low-risk'
+  if (String(level).startsWith('class_')) return 'unknown'
   return 'low-risk'
 }
 
@@ -404,6 +406,7 @@ const getEcologyRiskIcon = (ecologyData) => {
   const level = getEcologyLevelClass(ecologyData)
   if (level === 'bad') return '🔴'
   if (level === 'poor' || level === 'moderate') return '🟡'
+  if (String(level).startsWith('class_')) return '🔘'
   return '🟢'
 }
 
@@ -412,6 +415,7 @@ const getEcologyRiskText = (ecologyData) => {
   if (level === 'bad') return '高风险区域：生态环境差，建议优先标注与修复'
   if (level === 'poor') return '生态环境较差，建议重点巡查'
   if (level === 'moderate') return '生态环境中等，建议持续监测'
+  if (String(level).startsWith('class_')) return '当前为上传的分类栅格，已显示分类编码，可结合原始属性辅助判读'
   return '生态环境整体较好'
 }
 

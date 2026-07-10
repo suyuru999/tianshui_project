@@ -133,13 +133,22 @@ def _allow_public_feedback_management():
 def _get_overlay_layer_configs():
     base_dir = os.path.join(settings.MEDIA_ROOT, 'ecological_projects')
     return {
-        'ecology': {
-            'label': '生态指数栅格',
-            'store': 'ecology_raster',
+        'ecology_synced': {
+            'label': '系统RSEI结果',
+            'store': 'ecology_rsei',
             'kind': 'raster',
-            'layer_name': 'ecology_raster',
+            'layer_name': 'ecology_rsei',
             'paths': [
-                os.path.join(base_dir, 'ecology_raster.tif'),
+                os.path.join(base_dir, 'ecology_rsei.tif'),
+            ],
+        },
+        'ecology_uploaded': {
+            'label': '上传生态栅格',
+            'store': 'ecology_uploaded',
+            'kind': 'raster',
+            'layer_name': 'ecology_uploaded',
+            'paths': [
+                os.path.join(base_dir, 'ecology_uploaded.tif'),
             ],
         },
         'economy': {
@@ -306,7 +315,7 @@ def _list_available_rsei_sources():
 
 
 def _sync_latest_rsei_to_overlay(remote_sensing_image_id=None):
-    overlay_config = _get_overlay_layer_configs()['ecology']
+    overlay_config = _get_overlay_layer_configs()['ecology_synced']
     target_path = overlay_config['paths'][0]
 
     source_index, source_image, source_created_at = _get_rsei_source(remote_sensing_image_id=remote_sensing_image_id)
@@ -379,7 +388,7 @@ def _sync_latest_rsei_to_overlay(remote_sensing_image_id=None):
 
     image_name = getattr(source_image, 'name', '') or ''
     metadata = _update_overlay_metadata(
-        'ecology',
+        'ecology_synced',
         description=f'系统自动同步最近一次RSEI结果：{image_name}' if image_name else '系统自动同步最近一次RSEI结果',
         file_name=os.path.basename(source_path),
         layer_name=overlay_config['layer_name'],
@@ -1699,6 +1708,7 @@ def _build_compare_overlay_payload(
     source_filename=None,
     style_hint=None,
     class_color_map=None,
+    infer_background_value=False,
 ):
     """构建前端结果叠加展示所需的标准空间信息。"""
     if not raster_abs or not os.path.exists(raster_abs):
@@ -1731,6 +1741,7 @@ def _build_compare_overlay_payload(
             output_abs=overlay_image_abs,
             style_hint=style_hint,
             class_color_map=class_color_map,
+            infer_background_value=infer_background_value,
         ):
             overlay_image_url = _media_url(request, overlay_image_rel)
 
@@ -1750,6 +1761,12 @@ def _build_compare_overlay_payload(
 
 def _continuous_overlay_colormap(style_hint=None):
     style = str(style_hint or '').lower()
+    if style in {'rsei', 'ecology_rsei'}:
+        return mpl_colors.LinearSegmentedColormap.from_list(
+            'rsei_overlay',
+            ['#8B0000', '#FF0000', '#FFA500', '#FFFF00', '#00FF00', '#006400'],
+            N=256,
+        )
     if style in {'ndwi', 'wetness'}:
         return mpl_colormaps['Blues']
     if style in {'heat', 'lst'}:
@@ -1757,6 +1774,63 @@ def _continuous_overlay_colormap(style_hint=None):
     if style in {'dryness', 'ndbi', 'ndbsi'}:
         return mpl_colormaps['YlOrBr']
     return mpl_colormaps['RdYlGn']
+
+
+def _trim_uploaded_raster_background(data, valid_mask):
+    """尝试识别直接上传栅格四角一致的背景填充值，并将其透明化。"""
+    try:
+        if data.ndim != 2 or not np.any(valid_mask):
+            return valid_mask
+
+        height, width = data.shape
+        window = max(1, min(12, height // 20 or 1, width // 20 or 1))
+        corner_windows = [
+            data[:window, :window],
+            data[:window, width - window:width],
+            data[height - window:height, :window],
+            data[height - window:height, width - window:width],
+        ]
+
+        corner_values = []
+        for block in corner_windows:
+            values = block[np.isfinite(block)]
+            if values.size:
+                corner_values.append(np.round(values, 6))
+
+        if not corner_values:
+            return valid_mask
+
+        merged = np.concatenate(corner_values)
+        unique_values, counts = np.unique(merged, return_counts=True)
+        if unique_values.size == 0:
+            return valid_mask
+
+        dominant_index = int(np.argmax(counts))
+        dominant_value = float(unique_values[dominant_index])
+        dominant_count = int(counts[dominant_index])
+        if dominant_count < max(8, int(merged.size * 0.65)):
+            return valid_mask
+
+        tolerance = max(1e-6, abs(dominant_value) * 1e-6)
+        corner_hits = 0
+        for block in corner_windows:
+            values = block[np.isfinite(block)]
+            if values.size and np.mean(np.isclose(values, dominant_value, atol=tolerance)) >= 0.75:
+                corner_hits += 1
+
+        if corner_hits < 3:
+            return valid_mask
+
+        dominant_mask = valid_mask & np.isclose(data, dominant_value, atol=tolerance)
+        dominant_ratio = float(np.count_nonzero(dominant_mask)) / float(np.count_nonzero(valid_mask))
+        if dominant_ratio < 0.12:
+            return valid_mask
+
+        trimmed_mask = valid_mask & (~dominant_mask)
+        return trimmed_mask if np.any(trimmed_mask) else valid_mask
+    except Exception as exc:
+        logger.warning(f"识别上传栅格背景值失败，跳过透明化优化: {exc}")
+        return valid_mask
 
 
 def _rgba_from_compare_overlay_data(data, valid_mask, class_color_map=None, style_hint=None):
@@ -1786,7 +1860,7 @@ def _rgba_from_compare_overlay_data(data, valid_mask, class_color_map=None, styl
         normalized = np.clip((data - vmin) / (vmax - vmin), 0, 1)
         cmap = _continuous_overlay_colormap(style_hint)
         rgba = (cmap(normalized) * 255).astype(np.uint8)
-        rgba[..., 3] = np.where(valid_mask, 190, 0).astype(np.uint8)
+        rgba[..., 3] = np.where(valid_mask, 255, 0).astype(np.uint8)
 
     rgba[~valid_mask] = (0, 0, 0, 0)
     return rgba
@@ -1798,6 +1872,7 @@ def _generate_compare_overlay_png_with_gdal(
     style_hint=None,
     class_color_map=None,
     max_dimension=1600,
+    infer_background_value=False,
 ):
     try:
         from osgeo import gdal
@@ -1836,6 +1911,9 @@ def _generate_compare_overlay_png_with_gdal(
         if nodata_value is not None and np.isfinite(nodata_value):
             valid_mask &= data != np.float32(nodata_value)
 
+        if infer_background_value:
+            valid_mask = _trim_uploaded_raster_background(data, valid_mask)
+
         if not np.any(valid_mask):
             return False
 
@@ -1852,7 +1930,14 @@ def _generate_compare_overlay_png_with_gdal(
         return False
 
 
-def _generate_compare_overlay_png(raster_abs, output_abs, style_hint=None, class_color_map=None, max_dimension=1600):
+def _generate_compare_overlay_png(
+    raster_abs,
+    output_abs,
+    style_hint=None,
+    class_color_map=None,
+    max_dimension=1600,
+    infer_background_value=False,
+):
     """生成适合地图叠加的透明PNG，不包含白底、标题、坐标轴和图例。"""
     if not raster_abs or not os.path.exists(raster_abs):
         return False
@@ -1881,6 +1966,8 @@ def _generate_compare_overlay_png(raster_abs, output_abs, style_hint=None, class
         mask = np.ma.getmaskarray(band)
         data = np.ma.filled(band, np.nan).astype(np.float32)
         valid_mask = np.isfinite(data) & (~mask)
+        if infer_background_value:
+            valid_mask = _trim_uploaded_raster_background(data, valid_mask)
         if not np.any(valid_mask):
             return False
 
@@ -1900,6 +1987,7 @@ def _generate_compare_overlay_png(raster_abs, output_abs, style_hint=None, class
             style_hint=style_hint,
             class_color_map=class_color_map,
             max_dimension=max_dimension,
+            infer_background_value=infer_background_value,
         )
 
 
@@ -2890,8 +2978,11 @@ def validate_climate_file(file_obj):
     
     # 4. 检查文件类型
     file_name = file_obj.name.lower()
+    if file_name.endswith(('.shp', '.dbf', '.shx', '.prj', '.cpg', '.sbn', '.sbx')):
+        errors.append('请将完整 Shapefile 组件打包为一个 ZIP 后上传，系统会自动读取属性表进行气候统计分析')
+        return errors
     if not file_name.endswith(('.csv', '.xlsx', '.xls', '.tif', '.tiff', '.zip')):
-        errors.append('只支持CSV、Excel、GeoTIFF或ADF ZIP文件格式(.csv, .xlsx, .xls, .tif, .tiff, .zip)')
+        errors.append('只支持 CSV、Excel、GeoTIFF、ADF ZIP，或完整 Shapefile ZIP 文件格式(.csv, .xlsx, .xls, .tif, .tiff, .zip)')
     
     # 5. 检查文件名
     if not file_name or file_name.strip() == '':
@@ -2906,6 +2997,15 @@ def validate_climate_file(file_obj):
 
 def _detect_climate_file_capabilities(file_obj, file_type):
     file_name = getattr(file_obj, 'name', '') or ''
+    file_path = None
+    if isinstance(file_obj, str):
+        file_path = file_obj
+    else:
+        try:
+            file_path = getattr(file_obj, 'path', None)
+        except Exception:
+            file_path = None
+
     supported_metrics = ['temperature', 'precipitation', 'humidity', 'wind_speed']
     detected_mode = 'table'
     inferred_metric = None
@@ -2913,10 +3013,12 @@ def _detect_climate_file_capabilities(file_obj, file_type):
     manual_selection_required = False
     detected_category = 'climate_table'
     reason = None
+    source_type = 'climate_table'
+    field_mapping = {}
 
     if file_type in ['tif', 'tiff', 'zip']:
-        from .climate_analysis import detect_climate_raster_capabilities
-        raster_capability = detect_climate_raster_capabilities(file_name)
+        from .climate_analysis import detect_climate_file_capabilities as detect_climate_source_capabilities
+        raster_capability = detect_climate_source_capabilities(file_path or file_name, file_type)
         inferred_metric = raster_capability.get('inferred_metric')
         supported_metrics = raster_capability.get('supported_metrics', [])
         detected_mode = raster_capability.get('detected_mode', 'single_metric_raster')
@@ -2924,6 +3026,8 @@ def _detect_climate_file_capabilities(file_obj, file_type):
         manual_selection_required = raster_capability.get('manual_selection_required', False)
         detected_category = raster_capability.get('detected_category', 'single_metric_raster')
         reason = raster_capability.get('reason')
+        source_type = raster_capability.get('source_type', 'single_metric_raster')
+        field_mapping = raster_capability.get('field_mapping') or {}
 
     metric_labels = {
         'temperature': '温度',
@@ -2941,6 +3045,8 @@ def _detect_climate_file_capabilities(file_obj, file_type):
         'manual_selection_required': manual_selection_required,
         'detected_category': detected_category,
         'reason': reason,
+        'source_type': source_type,
+        'field_mapping': field_mapping,
     }
 
 @api_view(['POST'])
@@ -3012,7 +3118,7 @@ def upload_climate_data(request):
                     description=serializer.validated_data.get('description', ''),
                     uploaded_by=request.user if request.user.is_authenticated else None
                 )
-                capabilities = _detect_climate_file_capabilities(file_obj, file_type)
+                capabilities = _detect_climate_file_capabilities(data_file.file, file_type)
                 
                 logger.info(f"气候数据文件上传成功: {data_file.id} - {data_file.name}")
                 
@@ -3844,6 +3950,7 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
         payload = {}
         for layer_type, config in configs.items():
             layer_meta = metadata.get(layer_type, {})
+            published = any(os.path.exists(path) for path in config['paths'])
             payload[layer_type] = {
                 'label': config['label'],
                 'layer_name': layer_meta.get('layer_name') or config['layer_name'],
@@ -3855,8 +3962,50 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                 'source_image_name': layer_meta.get('source_image_name') or '',
                 'source_result_id': layer_meta.get('source_result_id') or '',
                 'source_result_created_at': layer_meta.get('source_result_created_at'),
-                'published': any(os.path.exists(path) for path in config['paths']),
+                'published': published,
             }
+
+            if config['kind'] == 'raster' and published:
+                raster_path = config['paths'][0]
+                visualization_rel = None
+                source_type = payload[layer_type].get('source_type') or ''
+                if os.path.exists(raster_path):
+                    try:
+                        with rasterio.open(raster_path) as dataset:
+                            bounds = dataset.bounds
+                            crs = dataset.crs.to_string() if dataset.crs else 'EPSG:4326'
+                            payload[layer_type]['bounds'] = [bounds.left, bounds.bottom, bounds.right, bounds.top]
+                            payload[layer_type]['crs'] = crs
+                    except Exception as exc:
+                        logger.warning(f"读取叠加生态栅格范围失败: {exc}")
+
+                source_result_id = payload[layer_type].get('source_result_id')
+                if source_result_id:
+                    try:
+                        index_obj = EcologicalIndex.objects.get(id=source_result_id)
+                        if getattr(index_obj, 'visualization_file', None):
+                            visualization_rel = index_obj.visualization_file.name
+                            payload[layer_type]['visualization_file_url'] = _media_url(request, visualization_rel)
+                    except EcologicalIndex.DoesNotExist:
+                        pass
+                    except Exception as exc:
+                        logger.warning(f"读取叠加生态结果可视化地址失败: {exc}")
+
+                try:
+                    result_file_rel = os.path.relpath(raster_path, settings.MEDIA_ROOT).replace('\\', '/')
+                    compare_overlay = _build_compare_overlay_payload(
+                        request=request,
+                        raster_abs=raster_path,
+                        result_file_rel=result_file_rel,
+                        visualization_rel=visualization_rel,
+                        source_filename=payload[layer_type].get('file_name') or os.path.basename(raster_path),
+                        style_hint='rsei',
+                        infer_background_value=source_type == 'uploaded_raster' or layer_type == 'ecology_uploaded',
+                    )
+                    if compare_overlay:
+                        payload[layer_type]['overlay_image_url'] = compare_overlay.get('overlay_image_url')
+                except Exception as exc:
+                    logger.warning(f"生成叠加生态透明覆盖图失败: {exc}")
 
         return Response({
             'success': True,
@@ -3882,7 +4031,7 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['delete'], url_path='clear-rsei-cache')
     def clear_rsei_cache(self, request):
         """清理叠加分析可选的系统生成 RSEI 缓存和当前生态栅格挂接。"""
-        ecology_config = _get_overlay_layer_configs()['ecology']
+        ecology_config = _get_overlay_layer_configs()['ecology_synced']
         removed_paths = []
 
         try:
@@ -3949,7 +4098,7 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
             except Exception as exc:
                 logger.warning(f"清理RSEI缓存目录失败 {path}: {exc}")
 
-        _clear_overlay_metadata('ecology')
+        _clear_overlay_metadata('ecology_synced')
 
         return Response({
             'success': True,
@@ -4479,8 +4628,8 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
             os.makedirs(upload_dir, exist_ok=True)
             logger.info(f"上传目录: {upload_dir}")
             
-            # 使用固定文件名以便覆盖旧数据
-            save_path = os.path.join(upload_dir, 'ecology_raster.tif')
+            overlay_config = _get_overlay_layer_configs()['ecology_uploaded']
+            save_path = overlay_config['paths'][0]
             
             # 保存上传的文件
             logger.info(f"开始保存文件到: {save_path}")
@@ -4495,10 +4644,13 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
             try:
                 from .geoserver_config import geoserver_manager
                 
-                logger.info(f"调用publish_raster: coverage_store=ecology_raster, layer=ecology_raster, file={save_path}")
+                logger.info(
+                    f"调用publish_raster: coverage_store={overlay_config['store']}, "
+                    f"layer={overlay_config['layer_name']}, file={save_path}"
+                )
                 success = geoserver_manager.publish_raster(
-                    coverage_store_name='ecology_raster',
-                    layer_name='ecology_raster',
+                    coverage_store_name=overlay_config['store'],
+                    layer_name=overlay_config['layer_name'],
                     file_path=save_path,
                     style_type='ecology_rsei'
                 )
@@ -4507,16 +4659,21 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                 if success:
                     logger.info("✅ GeoServer发布成功")
                     metadata = _update_overlay_metadata(
-                        'ecology',
+                        'ecology_uploaded',
                         description=description,
                         file_name=file_name,
-                        layer_name='ecology_raster',
+                        layer_name=overlay_config['layer_name'],
+                        source_type='uploaded_raster',
+                        source_image_id='',
+                        source_image_name='',
+                        source_result_id='',
+                        source_result_created_at=None,
                     )
                     return Response({
                         'success': True,
                         'message': '生态指数栅格上传成功并已发布到GeoServer',
                         'file_name': file_name,
-                        'layer_name': 'ecology_raster',
+                        'layer_name': overlay_config['layer_name'],
                         'description': description,
                         'metadata': metadata,
                     })

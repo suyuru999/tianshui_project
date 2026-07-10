@@ -24,7 +24,7 @@
     </div>
 
     <div v-if="overlayAvailable" ref="mapEl" class="compare-map"></div>
-    <div v-else class="compare-empty">{{ emptyText }}</div>
+    <div v-else class="compare-empty">{{ resolvedEmptyText }}</div>
   </div>
 </template>
 
@@ -38,6 +38,7 @@ import TileLayer from 'ol/layer/Tile'
 import ImageStatic from 'ol/source/ImageStatic'
 import XYZ from 'ol/source/XYZ'
 import { ScaleLine, defaults as defaultControls } from 'ol/control'
+import { unByKey } from 'ol/Observable'
 import { transformExtent } from 'ol/proj'
 import { MapUtils } from '../../utils/mapUtils'
 import {
@@ -71,13 +72,19 @@ const mapEl = ref(null)
 const overlayOpacity = ref(65)
 const referenceImageryVisible = ref(false)
 const imageryLoading = ref(false)
+const overlayLoadError = ref(false)
 
 const descriptionText = computed(() => (
   props.description || '打开遥感影像底图后，可将当前分析结果直接叠加在上面进行对比。'
 ))
 const overlayExtent = computed(() => resolveOverlayExtent())
 const overlayAvailable = computed(() => Boolean(
-  overlayExtent.value && props.compareOverlay?.overlay_image_url
+  overlayExtent.value && props.compareOverlay?.overlay_image_url && !overlayLoadError.value
+))
+const resolvedEmptyText = computed(() => (
+  overlayLoadError.value
+    ? '结果叠加图文件不存在或生成失败，当前仅保留主结果图展示。请重新分析后再尝试对比。'
+    : props.emptyText
 ))
 
 let map
@@ -85,6 +92,8 @@ let baseLayer
 let resultLayer
 let referenceImageryLayer
 let resizeObserver
+let resultLayerErrorKey = null
+let resultLayerLoadKey = null
 
 onMounted(() => {
   if (!overlayAvailable.value) return
@@ -93,6 +102,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
+  clearResultLayerEvents()
   if (map) {
     map.setTarget(undefined)
   }
@@ -115,6 +125,7 @@ watch(overlayAvailable, async available => {
 }, { flush: 'post' })
 
 watch(() => props.compareOverlay, async () => {
+  overlayLoadError.value = false
   await nextTick()
   if (!map) {
     if (overlayAvailable.value) {
@@ -204,8 +215,20 @@ function resolveOverlayExtent() {
 
 function removeResultLayer() {
   if (!map || !resultLayer) return
+  clearResultLayerEvents()
   map.removeLayer(resultLayer)
   resultLayer = null
+}
+
+function clearResultLayerEvents() {
+  if (resultLayerErrorKey) {
+    unByKey(resultLayerErrorKey)
+    resultLayerErrorKey = null
+  }
+  if (resultLayerLoadKey) {
+    unByKey(resultLayerLoadKey)
+    resultLayerLoadKey = null
+  }
 }
 
 function fitOverlayExtent() {
@@ -215,18 +238,34 @@ function fitOverlayExtent() {
 }
 
 function buildVisualizationLayer(extent) {
+  const source = new ImageStatic({
+    url: props.compareOverlay.overlay_image_url,
+    imageExtent: extent,
+    projection: 'EPSG:3857'
+  })
+
+  resultLayerLoadKey = source.on('imageloadstart', () => {
+    overlayLoadError.value = false
+  })
+  resultLayerErrorKey = source.on('imageloaderror', () => {
+    console.warn('结果叠加图加载失败:', props.compareOverlay?.overlay_image_url || '')
+    overlayLoadError.value = true
+    referenceImageryVisible.value = false
+    if (referenceImageryLayer) {
+      referenceImageryLayer.setVisible(false)
+    }
+    removeResultLayer()
+  })
+
   return new ImageLayer({
-    source: new ImageStatic({
-      url: props.compareOverlay.overlay_image_url,
-      imageExtent: extent,
-      projection: 'EPSG:3857'
-    }),
+    source,
     opacity: Number(overlayOpacity.value) / 100
   })
 }
 
 function rebuildResultLayer() {
   if (!map) return
+  overlayLoadError.value = false
   removeResultLayer()
   const extent = getOverlayExtent()
   if (!extent) return

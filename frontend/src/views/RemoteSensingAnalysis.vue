@@ -87,6 +87,7 @@ import { useLoadingStore } from '../store/loading.js';
 import { useMessageStore } from '../store/message.js';
 
 const OVERLAY_RSEI_REFRESH_KEY = 'overlay_rsei_refresh_signal';
+const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const INDEX_OPTIONS = [
   { key: 'rsei', label: '遥感生态指数 (RSEI)' },
   { key: 'ndvi', label: '绿化指数 (NDVI)' },
@@ -178,8 +179,9 @@ const historyItems = computed(() => {
 const globalLoading = computed(() => loadingStore.globalLoading);
 
 // 组件挂载时检查用户登录状态
-onMounted(() => {
+onMounted(async () => {
   loadCacheFromStorage();
+  await validateHistoryCacheInBackground();
   
   // 调试信息
   console.log('组件挂载，当前状态:', {
@@ -333,8 +335,184 @@ function saveAnalysisResult(resultData, imageId, indexType) {
   }, 100);
 }
 
+function normalizeCacheIndexType(indexType) {
+  return String(indexType || '').toLowerCase();
+}
+
+function buildCacheMapKey(imageId, indexType) {
+  return `${imageId}_${normalizeCacheIndexType(indexType)}`;
+}
+
+function buildCacheStorageKey(imageId, indexType) {
+  return `analysis_result_${imageId}_${normalizeCacheIndexType(indexType)}`;
+}
+
+function removeStorageCacheKey(storageKey) {
+  if (!storageKey) {
+    return;
+  }
+
+  try {
+    localStorage.removeItem(storageKey);
+    const cacheIndex = JSON.parse(localStorage.getItem('analysis_cache_index') || '[]');
+    const nextCacheIndex = Array.isArray(cacheIndex)
+      ? cacheIndex.filter((key) => key !== storageKey)
+      : [];
+    localStorage.setItem('analysis_cache_index', JSON.stringify(nextCacheIndex));
+  } catch (error) {
+    console.warn('移除本地缓存键失败:', storageKey, error);
+  }
+}
+
+function removeCachedEntry(imageId, indexType, options = {}) {
+  if (!imageId || !indexType) {
+    return;
+  }
+
+  const { notify = false, message = '历史记录已删除' } = options;
+  const cacheMapKey = buildCacheMapKey(imageId, indexType);
+  const storageKey = buildCacheStorageKey(imageId, indexType);
+
+  analysisResultsCache.value.delete(cacheMapKey);
+  removeStorageCacheKey(storageKey);
+
+  if (notify) {
+    messageStore.success(message);
+  }
+}
+
+async function checkMediaFileAccessible(url) {
+  const normalizedUrl = String(url || '').trim();
+  if (!normalizedUrl) {
+    return false;
+  }
+
+  try {
+    const resolvedUrl = new URL(normalizedUrl, window.location.origin).toString();
+    const headResponse = await fetch(resolvedUrl, {
+      method: 'HEAD',
+      cache: 'no-store'
+    });
+
+    if (headResponse.ok) {
+      return true;
+    }
+
+    if (headResponse.status !== 405) {
+      return false;
+    }
+  } catch (error) {
+    console.warn('HEAD 校验媒体文件失败，尝试 GET:', normalizedUrl, error);
+  }
+
+  try {
+    const resolvedUrl = new URL(normalizedUrl, window.location.origin).toString();
+    const getResponse = await fetch(resolvedUrl, {
+      method: 'GET',
+      cache: 'no-store'
+    });
+    return getResponse.ok;
+  } catch (error) {
+    console.warn('GET 校验媒体文件失败:', normalizedUrl, error);
+    return false;
+  }
+}
+
+async function validateCachedResult(cacheItem, options = {}) {
+  const { showMessage = false } = options;
+
+  if (!cacheItem?.imageId || !cacheItem?.indexType || !cacheItem?.resultData) {
+    removeCachedEntry(cacheItem?.imageId, cacheItem?.indexType);
+    if (showMessage) {
+      messageStore.warning('该历史结果已失效，请重新分析');
+    }
+    return null;
+  }
+
+  const normalizedIndex = normalizeCacheIndexType(cacheItem.indexType);
+  const isExpired = Date.now() - Number(cacheItem.timestamp || 0) > CACHE_MAX_AGE_MS;
+  if (isExpired) {
+    removeCachedEntry(cacheItem.imageId, normalizedIndex);
+    if (showMessage) {
+      messageStore.warning('该历史结果缓存已过期，请重新分析');
+    }
+    return null;
+  }
+
+  try {
+    const response = await remoteSensingService.getIndices(cacheItem.imageId);
+    const remoteIndices = Array.isArray(response?.indices) ? response.indices : [];
+    const matchedIndex = remoteIndices.find(
+      (item) => normalizeCacheIndexType(item?.index_type) === normalizedIndex
+    );
+
+    if (!matchedIndex) {
+      removeCachedEntry(cacheItem.imageId, normalizedIndex);
+      if (showMessage) {
+        messageStore.warning('该历史结果对应的后台数据已被清理，请重新分析');
+      }
+      return null;
+    }
+
+    const visualizationUrl = matchedIndex.visualization_file_url || matchedIndex.visualization_file || '';
+    if (visualizationUrl) {
+      const canLoadVisualization = await checkMediaFileAccessible(visualizationUrl);
+      if (!canLoadVisualization) {
+        removeCachedEntry(cacheItem.imageId, normalizedIndex);
+        if (showMessage) {
+          messageStore.warning('该历史结果图片文件已不存在，请重新分析');
+        }
+        return null;
+      }
+    }
+
+    const refreshedResultData = {
+      ...cacheItem.resultData,
+      remote_sensing_image_id: cacheItem.imageId,
+      indices: remoteIndices
+    };
+    const refreshedCacheItem = {
+      ...cacheItem,
+      indexType: normalizedIndex,
+      resultData: refreshedResultData
+    };
+
+    const cacheMapKey = buildCacheMapKey(cacheItem.imageId, normalizedIndex);
+    const storageKey = buildCacheStorageKey(cacheItem.imageId, normalizedIndex);
+    analysisResultsCache.value.set(cacheMapKey, refreshedCacheItem);
+    localStorage.setItem(storageKey, JSON.stringify(refreshedCacheItem));
+    return refreshedCacheItem;
+  } catch (error) {
+    console.warn('校验历史缓存失败:', cacheItem.imageId, normalizedIndex, error);
+
+    if (error?.response?.status === 404) {
+      removeCachedEntry(cacheItem.imageId, normalizedIndex);
+      if (showMessage) {
+        messageStore.warning('该历史结果对应的后台记录已不存在，请重新分析');
+      }
+      return null;
+    }
+
+    if (showMessage) {
+      messageStore.warning('暂时无法校验历史结果，请确认后端服务正常后重试');
+    }
+    return cacheItem;
+  }
+}
+
+async function validateHistoryCacheInBackground() {
+  const cacheItems = Array.from(analysisResultsCache.value.values());
+  if (cacheItems.length === 0) {
+    return;
+  }
+
+  for (const cacheItem of cacheItems) {
+    await validateCachedResult(cacheItem, { showMessage: false });
+  }
+}
+
 function getCachedResult(imageId, indexType) {
-  const key = `${imageId}_${indexType.toLowerCase()}`;
+  const key = buildCacheMapKey(imageId, indexType);
   console.log(`查找缓存，键: ${key}, 影像ID: ${imageId}, 指数类型: ${indexType}`);
   
   // 记录当前所有缓存键
@@ -401,20 +579,10 @@ function getCachedResult(imageId, indexType) {
   // 3. 处理找到的缓存
   if (cached) {
     // 检查缓存是否过期（24小时）
-    const isExpired = Date.now() - cached.timestamp > 24 * 60 * 60 * 1000;
+    const isExpired = Date.now() - cached.timestamp > CACHE_MAX_AGE_MS;
     if (isExpired) {
       console.log(`缓存已过期，删除键: ${matchedKey}`);
-      analysisResultsCache.value.delete(matchedKey);
-      
-      // 同时从localStorage中删除
-      try {
-        const storageKey = `analysis_result_${imageId}_${indexType.toLowerCase()}`;
-        localStorage.removeItem(storageKey);
-        console.log(`已删除过期的localStorage缓存: ${storageKey}`);
-      } catch (e) {
-        console.warn('删除过期localStorage缓存失败:', e);
-      }
-      
+      removeCachedEntry(imageId, indexType);
       return null;
     }
     
@@ -485,39 +653,25 @@ function deleteHistoryItem(item) {
     return;
   }
 
-  const normalizedIndex = String(item.indexType).toLowerCase();
-  const cacheMapKey = `${item.imageId}_${normalizedIndex}`;
-  const storageKey = `analysis_result_${item.imageId}_${normalizedIndex}`;
-
-  analysisResultsCache.value.delete(cacheMapKey);
-
-  try {
-    localStorage.removeItem(storageKey);
-    const cacheIndex = JSON.parse(localStorage.getItem('analysis_cache_index') || '[]');
-    const nextCacheIndex = Array.isArray(cacheIndex)
-      ? cacheIndex.filter((key) => key !== storageKey)
-      : [];
-    localStorage.setItem('analysis_cache_index', JSON.stringify(nextCacheIndex));
-  } catch (error) {
-    console.warn('删除历史记录失败:', error);
-  }
-
-  messageStore.success('历史记录已删除');
+  removeCachedEntry(item.imageId, item.indexType, {
+    notify: true,
+    message: '历史记录已删除'
+  });
 }
 
-function restoreHistoryItem(item) {
-  if (!item?.resultData) {
-    messageStore.warning('该历史结果已失效，请重新计算');
+async function restoreHistoryItem(item) {
+  const validatedItem = await validateCachedResult(item, { showMessage: true });
+  if (!validatedItem?.resultData) {
     return;
   }
 
-  selectedIndex.value = String(item.indexType || 'rsei').toLowerCase();
-  fileName.value = item.fileName || '';
+  selectedIndex.value = String(validatedItem.indexType || 'rsei').toLowerCase();
+  fileName.value = validatedItem.fileName || '';
   currentFile.value = null;
-  currentImageId.value = item.imageId || null;
-  currentTaskId.value = item.resultData?.result?.id || null;
-  syncRemoteCapabilities(item.resultData);
-  resultData.value = item.resultData;
+  currentImageId.value = validatedItem.imageId || null;
+  currentTaskId.value = validatedItem.resultData?.result?.id || null;
+  syncRemoteCapabilities(validatedItem.resultData);
+  resultData.value = validatedItem.resultData;
   status.value = 'done';
   analysisProgress.value = 100;
   currentStep.value = '历史结果恢复完成';
@@ -573,12 +727,21 @@ function loadCacheFromStorage() {
         // 验证缓存数据
         if (!cacheData || !cacheData.imageId || !cacheData.indexType || !cacheData.resultData) {
           console.warn(`缓存键 ${storageKey} 的数据无效:`, cacheData);
+          removeStorageCacheKey(storageKey);
+          failedCount++;
+          continue;
+        }
+
+        const isExpired = Date.now() - Number(cacheData.timestamp || 0) > CACHE_MAX_AGE_MS;
+        if (isExpired) {
+          console.warn(`缓存键 ${storageKey} 已过期，自动移除`);
+          removeCachedEntry(cacheData.imageId, cacheData.indexType);
           failedCount++;
           continue;
         }
         
         // 构建内存缓存键
-        const memKey = `${cacheData.imageId}_${cacheData.indexType.toLowerCase()}`;
+        const memKey = buildCacheMapKey(cacheData.imageId, cacheData.indexType);
         
         // 保存到内存缓存
         analysisResultsCache.value.set(memKey, cacheData);

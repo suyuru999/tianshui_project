@@ -8,6 +8,7 @@ import logging
 from typing import Dict, Any, Optional
 from django.conf import settings
 from pathlib import Path
+import numpy as np
 import requests
 from requests.auth import HTTPBasicAuth
 
@@ -1004,6 +1005,14 @@ class GeoServerManager:
         if style_type == 'imagery_rgb':
             return (0.0, 255.0)
 
+        if style_type == 'ecology_rsei':
+            try:
+                min_val, max_val = self._get_raster_percentile_range(file_path, lower=2, upper=98)
+                logger.info(f"使用生态/RSEI动态拉伸值域创建样式: {min_val} - {max_val}")
+                return min_val, max_val
+            except Exception as exc:
+                logger.warning(f"获取生态/RSEI动态拉伸值域失败: {exc}，回退到常规值域")
+
         if quick_timeout:
             try:
                 import threading
@@ -1037,6 +1046,32 @@ class GeoServerManager:
         except Exception as stats_error:
             logger.warning(f"读取栅格统计信息失败: {stats_error}，使用默认值域")
             return default_range
+
+    def _get_raster_percentile_range(self, file_path: str, lower: float = 2, upper: float = 98) -> tuple:
+        """读取栅格有效值的分位数范围，用于和分析页一致的动态拉伸渲染。"""
+        try:
+            import rasterio
+
+            with rasterio.open(file_path) as dataset:
+                data = dataset.read(1, masked=True)
+                valid_data = data.compressed() if hasattr(data, 'compressed') else data.flatten()
+
+            if valid_data.size == 0:
+                raise ValueError('栅格没有可用像元用于动态拉伸')
+
+            min_val = float(np.nanpercentile(valid_data, lower))
+            max_val = float(np.nanpercentile(valid_data, upper))
+
+            if not np.isfinite(min_val) or not np.isfinite(max_val) or max_val <= min_val:
+                raw_min = float(np.nanmin(valid_data))
+                raw_max = float(np.nanmax(valid_data))
+                if np.isfinite(raw_min) and np.isfinite(raw_max) and raw_max > raw_min:
+                    return (raw_min, raw_max)
+                raise ValueError(f'动态拉伸值域无效: {min_val}, {max_val}')
+
+            return (min_val, max_val)
+        except Exception:
+            return self._get_raster_statistics(file_path)
 
     def _create_default_raster_sld(self, min_value: float = 0.0, max_value: float = 5.0) -> str:
         """创建默认的栅格SLD样式（彩色渐变）"""
@@ -1341,31 +1376,58 @@ class GeoServerManager:
         return sld
 
     def _create_ecology_rsei_raster_sld(self, min_value: float = 0.0, max_value: float = 1.0) -> str:
-        """创建生态/RSEI 专用五级分级样式。"""
-        classified_mode = min_value >= 0 and max_value <= 5.5 and max_value > 1.0
+        """创建生态/RSEI 专用分级样式。"""
+        classified_mode = min_value >= 0 and max_value <= 6.5 and max_value > 1.0
 
         if classified_mode:
-            entries = [
-                {'quantity': 1, 'color': '#c0392b', 'label': '差（高风险区域）'},
-                {'quantity': 2, 'color': '#f08c7f', 'label': '较差'},
-                {'quantity': 3, 'color': '#f1c453', 'label': '中等'},
-                {'quantity': 4, 'color': '#9ccf72', 'label': '良好'},
-                {'quantity': 5, 'color': '#2f8f5b', 'label': '优秀'},
-            ]
+            if max_value <= 5.5:
+                entries = [
+                    {'quantity': 1, 'color': '#c0392b', 'label': '差（高风险区域）'},
+                    {'quantity': 2, 'color': '#f08c7f', 'label': '较差'},
+                    {'quantity': 3, 'color': '#f1c453', 'label': '中等'},
+                    {'quantity': 4, 'color': '#9ccf72', 'label': '良好'},
+                    {'quantity': 5, 'color': '#2f8f5b', 'label': '优秀'},
+                ]
+                abstract = 'RSEI五级分级样式（编码栅格）：1=差，5=优秀'
+            else:
+                entries = [
+                    {'quantity': 1, 'color': '#8b1e3f', 'label': '1级'},
+                    {'quantity': 2, 'color': '#c0392b', 'label': '2级'},
+                    {'quantity': 3, 'color': '#f08c7f', 'label': '3级'},
+                    {'quantity': 4, 'color': '#f1c453', 'label': '4级'},
+                    {'quantity': 5, 'color': '#9ccf72', 'label': '5级'},
+                    {'quantity': 6, 'color': '#2f8f5b', 'label': '6级'},
+                ]
+                abstract = '单波段分类栅格样式（1-6级编码）'
             color_map_entries = "\n".join(
                 f'                            <ColorMapEntry color="{entry["color"]}" quantity="{entry["quantity"]}" opacity="0.82" label="{entry["label"]}"/>'
                 for entry in entries
             )
-            abstract = 'RSEI五级分级样式（编码栅格）：1=差，5=优秀'
+            color_map_type = 'intervals'
         else:
+            if not np.isfinite(min_value) or not np.isfinite(max_value) or max_value <= min_value:
+                min_value = 0.0
+                max_value = 1.0
+
+            raw_min = 0.0 if min_value >= 0.0 and max_value <= 1.0 else min_value
+            raw_max = 1.0 if min_value >= 0.0 and max_value <= 1.0 else max_value
+            range_value = max_value - min_value
+            v1 = min_value + range_value * 0.2
+            v2 = min_value + range_value * 0.4
+            v3 = min_value + range_value * 0.6
+            v4 = min_value + range_value * 0.8
+
             color_map_entries = "\n".join([
-                '                            <ColorMapEntry color="#c0392b" quantity="0.200000" opacity="0.84" label="差（高风险区域）"/>',
-                '                            <ColorMapEntry color="#f08c7f" quantity="0.400000" opacity="0.82" label="较差"/>',
-                '                            <ColorMapEntry color="#f1c453" quantity="0.600000" opacity="0.80" label="中等"/>',
-                '                            <ColorMapEntry color="#9ccf72" quantity="0.800000" opacity="0.80" label="良好"/>',
-                '                            <ColorMapEntry color="#2f8f5b" quantity="1.000000" opacity="0.82" label="优秀"/>',
+                f'                            <ColorMapEntry color="#8B0000" quantity="{raw_min:.6f}" opacity="1.0" label="最低值"/>',
+                f'                            <ColorMapEntry color="#FF0000" quantity="{min_value:.6f}" opacity="1.0" label="低值"/>',
+                f'                            <ColorMapEntry color="#FFA500" quantity="{v1:.6f}" opacity="1.0" label="较低值"/>',
+                f'                            <ColorMapEntry color="#FFFF00" quantity="{v2:.6f}" opacity="1.0" label="中值"/>',
+                f'                            <ColorMapEntry color="#00FF00" quantity="{v3:.6f}" opacity="1.0" label="较高值"/>',
+                f'                            <ColorMapEntry color="#006400" quantity="{v4:.6f}" opacity="1.0" label="高值"/>',
+                f'                            <ColorMapEntry color="#006400" quantity="{raw_max:.6f}" opacity="1.0" label="最高值"/>',
             ])
-            abstract = 'RSEI五级分级样式：0-0.2差，0.2-0.4较差，0.4-0.6中等，0.6-0.8良好，0.8-1优秀'
+            abstract = 'RSEI动态拉伸样式：按当前结果有效值范围进行分析页同款渐变渲染'
+            color_map_type = 'intervals'
 
         sld = f'''<?xml version="1.0" encoding="UTF-8"?>
 <StyledLayerDescriptor version="1.0.0"
@@ -1382,8 +1444,13 @@ class GeoServerManager:
             <FeatureTypeStyle>
                 <Rule>
                     <RasterSymbolizer>
-                        <Opacity>0.84</Opacity>
-                        <ColorMap type="intervals">
+                        <Opacity>1.0</Opacity>
+                        <ChannelSelection>
+                            <GrayChannel>
+                                <SourceChannelName>1</SourceChannelName>
+                            </GrayChannel>
+                        </ChannelSelection>
+                        <ColorMap type="{color_map_type}">
 {color_map_entries}
                         </ColorMap>
                     </RasterSymbolizer>

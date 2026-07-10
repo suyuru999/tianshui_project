@@ -239,13 +239,6 @@ async function loadIndicesData() {
   visualizationLoadError.value = '';
 
   try {
-    if (Array.isArray(props.resultData.indices)) {
-      indicesData.value = props.resultData.indices;
-      await nextTick();
-      initCharts();
-      return;
-    }
-
     // 尝试多种方式获取影像ID
     let imageId = null;
 
@@ -256,6 +249,13 @@ async function loadIndicesData() {
     }
 
     if (!imageId) {
+      if (Array.isArray(props.resultData.indices)) {
+        indicesData.value = props.resultData.indices;
+        await nextTick();
+        initCharts();
+        return;
+      }
+
       console.error('无法获取影像ID，resultData:', props.resultData);
       ElMessage.warning('无法获取影像ID');
       return;
@@ -281,11 +281,17 @@ async function loadIndicesData() {
       initCharts();
     } else {
       console.log('暂无指数数据，响应:', response);
-      indicesData.value = [];
+      indicesData.value = Array.isArray(props.resultData.indices) ? props.resultData.indices : [];
     }
   } catch (error) {
     console.error('加载指数数据失败:', error);
-    ElMessage.error('加载分析结果失败: ' + (error.message || '未知错误'));
+    if (Array.isArray(props.resultData.indices)) {
+      indicesData.value = props.resultData.indices;
+      await nextTick();
+      initCharts();
+    } else {
+      ElMessage.error('加载分析结果失败: ' + (error.message || '未知错误'));
+    }
   } finally {
     loading.value = false;
   }
@@ -583,7 +589,7 @@ function getIndexLevel(value) {
 // 获取标签类型
 function getIndexTagType(value) {
   if (value >= 0.8) return 'success';
-  if (value >= 0.6) return '';
+  if (value >= 0.6) return 'info';
   if (value >= 0.4) return 'warning';
   return 'danger';
 }
@@ -597,6 +603,11 @@ function formatValue(value) {
 function handleVisualizationError(event) {
   const failedUrl = event?.target?.currentSrc || event?.target?.src || primaryVisualizationUrl.value || '';
   console.error('可视化图片加载失败:', failedUrl);
+  if (failedUrl && failedUrl.includes('/media/')) {
+    visualizationLoadError.value = '结果图片文件已不存在，通常是旧缓存或后台结果文件已被清理。请重新分析，或删除这条历史记录后再生成。';
+    return;
+  }
+
   visualizationLoadError.value = failedUrl
     ? `图片地址无法访问：${failedUrl}`
     : '图片地址为空或服务未返回有效文件。';

@@ -238,8 +238,13 @@ class ClimateDataFileUploadSerializer(serializers.ModelSerializer):
     
     def validate_file(self, value):
         """验证文件类型"""
-        if not value.name.lower().endswith(('.csv', '.xlsx', '.xls', '.tif', '.tiff', '.zip')):
-            raise serializers.ValidationError("只支持CSV、Excel、GeoTIFF或ADF ZIP文件格式")
+        lower_name = value.name.lower()
+        if lower_name.endswith(('.shp', '.dbf', '.shx', '.prj', '.cpg', '.sbn', '.sbx')):
+            raise serializers.ValidationError(
+                "请将完整 Shapefile 组件打包为一个 ZIP 后上传，系统会自动读取属性表进行气候统计分析"
+            )
+        if not lower_name.endswith(('.csv', '.xlsx', '.xls', '.tif', '.tiff', '.zip')):
+            raise serializers.ValidationError("只支持 CSV、Excel、GeoTIFF、ADF ZIP，或完整 Shapefile ZIP")
         return value
 
 

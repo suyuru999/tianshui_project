@@ -60,6 +60,23 @@
                   </label>
                 </div>
               </div>
+              <div class="layer-item layer-item--stacked">
+                <div class="layer-item-main">
+                  <div class="layer-info">
+                    <span>生态栅格来源</span>
+                  </div>
+                  <div class="layer-controls">
+                    <select
+                      v-model="activeEcologyLayerKey"
+                      class="layer-source-select"
+                      @change="handleEcologySourceChange"
+                    >
+                      <option value="ecology_synced">系统RSEI结果</option>
+                      <option value="ecology_uploaded">上传生态栅格</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
               <div class="layer-item">
                 <div class="layer-info">
                   <span>经济数据矢量</span>
@@ -177,11 +194,12 @@
       </div>
 
       <!-- 右侧地图区域 -->
-      <div class="map-area">
-        <OverlayMapContainer
+        <div class="map-area">
+          <OverlayMapContainer
           ref="mapContainerRef"
           :layer-visibility="layerVisibility"
           :layer-opacity="layerOpacity"
+          :active-ecology-layer-key="activeEcologyLayerKey"
         />
       </div>
     </div>
@@ -199,18 +217,19 @@ const mapContainerRef = ref(null)
 const historyItems = ref([])
 const historyExpanded = ref(false)
 const HISTORY_KEY = 'overlay_analysis_view'
+const activeEcologyLayerKey = ref('ecology_synced')
 
 // 图层可见性控制
 const layerVisibility = reactive({
   referenceImagery: false,
-  ecology: true,
+  ecology: false,
   economy: true,
   engineering: true
 })
 
 const layerOpacity = reactive({
   referenceImagery: 100,
-  ecology: 70,
+  ecology: 88,
   economy: 60,
   engineering: 80
 })
@@ -223,7 +242,8 @@ const persistCurrentView = () => {
     timestamp: Date.now(),
     payload: {
       layerVisibility: { ...layerVisibility },
-      layerOpacity: { ...layerOpacity }
+      layerOpacity: { ...layerOpacity },
+      activeEcologyLayerKey: activeEcologyLayerKey.value
     }
   }, { maxItems: 1 })
 }
@@ -248,6 +268,7 @@ const restoreHistoryItem = (item) => {
     economy: Number(opacity.economy) || 60,
     engineering: Number(opacity.engineering) || 80
   })
+  activeEcologyLayerKey.value = item?.payload?.activeEcologyLayerKey || 'ecology_synced'
 
   if (mapContainerRef.value) {
     mapContainerRef.value.refreshMap()
@@ -274,10 +295,19 @@ const clearHistoryItems = () => {
 const buildHistorySubtitle = () => {
   const labels = []
   if (layerVisibility.referenceImagery) labels.push('遥感影像底图')
-  if (layerVisibility.ecology) labels.push('生态指数栅格')
+  if (layerVisibility.ecology) {
+    labels.push(activeEcologyLayerKey.value === 'ecology_uploaded' ? '上传生态栅格' : '系统RSEI结果')
+  }
   if (layerVisibility.economy) labels.push('经济数据矢量')
   if (layerVisibility.engineering) labels.push('工程项目矢量')
   return labels.length > 0 ? labels.join('、') : '当前未开启任何业务图层'
+}
+
+const handleEcologySourceChange = () => {
+  if (mapContainerRef.value) {
+    mapContainerRef.value.refreshMap()
+  }
+  persistCurrentView()
 }
 
 // 处理图层切换
@@ -290,7 +320,14 @@ const handleLayerToggle = (layerType) => {
 
 // 处理地图刷新
 const handleRefreshMap = (payload = {}) => {
-  if (payload.action === 'deleted' && payload.type && layerVisibility[payload.type] !== undefined) {
+  if (payload.type === 'ecology_synced' || payload.type === 'ecology_uploaded') {
+    if (payload.action === 'updated') {
+      layerVisibility.ecology = true
+      activeEcologyLayerKey.value = payload.type
+    } else if (payload.action === 'deleted' && activeEcologyLayerKey.value === payload.type) {
+      layerVisibility.ecology = false
+    }
+  } else if (payload.action === 'deleted' && payload.type && layerVisibility[payload.type] !== undefined) {
     layerVisibility[payload.type] = false
   }
   if (payload.action === 'updated' && payload.type && layerVisibility[payload.type] !== undefined) {
@@ -483,6 +520,23 @@ watch(layerOpacity, () => {
 .layer-item-extra {
   display: flex;
   justify-content: flex-end;
+}
+
+.layer-source-select {
+  min-width: 170px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #d5e1ed;
+  border-radius: 8px;
+  background: #fff;
+  color: #44515f;
+  font-size: 12px;
+  outline: none;
+}
+
+.layer-source-select:focus {
+  border-color: #1f78d1;
+  box-shadow: 0 0 0 3px rgba(31, 120, 209, 0.12);
 }
 
 .layer-info {

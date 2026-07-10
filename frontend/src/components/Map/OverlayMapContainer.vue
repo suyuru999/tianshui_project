@@ -43,6 +43,8 @@ import {
   getHighResImageryQualifiedLayerName
 } from '../../utils/highResImagery.js'
 import { API_CONFIG } from '../../config/api.js'
+import { API_ENDPOINTS, buildApiUrl } from '../../config/api.js'
+import request from '../../utils/http.js'
 import OverlayAnalysisPopup from './OverlayAnalysisPopup.vue'
 
 // Props
@@ -60,10 +62,14 @@ const props = defineProps({
     type: Object,
     default: () => ({
       referenceImagery: 100,
-      ecology: 70,
+      ecology: 88,
       economy: 60,
       engineering: 80
     })
+  },
+  activeEcologyLayerKey: {
+    type: String,
+    default: 'ecology_synced'
   }
 })
 
@@ -77,8 +83,10 @@ const TIANSHUI_CENTER = [105.7, 34.6] // 天水市中心坐标
 let map = null
 let referenceImageryLayer = null
 let ecologyRasterLayer = null
+let ecologyDisplayLayer = null
 let economyVectorLayer = null
 let engineeringVectorLayer = null
+let ecologyLayerMetadata = {}
 
 const hasFeatureProperties = (item) => {
   if (!item) return false
@@ -116,6 +124,15 @@ const ECOLOGY_CLASS_CODE_MAP = {
   5: ECOLOGY_LEVEL_CONFIG[0]
 }
 
+const ECOLOGY_GENERIC_CLASS_COLORS = {
+  1: '#8b1e3f',
+  2: '#c0392b',
+  3: '#f08c7f',
+  4: '#f1c453',
+  5: '#9ccf72',
+  6: '#2f8f5b'
+}
+
 const parseFiniteNumber = (value) => {
   if (value === null || value === undefined || value === '') {
     return null
@@ -134,22 +151,39 @@ const getEcologyClassification = (rawValue, sourceField = '') => {
   const isIntegerLike = Math.abs(rawValue - Math.round(rawValue)) < 1e-6
 
   if (isIntegerLike) {
-    const classInfo = ECOLOGY_CLASS_CODE_MAP[Math.round(rawValue)]
+    const roundedValue = Math.round(rawValue)
+    const classInfo = ECOLOGY_CLASS_CODE_MAP[roundedValue]
     const looksLikeGradeField =
       normalizedField.includes('GRAY_INDEX') ||
       normalizedField.includes('CLASS') ||
       normalizedField.includes('GRADE') ||
       normalizedField.includes('LEVEL')
 
-    if (classInfo && (looksLikeGradeField || rawValue > 1)) {
+    if (classInfo && looksLikeGradeField) {
       return {
         ...classInfo,
         rawValue,
-        displayValue: Math.round(rawValue),
-        displayValueText: String(Math.round(rawValue)),
+        displayValue: roundedValue,
+        displayValueText: String(roundedValue),
         sourceMode: 'classified',
         normalizedValue: null,
         isHighRisk: classInfo.code === 'bad'
+      }
+    }
+
+    if (roundedValue >= 1 && roundedValue <= 6) {
+      return {
+        code: `class_${roundedValue}`,
+        label: `${roundedValue}级`,
+        shortLabel: String(roundedValue),
+        riskCode: 'unknown',
+        rawValue,
+        displayValue: roundedValue,
+        displayValueText: String(roundedValue),
+        sourceMode: 'classified_generic',
+        normalizedValue: null,
+        isHighRisk: false,
+        color: ECOLOGY_GENERIC_CLASS_COLORS[roundedValue] || '#666666'
       }
     }
   }
@@ -179,9 +213,7 @@ const getEcologyClassification = (rawValue, sourceField = '') => {
 // 监听图层可见性变化
 watch(() => props.layerVisibility, (newVal) => {
   syncReferenceImageryVisibility(newVal.referenceImagery)
-  if (ecologyRasterLayer) {
-    ecologyRasterLayer.setVisible(newVal.ecology)
-  }
+  syncEcologyLayerVisibility(newVal.ecology)
   if (economyVectorLayer) {
     economyVectorLayer.setVisible(newVal.economy)
   }
@@ -193,6 +225,10 @@ watch(() => props.layerVisibility, (newVal) => {
 watch(() => props.layerOpacity, (newVal) => {
   applyLayerOpacity(newVal)
 }, { deep: true })
+
+watch(() => props.activeEcologyLayerKey, () => {
+  refreshEcologyDisplayLayer()
+})
 
 // 创建高德底图（稳定可靠）
 const createBaseMap = () => {
@@ -206,7 +242,33 @@ const createBaseMap = () => {
   })
 }
 
-// 创建三个WMS图层
+const buildEcologyWMSLayer = (layerName) => {
+  const wmsBaseUrl = GEOSERVER_OWS_PROXY
+  const wmsCommonParams = {
+    'VERSION': '1.1.0',
+    'TILED': true,
+    'TRANSPARENT': true,
+    'FORMAT': 'image/png',
+    'SRS': 'EPSG:4326'
+  }
+
+  return new TileLayer({
+    source: new TileWMS({
+      url: wmsBaseUrl,
+      params: {
+        ...wmsCommonParams,
+        'LAYERS': `${GEOSERVER_WORKSPACE}:${layerName}`
+      },
+      serverType: 'geoserver',
+      crossOrigin: 'anonymous'
+    }),
+    visible: props.layerVisibility.ecology,
+    opacity: Number(props.layerOpacity?.ecology ?? 88) / 100,
+    zIndex: 2
+  })
+}
+
+// 创建WMS图层
 const createWMSLayers = () => {
   const wmsBaseUrl = GEOSERVER_OWS_PROXY
   
@@ -219,23 +281,7 @@ const createWMSLayers = () => {
     'SRS': 'EPSG:4326'  // 使用 SRS 对应 WMS 1.1.0，与 View 投影一致
   }
   
-  // 1. 生态栅格图层
-  ecologyRasterLayer = new TileLayer({
-    source: new TileWMS({
-    url: wmsBaseUrl,
-    params: {
-        ...wmsCommonParams,
-        'LAYERS': `${GEOSERVER_WORKSPACE}:ecology_raster`
-    },
-    serverType: 'geoserver',
-    crossOrigin: 'anonymous'
-    }),
-    visible: props.layerVisibility.ecology,
-    opacity: Number(props.layerOpacity?.ecology ?? 70) / 100,
-    zIndex: 2
-  })
-  
-  // 2. 经济矢量图层
+  // 1. 经济矢量图层
   economyVectorLayer = new TileLayer({
     source: new TileWMS({
     url: wmsBaseUrl,
@@ -251,7 +297,7 @@ const createWMSLayers = () => {
     zIndex: 3
   })
   
-  // 3. 工程矢量图层
+  // 2. 工程矢量图层
   engineeringVectorLayer = new TileLayer({
     source: new TileWMS({
     url: wmsBaseUrl,
@@ -267,15 +313,18 @@ const createWMSLayers = () => {
     zIndex: 4
   })
   
-  return [ecologyRasterLayer, economyVectorLayer, engineeringVectorLayer]
+  return [economyVectorLayer, engineeringVectorLayer]
 }
 
 const applyLayerOpacity = (opacityConfig = {}) => {
   if (referenceImageryLayer) {
     referenceImageryLayer.setOpacity(Number(opacityConfig.referenceImagery ?? 100) / 100)
   }
+  if (ecologyDisplayLayer) {
+    ecologyDisplayLayer.setOpacity(Number(opacityConfig.ecology ?? 88) / 100)
+  }
   if (ecologyRasterLayer) {
-    ecologyRasterLayer.setOpacity(Number(opacityConfig.ecology ?? 70) / 100)
+    ecologyRasterLayer.setOpacity(ecologyDisplayLayer ? 0 : Number(opacityConfig.ecology ?? 88) / 100)
   }
   if (economyVectorLayer) {
     economyVectorLayer.setOpacity(Number(opacityConfig.economy ?? 60) / 100)
@@ -300,14 +349,16 @@ const ensureReferenceImageryLayer = async () => {
       visible: true,
       opacity: Number(props.layerOpacity?.referenceImagery ?? 100) / 100,
       serverType: 'geoserver',
-      metadata: imageryRecord.metadata
+      metadata: imageryRecord.metadata,
+      targetProjection: 'EPSG:4326'
     })
     : MapUtils.loadStaticWMSImage(GEOSERVER_OWS_PROXY, layerName, {
       visible: true,
       opacity: Number(props.layerOpacity?.referenceImagery ?? 100) / 100,
       serverType: 'geoserver',
       metadata: imageryRecord.metadata,
-      imageUrl: imageryRecord.preview_image_url || undefined
+      imageUrl: imageryRecord.preview_image_url || undefined,
+      targetProjection: 'EPSG:4326'
     })
   referenceImageryLayer.setZIndex(1)
   map.addLayer(referenceImageryLayer)
@@ -326,6 +377,108 @@ const syncReferenceImageryVisibility = async (visible) => {
     await ensureReferenceImageryLayer()
   } catch (error) {
     console.error('加载叠加分析遥感影像底图失败:', error)
+  }
+}
+
+const syncEcologyLayerVisibility = (visible) => {
+  if (ecologyDisplayLayer) {
+    ecologyDisplayLayer.setVisible(visible)
+  }
+  if (ecologyRasterLayer) {
+    ecologyRasterLayer.setVisible(!ecologyDisplayLayer && visible)
+  }
+}
+
+const loadOverlayLayerMetadata = async () => {
+  try {
+    const endpoint = buildApiUrl(API_ENDPOINTS.OVERLAY_ANALYSIS.UPLOADED_LAYER_METADATA)
+    const response = await request.get(endpoint, {}, { skipAuth: true, silentError: true })
+    ecologyLayerMetadata = response?.data || {}
+  } catch (error) {
+    console.warn('加载叠加图层元数据失败:', error)
+    ecologyLayerMetadata = {}
+  }
+}
+
+const getActiveEcologyMetadata = () => {
+  const preferredKey = props.activeEcologyLayerKey || 'ecology_synced'
+  const preferred = ecologyLayerMetadata?.[preferredKey]
+  if (preferred?.published) {
+    return preferred
+  }
+
+  const fallbackKeys = ['ecology_synced', 'ecology_uploaded']
+  for (const key of fallbackKeys) {
+    const item = ecologyLayerMetadata?.[key]
+    if (item?.published) {
+      return item
+    }
+  }
+
+  return null
+}
+
+const refreshEcologyDisplayLayer = async () => {
+  await loadOverlayLayerMetadata()
+  const metadata = getActiveEcologyMetadata()
+  const overlayImageUrl = metadata?.overlay_image_url
+    ? `${metadata.overlay_image_url}${metadata.overlay_image_url.includes('?') ? '&' : '?'}v=${encodeURIComponent(metadata.updated_at || Date.now())}`
+    : null
+  const useStaticVisualization = Boolean(
+    metadata?.published &&
+    (overlayImageUrl || metadata?.visualization_file_url) &&
+    ['latest_rsei', 'selected_rsei', 'uploaded_raster'].includes(metadata?.source_type)
+  )
+
+  if (!map) return
+
+  if (ecologyRasterLayer) {
+    map.removeLayer(ecologyRasterLayer)
+    ecologyRasterLayer = null
+  }
+
+  if (metadata?.published && metadata?.layer_name) {
+    ecologyRasterLayer = buildEcologyWMSLayer(metadata.layer_name)
+    map.addLayer(ecologyRasterLayer)
+  }
+
+  if (!metadata?.published) {
+    if (ecologyDisplayLayer) {
+      map.removeLayer(ecologyDisplayLayer)
+      ecologyDisplayLayer = null
+    }
+    return
+  }
+
+  if (useStaticVisualization) {
+    if (ecologyDisplayLayer) {
+      map.removeLayer(ecologyDisplayLayer)
+      ecologyDisplayLayer = null
+    }
+    ecologyDisplayLayer = MapUtils.loadStaticWMSImage(GEOSERVER_OWS_PROXY, `${GEOSERVER_WORKSPACE}:${metadata.layer_name}`, {
+      visible: props.layerVisibility.ecology,
+      opacity: Number(props.layerOpacity?.ecology ?? 88) / 100,
+      serverType: 'geoserver',
+      metadata,
+      imageUrl: overlayImageUrl || metadata.visualization_file_url,
+      targetProjection: 'EPSG:4326'
+    })
+    ecologyDisplayLayer.setZIndex(2)
+    map.addLayer(ecologyDisplayLayer)
+    if (ecologyRasterLayer) {
+      ecologyRasterLayer.setOpacity(0)
+      ecologyRasterLayer.setVisible(false)
+    }
+    return
+  }
+
+  if (ecologyDisplayLayer) {
+    map.removeLayer(ecologyDisplayLayer)
+    ecologyDisplayLayer = null
+  }
+  if (ecologyRasterLayer) {
+    ecologyRasterLayer.setOpacity(Number(props.layerOpacity?.ecology ?? 88) / 100)
+    ecologyRasterLayer.setVisible(props.layerVisibility.ecology)
   }
 }
 
@@ -394,6 +547,7 @@ const initMap = () => {
 
     syncReferenceImageryVisibility(props.layerVisibility.referenceImagery)
     applyLayerOpacity(props.layerOpacity)
+    refreshEcologyDisplayLayer()
   
     // 再次刷新（确保底图显示）
   setTimeout(() => {
@@ -847,7 +1001,7 @@ const parseEngineeringData = (data) => {
 const toggleLayer = (layerType) => {
   try {
     if (layerType === 'ecology' && ecologyRasterLayer) {
-      ecologyRasterLayer.setVisible(props.layerVisibility.ecology)
+      syncEcologyLayerVisibility(props.layerVisibility.ecology)
     } else if (layerType === 'economy' && economyVectorLayer) {
       economyVectorLayer.setVisible(props.layerVisibility.economy)
     } else if (layerType === 'engineering' && engineeringVectorLayer) {
@@ -879,6 +1033,8 @@ const closePopup = () => {
 // 处理地图刷新（上传完成后）
 const handleRefreshMap = () => {
   console.log('🔄 数据上传完成，刷新地图图层...')
+
+  refreshEcologyDisplayLayer()
   
   // 刷新所有WMS图层
   if (ecologyRasterLayer) {

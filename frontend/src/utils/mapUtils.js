@@ -127,7 +127,7 @@ export class MapUtils {
 
   // 加载WMS服务
   static loadWMS(url, layers, options = {}) {
-    const layerExtent = this.resolveMetadataExtent(options.metadata)
+    const layerExtent = this.resolveMetadataExtent(options.metadata, options.targetProjection)
     const source = new TileWMS({
       url: url,
       params: {
@@ -152,7 +152,7 @@ export class MapUtils {
 
   // 加载ImageWMS服务（用于叠加分析的栅格图层）
   static loadImageWMS(url, layers, options = {}) {
-    const layerExtent = this.resolveMetadataExtent(options.metadata)
+    const layerExtent = this.resolveMetadataExtent(options.metadata, options.targetProjection)
     const source = new ImageWMS({
       url: url,
       params: {
@@ -184,7 +184,7 @@ export class MapUtils {
     return layer
   }
 
-  static resolveMetadataExtent(metadata = {}) {
+  static resolveMetadataExtent(metadata = {}, targetProjection = 'EPSG:3857') {
     const bounds = Array.isArray(metadata.bounds) ? metadata.bounds.map(Number) : null
     if (!bounds || bounds.length !== 4 || bounds.some(value => !Number.isFinite(value))) {
       return null
@@ -192,10 +192,12 @@ export class MapUtils {
 
     const sourceCrs = metadata.crs || 'EPSG:4326'
     try {
-      return sourceCrs === 'EPSG:3857' ? bounds : transformExtent(bounds, sourceCrs, 'EPSG:3857')
+      return sourceCrs === targetProjection ? bounds : transformExtent(bounds, sourceCrs, targetProjection)
     } catch (error) {
       console.warn('图层范围转换失败，按经纬度处理:', error)
-      return transformExtent(bounds, 'EPSG:4326', 'EPSG:3857')
+      return targetProjection === 'EPSG:4326'
+        ? bounds
+        : transformExtent(bounds, 'EPSG:4326', targetProjection)
     }
   }
 
@@ -208,12 +210,15 @@ export class MapUtils {
     }
 
     const sourceCrs = metadata.crs || 'EPSG:4326'
+    const targetProjection = options.targetProjection || 'EPSG:3857'
     let imageExtent = bounds
     try {
-      imageExtent = sourceCrs === 'EPSG:3857' ? bounds : transformExtent(bounds, sourceCrs, 'EPSG:3857')
+      imageExtent = sourceCrs === targetProjection ? bounds : transformExtent(bounds, sourceCrs, targetProjection)
     } catch (error) {
       console.warn('静态WMS影像范围转换失败，按经纬度处理:', error)
-      imageExtent = transformExtent(bounds, 'EPSG:4326', 'EPSG:3857')
+      imageExtent = targetProjection === 'EPSG:4326'
+        ? bounds
+        : transformExtent(bounds, 'EPSG:4326', targetProjection)
     }
 
     const extentWidth = Math.max(1, imageExtent[2] - imageExtent[0])
@@ -227,7 +232,7 @@ export class MapUtils {
     requestUrl.searchParams.set('REQUEST', 'GetMap')
     requestUrl.searchParams.set('LAYERS', layers)
     requestUrl.searchParams.set('STYLES', options.styles || '')
-    requestUrl.searchParams.set('SRS', 'EPSG:3857')
+    requestUrl.searchParams.set('SRS', targetProjection)
     requestUrl.searchParams.set('BBOX', imageExtent.join(','))
     requestUrl.searchParams.set('WIDTH', String(imageWidth))
     requestUrl.searchParams.set('HEIGHT', String(imageHeight))
@@ -237,7 +242,7 @@ export class MapUtils {
     const source = new ImageStatic({
       url: options.imageUrl || requestUrl.toString(),
       imageExtent,
-      projection: 'EPSG:3857',
+      projection: targetProjection,
       crossOrigin: 'anonymous'
     })
 

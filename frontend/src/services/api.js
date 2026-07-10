@@ -331,8 +331,12 @@ export const climateMonitoringService = {
     // 验证文件类型
     const allowedTypes = ['.csv', '.xlsx', '.xls', '.tif', '.tiff', '.zip']
     const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'))
+    const shapefileSidecars = ['.shp', '.dbf', '.shx', '.prj', '.cpg', '.sbn', '.sbx']
+    if (shapefileSidecars.includes(fileExtension)) {
+      return Promise.reject(new Error('请将完整 Shapefile 组件打包为一个 ZIP 后上传，系统会自动读取属性表进行气候统计分析'))
+    }
     if (!allowedTypes.includes(fileExtension)) {
-      return Promise.reject(new Error('只支持CSV、Excel、GeoTIFF或ADF文件夹ZIP'))
+      return Promise.reject(new Error('只支持 CSV、Excel、GeoTIFF、ADF 文件夹 ZIP，或完整 Shapefile ZIP'))
     }
     
     const formData = new FormData()

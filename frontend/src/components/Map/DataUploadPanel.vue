@@ -118,24 +118,43 @@
               {{ uploading.ecology ? '上传中...' : currentDataType.buttonText }}
             </button>
           </div>
-          <div v-if="publishedLayers.ecology" class="published-row auto-sync-published">
+          <div v-if="publishedLayers.ecologySynced" class="published-row auto-sync-published">
             <div>
-              <strong>生态指数栅格</strong>
+              <strong>系统RSEI结果</strong>
               <span>已发布到地图</span>
-              <span v-if="publishedLayers.ecology.sourceImageName" class="published-meta">
-                来源影像：{{ publishedLayers.ecology.sourceImageName }}
+              <span v-if="publishedLayers.ecologySynced.sourceImageName" class="published-meta">
+                来源影像：{{ publishedLayers.ecologySynced.sourceImageName }}
               </span>
-              <span v-if="publishedLayers.ecology.fileName" class="published-meta">
-                结果文件：{{ publishedLayers.ecology.fileName }}
+              <span v-if="publishedLayers.ecologySynced.fileName" class="published-meta">
+                结果文件：{{ publishedLayers.ecologySynced.fileName }}
               </span>
-              <span v-if="publishedLayers.ecology.description" class="published-meta published-description">
-                说明：{{ publishedLayers.ecology.description }}
+              <span v-if="publishedLayers.ecologySynced.description" class="published-meta published-description">
+                说明：{{ publishedLayers.ecologySynced.description }}
               </span>
             </div>
             <button
               class="delete-layer-btn"
               :disabled="deleting.ecology"
-              @click="deleteUploadedLayer('ecology')"
+              @click="deleteUploadedLayer('ecology_synced')"
+            >
+              {{ deleting.ecology ? '删除中...' : '移除图层' }}
+            </button>
+          </div>
+          <div v-if="publishedLayers.ecologyUploaded" class="published-row auto-sync-published">
+            <div>
+              <strong>上传生态栅格</strong>
+              <span>已发布到地图</span>
+              <span v-if="publishedLayers.ecologyUploaded.fileName" class="published-meta">
+                文件：{{ publishedLayers.ecologyUploaded.fileName }}
+              </span>
+              <span v-if="publishedLayers.ecologyUploaded.description" class="published-meta published-description">
+                说明：{{ publishedLayers.ecologyUploaded.description }}
+              </span>
+            </div>
+            <button
+              class="delete-layer-btn"
+              :disabled="deleting.ecology"
+              @click="deleteUploadedLayer('ecology_uploaded')"
             >
               {{ deleting.ecology ? '删除中...' : '移除图层' }}
             </button>
@@ -228,7 +247,7 @@
       <div class="data-requirements">
         <h4>数据要求说明</h4>
         <ul>
-          <li><strong>生态指数栅格：</strong>默认自动挂接系统最近一次成功计算的 RSEI 结果；如暂无结果，请先到“遥感生态指数分析”模块完成 RSEI 计算</li>
+          <li><strong>生态指数栅格：</strong>可手动同步系统最近一次成功计算的 RSEI 结果，也可直接上传自己的生态栅格；如暂无结果，请先到“遥感生态指数分析”模块完成 RSEI 计算</li>
           <li><strong>经济数据矢量：</strong>建议包含区域名称、经济指标、人口、面积等字段；系统现会自动识别常见字段名并尽量适配</li>
           <li><strong>工程项目矢量：</strong>需包含字段：proj_name（项目名称）、proj_type（类型）、status（状态）、start_date、end_date、area_km2</li>
           <li><strong>字符编码：</strong>所有矢量数据请使用UTF-8编码，确保中文正常显示</li>
@@ -331,6 +350,12 @@ const descriptions = reactive({
 const availableRSEISources = ref([])
 const selectedEcologySource = ref('')
 const clearingRSEICache = ref(false)
+const overlayMetadataKeyMap = {
+  ecologySynced: 'ecology_synced',
+  ecologyUploaded: 'ecology_uploaded',
+  economy: 'economy',
+  engineering: 'engineering'
+}
 
 // 上传状态
 const uploading = reactive({
@@ -354,7 +379,8 @@ const uploadStatus = reactive({
 })
 
 const publishedLayers = reactive({
-  ecology: null,
+  ecologySynced: null,
+  ecologyUploaded: null,
   economy: null,
   engineering: null
 })
@@ -365,12 +391,11 @@ const deleting = reactive({
   engineering: false
 })
 
-const hasAttemptedAutoSync = ref(false)
 let removeWindowFocusListener = null
 
 const canClearRSEICache = computed(() => {
   return Boolean(
-    publishedLayers.ecology ||
+    publishedLayers.ecologySynced ||
     selectedEcologySource.value ||
     availableRSEISources.value.length > 0
   )
@@ -433,13 +458,17 @@ const loadUploadedLayerMetadata = async () => {
     const response = await request.get(endpoint, {}, { skipAuth: true, silentError: true })
     const metadata = response?.data || {}
 
-    Object.keys(publishedLayers).forEach((type) => {
-      const item = metadata[type]
+    Object.entries(overlayMetadataKeyMap).forEach(([stateKey, metadataKey]) => {
+      const item = metadata[metadataKey]
       if (item?.published) {
-        publishedLayers[type] = normalizePublishedLayer(type, item)
-        descriptions[type] = item.description || descriptions[type]
+        publishedLayers[stateKey] = normalizePublishedLayer(metadataKey, item)
+        if (stateKey === 'ecologyUploaded') {
+          descriptions.ecology = item.description || descriptions.ecology
+        } else if (stateKey === 'economy' || stateKey === 'engineering') {
+          descriptions[stateKey] = item.description || descriptions[stateKey]
+        }
       } else {
-        publishedLayers[type] = null
+        publishedLayers[stateKey] = null
       }
     })
   } catch (error) {
@@ -484,13 +513,8 @@ const tryConsumeOverlayRefreshSignal = async () => {
     )
     if (matchedSource) {
       selectedEcologySource.value = matchedSource.remote_sensing_image_id
-      await syncLatestRSEI(true)
       return
     }
-  }
-
-  if (availableRSEISources.value.length > 0) {
-    await syncLatestRSEI(true)
   }
 }
 
@@ -516,7 +540,7 @@ const syncLatestRSEI = async (silent = false) => {
     const response = await request.post(endpoint, payload, { skipAuth: true, silentError: silent })
 
     if (response.success) {
-      publishedLayers.ecology = normalizePublishedLayer('ecology', response.metadata || {})
+      publishedLayers.ecologySynced = normalizePublishedLayer('ecology_synced', response.metadata || {})
       descriptions.ecology = response.metadata?.description || descriptions.ecology
       if (response.metadata?.source_image_id) {
         selectedEcologySource.value = response.metadata.source_image_id
@@ -525,12 +549,12 @@ const syncLatestRSEI = async (silent = false) => {
         type: 'success',
         message: response.message || '最近一次 RSEI 结果已同步'
       }
-      emitRefreshMap('ecology', 'updated')
+      emitRefreshMap('ecology_synced', 'updated')
       return true
     }
 
     if (response.reason === 'no_rsei_result') {
-      if (!silent && !publishedLayers.ecology) {
+      if (!silent && !publishedLayers.ecologySynced) {
         uploadStatus.ecology = {
           type: 'info',
           message: response.message || '当前还没有可用的 RSEI 结果，请先去遥感生态指数分析模块计算。'
@@ -601,7 +625,8 @@ const uploadFile = async (type) => {
     })
     
     if (response.success) {
-      publishedLayers[type] = normalizePublishedLayer(type, response.metadata || {
+      const publishedStateKey = type === 'ecology' ? 'ecologyUploaded' : type
+      publishedLayers[publishedStateKey] = normalizePublishedLayer(type === 'ecology' ? 'ecology_uploaded' : type, response.metadata || {
         file_name: response.file_name || files[type]?.name,
         description: response.description || descriptions[type],
         layer_name: response.layer_name
@@ -618,9 +643,10 @@ const uploadFile = async (type) => {
       }, 3000)
       
       // 触发地图刷新事件
-      emitRefreshMap(type, 'updated')
+      emitRefreshMap(type === 'ecology' ? 'ecology_uploaded' : type, 'updated')
     } else {
-      publishedLayers[type] = null
+      const publishedStateKey = type === 'ecology' ? 'ecologyUploaded' : type
+      publishedLayers[publishedStateKey] = null
       uploadStatus[type] = {
         type: 'error',
         message: response.message || '上传失败'
@@ -642,15 +668,22 @@ const uploadFile = async (type) => {
       type: 'error',
       message: errorMessage
     }
-    publishedLayers[type] = null
+    const publishedStateKey = type === 'ecology' ? 'ecologyUploaded' : type
+    publishedLayers[publishedStateKey] = null
   } finally {
     uploading[type] = false
   }
 }
 
 const deleteUploadedLayer = async (type) => {
-  deleting[type] = true
-  uploadStatus[type] = { type: 'info', message: '正在删除图层...' }
+  const stateKey = type === 'ecology_synced'
+    ? 'ecologySynced'
+    : type === 'ecology_uploaded'
+      ? 'ecologyUploaded'
+      : type
+  const deletingKey = type.startsWith('ecology_') ? 'ecology' : type
+  deleting[deletingKey] = true
+  uploadStatus[deletingKey] = { type: 'info', message: '正在删除图层...' }
   try {
     const endpoint = buildApiUrl(API_ENDPOINTS.OVERLAY_ANALYSIS.DELETE_UPLOADED_LAYER)
     const response = await request.delete(endpoint, {
@@ -658,28 +691,51 @@ const deleteUploadedLayer = async (type) => {
       params: { data_type: type }
     })
 
-    publishedLayers[type] = null
-    files[type] = null
-    uploadProgress[type] = 0
-    descriptions[type] = ''
-    uploadStatus[type] = {
-      type: response.success ? 'success' : 'error',
-      message: response.message || '图层已删除'
+    publishedLayers[stateKey] = null
+    if (type === 'ecology_uploaded') {
+      files.ecology = null
+      uploadProgress.ecology = 0
+      descriptions.ecology = ''
+      uploadStatus.ecology = {
+        type: response.success ? 'success' : 'error',
+        message: response.message || '图层已删除'
+      }
+    } else if (type === 'ecology_synced') {
+      uploadStatus.ecology = {
+        type: response.success ? 'success' : 'error',
+        message: response.message || '图层已删除'
+      }
+    } else {
+      files[type] = null
+      uploadProgress[type] = 0
+      descriptions[type] = ''
+      uploadStatus[type] = {
+        type: response.success ? 'success' : 'error',
+        message: response.message || '图层已删除'
+      }
     }
     emitRefreshMap(type, 'deleted')
   } catch (error) {
     console.error('删除图层失败:', error)
-    uploadStatus[type] = {
-      type: 'error',
-      message: getRequestErrorMessage(error, '删除图层失败')
+    uploadStatus.ecology = type.startsWith('ecology_')
+      ? {
+          type: 'error',
+          message: getRequestErrorMessage(error, '删除图层失败')
+        }
+      : uploadStatus.ecology
+    if (!type.startsWith('ecology_')) {
+      uploadStatus[type] = {
+        type: 'error',
+        message: getRequestErrorMessage(error, '删除图层失败')
+      }
     }
   } finally {
-    deleting[type] = false
+    deleting[deletingKey] = false
   }
 }
 
 const clearRSEICache = async () => {
-  if (!window.confirm('确定要清除当前挂接的生态栅格和系统生成的 RSEI 来源缓存吗？')) {
+  if (!window.confirm('确定要清除系统同步的 RSEI 缓存吗？这不会删除你手动上传的生态栅格。')) {
     return
   }
 
@@ -690,17 +746,14 @@ const clearRSEICache = async () => {
     const endpoint = buildApiUrl(API_ENDPOINTS.OVERLAY_ANALYSIS.CLEAR_RSEI_CACHE)
     const response = await request.delete(endpoint, { skipAuth: true })
 
-    publishedLayers.ecology = null
-    files.ecology = null
-    uploadProgress.ecology = 0
-    descriptions.ecology = ''
+    publishedLayers.ecologySynced = null
     selectedEcologySource.value = ''
     availableRSEISources.value = []
     uploadStatus.ecology = {
       type: response.success ? 'success' : 'error',
       message: response.message || 'RSEI缓存已清除'
     }
-    emitRefreshMap('ecology', 'deleted')
+    emitRefreshMap('ecology_synced', 'deleted')
   } catch (error) {
     console.error('清除RSEI缓存失败:', error)
     uploadStatus.ecology = {
@@ -722,16 +775,7 @@ const emitRefreshMap = (type = selectedType.value, action = 'updated') => {
 
 onMounted(() => {
   loadUploadedLayerMetadata()
-  loadAvailableRSEISources().then(() => {
-    if (hasAttemptedAutoSync.value) {
-      return
-    }
-    hasAttemptedAutoSync.value = true
-
-    if (availableRSEISources.value.length > 0) {
-      syncLatestRSEI(true)
-    }
-  })
+  loadAvailableRSEISources()
 
   const handleWindowFocus = () => {
     tryConsumeOverlayRefreshSignal()

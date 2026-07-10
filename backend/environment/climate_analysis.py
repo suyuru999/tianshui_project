@@ -8,6 +8,9 @@ import numpy as np
 import json
 import logging
 import os
+import re
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from django.core.files.base import ContentFile
@@ -473,6 +476,12 @@ def analyze_climate_data(file_path: str, file_type: str, preferred_metric: Optio
         Dict: 分析结果
     """
     if file_type.lower() in ['tif', 'tiff', 'zip']:
+        if file_type.lower() == 'zip':
+            zip_source_type = _inspect_zip_source_type(file_path)
+            if zip_source_type == ZIP_SOURCE_SHAPEFILE:
+                return analyze_climate_vector(file_path, preferred_metric=preferred_metric)
+            if zip_source_type == ZIP_SOURCE_UNKNOWN:
+                return {'error': 'ZIP 文件未识别为 ADF 栅格目录，也不是完整的 Shapefile 压缩包'}
         return analyze_climate_raster(file_path, file_type, preferred_metric=preferred_metric)
 
     analyzer = ClimateDataAnalyzer(file_path, file_type)
@@ -486,6 +495,321 @@ NON_CLIMATE_KEYWORDS = [
     '归一化干度', '归一化湿度', '归一化植被', '归一化建筑', '归一化水体',
     '遥感', '生态', '植被指数', '建筑指数', '水体指数',
 ]
+
+CLIMATE_METRIC_FIELD_ALIASES = {
+    'temperature': [
+        'temperature', 'temp', 'tmean', 'tavg', 'avgtemp', 'meantemp',
+        'airtemperature', 'surfaceairtemperature',
+        '气温', '平均气温', '均温', '温度', '年均温', '月均温', '日均温', '最高气温', '最低气温'
+    ],
+    'precipitation': [
+        'precipitation', 'precip', 'rain', 'rainfall', 'ppt', 'pre',
+        '降水', '降水量', '降雨', '降雨量', '雨量', '累计降水'
+    ],
+    'humidity': [
+        'humidity', 'relativehumidity', 'rh', 'humid',
+        '湿度', '相对湿度', '空气湿度'
+    ],
+    'wind_speed': [
+        'windspeed', 'windvelocity', 'wind', 'ws', 'avgwind',
+        '风速', '平均风速', '风力'
+    ],
+}
+
+CLIMATE_MISSING_VALUE_SENTINELS = [9999, 9999.0, 9999.9, 99999, 99999.0, -9999, -9999.0]
+
+ZIP_SOURCE_SHAPEFILE = 'shapefile_zip'
+ZIP_SOURCE_ADF = 'adf_zip'
+ZIP_SOURCE_UNKNOWN = 'unknown_zip'
+
+
+def _normalize_climate_field_name(name: str) -> str:
+    text = str(name or '').strip().lower()
+    text = re.sub(r'[\s_\-（）()\[\]{}【】.:：/\\]+', '', text)
+    text = text.replace('℃', '').replace('°c', '').replace('%', '').replace('mm', '').replace('m/s', '')
+    return text
+
+
+def _infer_metric_from_field_name(field_name: str) -> Optional[str]:
+    normalized = _normalize_climate_field_name(field_name)
+    if not normalized:
+        return None
+
+    for metric, aliases in CLIMATE_METRIC_FIELD_ALIASES.items():
+        for alias in aliases:
+            if _normalize_climate_field_name(alias) in normalized:
+                return metric
+    return None
+
+
+def _extract_year_from_climate_field_name(field_name: str) -> Optional[int]:
+    text = str(field_name or '').strip()
+    if re.fullmatch(r'(?:19|20)\d{2}', text):
+        year = int(text)
+        if 1800 <= year <= 2100:
+            return year
+    return None
+
+
+def _detect_year_value_fields(columns: List[str]) -> List[Tuple[int, str]]:
+    year_fields = []
+    for column in columns:
+        year = _extract_year_from_climate_field_name(column)
+        if year is not None:
+            year_fields.append((year, column))
+    return sorted(year_fields, key=lambda item: item[0])
+
+
+def _infer_metric_from_context(*paths_or_names: str) -> Optional[str]:
+    for value in paths_or_names:
+        if not value:
+            continue
+        metric = _infer_climate_metric(str(value))
+        if metric in {'temperature', 'precipitation', 'humidity', 'wind_speed'}:
+            return metric
+    return None
+
+
+def _clean_climate_numeric_series(series: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(series, errors='coerce')
+    numeric = numeric.replace(CLIMATE_MISSING_VALUE_SENTINELS, np.nan)
+    # 气象站资料常用 9999.9 一类大值代表缺测；正常气候变量不会接近这个量级。
+    numeric = numeric.mask(numeric.abs() >= 9990)
+    return numeric.dropna()
+
+
+def _inspect_zip_source_type(file_path: str) -> str:
+    try:
+        if not zipfile.is_zipfile(file_path):
+            return ZIP_SOURCE_UNKNOWN
+
+        with zipfile.ZipFile(file_path, 'r') as zf:
+            names = [member.filename.lower() for member in zf.infolist() if not member.is_dir()]
+
+        has_shp = any(name.endswith('.shp') for name in names)
+        has_dbf = any(name.endswith('.dbf') for name in names)
+        has_shx = any(name.endswith('.shx') for name in names)
+        if has_shp and has_dbf and has_shx:
+            return ZIP_SOURCE_SHAPEFILE
+
+        if any(name.endswith('.adf') for name in names):
+            return ZIP_SOURCE_ADF
+    except Exception as exc:
+        logger.warning(f"识别ZIP来源类型失败: {exc}")
+
+    return ZIP_SOURCE_UNKNOWN
+
+
+def _extract_shapefile_zip_for_analysis(zip_path: str) -> Tuple[str, str]:
+    extract_dir = tempfile.mkdtemp(prefix='climate_shp_', dir=os.path.dirname(zip_path))
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            for member in zf.infolist():
+                member_name = member.filename
+                if os.path.isabs(member_name) or '..' in Path(member_name).parts:
+                    continue
+                zf.extract(member, extract_dir)
+
+        shp_candidates = []
+        for root, _, files in os.walk(extract_dir):
+            for file_name in files:
+                if file_name.lower().endswith('.shp'):
+                    shp_candidates.append(os.path.join(root, file_name))
+
+        if not shp_candidates:
+            raise ValueError('ZIP 中未找到可用的 .shp 文件')
+
+        shp_path = sorted(shp_candidates, key=lambda item: len(Path(item).parts))[0]
+        return shp_path, extract_dir
+    except Exception:
+        remove_tree(extract_dir)
+        raise
+
+
+def _load_shapefile_dataframe(shp_path: str) -> pd.DataFrame:
+    try:
+        from osgeo import ogr
+    except ImportError as exc:
+        raise RuntimeError('当前环境缺少 GDAL/OGR，无法读取 Shapefile 属性表') from exc
+
+    datasource = ogr.Open(shp_path)
+    if datasource is None:
+        raise ValueError(f'无法打开 Shapefile: {shp_path}')
+
+    layer = datasource.GetLayer(0)
+    if layer is None:
+        raise ValueError(f'Shapefile 图层为空: {shp_path}')
+
+    layer_defn = layer.GetLayerDefn()
+    field_names = [layer_defn.GetFieldDefn(i).GetNameRef() for i in range(layer_defn.GetFieldCount())]
+    records = []
+    feature = layer.GetNextFeature()
+    while feature is not None:
+        record = {field_name: feature.GetField(field_name) for field_name in field_names}
+        records.append(record)
+        feature = layer.GetNextFeature()
+
+    datasource = None
+    return pd.DataFrame(records)
+
+
+def _detect_climate_metric_fields(columns: List[str]) -> Dict[str, List[str]]:
+    mapping = {metric: [] for metric in CLIMATE_METRIC_FIELD_ALIASES.keys()}
+    for column in columns:
+        metric = _infer_metric_from_field_name(column)
+        if metric:
+            mapping[metric].append(column)
+    return {metric: fields for metric, fields in mapping.items() if fields}
+
+
+def _sample_series_values(series: pd.Series, max_points: int = 240) -> List[float]:
+    cleaned = _clean_climate_numeric_series(series)
+    if cleaned.empty:
+        return []
+    values = cleaned.to_numpy(dtype=float)
+    if values.size > max_points:
+        indices = np.linspace(0, values.size - 1, max_points).astype(int)
+        values = values[indices]
+    return [round(float(value), 4) for value in values.tolist()]
+
+
+def _build_year_wide_vector_analysis(
+    df: pd.DataFrame,
+    year_fields: List[Tuple[int, str]],
+    metric: str,
+    capability: Dict,
+    file_path: str,
+) -> Dict:
+    yearly_values = []
+    yearly_labels = []
+    merged_values = []
+
+    for year, field_name in year_fields:
+        cleaned = _clean_climate_numeric_series(df[field_name])
+        if cleaned.empty:
+            continue
+
+        yearly_labels.append(year)
+        yearly_values.append(round(float(cleaned.mean()), 4))
+        merged_values.append(cleaned)
+
+    if not merged_values:
+        return {
+            'error': 'Shapefile 年份属性字段中未解析出有效气候值，可能全部为缺测值 9999.9。',
+            'capabilities': capability,
+        }
+
+    merged_series = pd.concat(merged_values, ignore_index=True)
+    statistics = {
+        metric: {
+            'avg': round(float(merged_series.mean()), 4),
+            'max': round(float(merged_series.max()), 4),
+            'min': round(float(merged_series.min()), 4),
+            'std': round(float(merged_series.std(ddof=1)) if len(merged_series) > 1 else 0.0, 4),
+        }
+    }
+    chart_data = {
+        metric: yearly_values,
+        'vector_metadata': {
+            'filename': os.path.basename(file_path),
+            'feature_count': int(len(df)),
+            'source_type': 'vector_attribute_table',
+            'table_layout': 'year_wide',
+            'available_metrics': [metric],
+            'field_mapping': {metric: [field_name for _, field_name in year_fields]},
+            'detected_category': capability.get('detected_category'),
+            'year_labels': yearly_labels,
+            'year_range': [min(yearly_labels), max(yearly_labels)] if yearly_labels else None,
+            'valid_year_count': len(yearly_labels),
+            'missing_value_rule': '9999/9999.9/-9999 已按缺测剔除',
+        }
+    }
+
+    return {
+        'statistics': statistics,
+        'chart_data': chart_data,
+        'charts': {},
+        'data_count': int(len(merged_series)),
+    }
+
+
+def detect_climate_vector_capabilities(file_path: str) -> Dict:
+    cleanup_dir = None
+    try:
+        shp_path, cleanup_dir = _extract_shapefile_zip_for_analysis(file_path)
+        df = _load_shapefile_dataframe(shp_path)
+        field_mapping = _detect_climate_metric_fields(df.columns.tolist())
+        year_fields = _detect_year_value_fields(df.columns.tolist())
+        year_table_metric = _infer_metric_from_context(file_path, shp_path)
+        if year_fields and year_table_metric:
+            field_mapping = {year_table_metric: [field_name for _, field_name in year_fields]}
+
+        supported_metrics = list(field_mapping.keys())
+        inferred_metric = supported_metrics[0] if len(supported_metrics) == 1 else None
+
+        if not supported_metrics:
+            has_year_table = bool(year_fields)
+            return {
+                'detected_mode': 'vector_attribute_table',
+                'inferred_metric': None,
+                'supported_metrics': ['temperature', 'precipitation', 'humidity', 'wind_speed'] if has_year_table else [],
+                'unsupported_for_climate': not has_year_table,
+                'manual_selection_required': has_year_table,
+                'detected_category': 'shapefile_year_wide_table' if has_year_table else 'shapefile_attribute_table',
+                'reason': (
+                    '已识别出年份字段，但无法从文件名判断是温度、降水、湿度还是风速，请手动选择指标后再分析。'
+                    if has_year_table
+                    else '已识别为 Shapefile 属性表，但未检测到温度、降水、湿度或风速字段，请检查字段命名。'
+                ),
+                'filename_hint': os.path.basename(file_path).lower(),
+                'source_type': ZIP_SOURCE_SHAPEFILE,
+                'field_mapping': {},
+                'year_fields': [year for year, _ in year_fields],
+            }
+
+        return {
+            'detected_mode': 'vector_attribute_table',
+            'inferred_metric': inferred_metric,
+            'supported_metrics': supported_metrics,
+            'unsupported_for_climate': False,
+            'manual_selection_required': False,
+            'detected_category': 'shapefile_year_wide_table' if year_fields else 'shapefile_attribute_table',
+            'reason': None,
+            'filename_hint': os.path.basename(file_path).lower(),
+            'source_type': ZIP_SOURCE_SHAPEFILE,
+            'field_mapping': field_mapping,
+            'year_fields': [year for year, _ in year_fields],
+        }
+    finally:
+        if cleanup_dir:
+            remove_tree(cleanup_dir)
+
+
+def detect_climate_file_capabilities(file_path: str, file_type: Optional[str] = None) -> Dict:
+    normalized_type = str(file_type or Path(file_path).suffix.lstrip('.')).lower()
+    if normalized_type == 'zip':
+        source_type = _inspect_zip_source_type(file_path)
+        if source_type == ZIP_SOURCE_SHAPEFILE:
+            return detect_climate_vector_capabilities(file_path)
+        if source_type == ZIP_SOURCE_ADF:
+            capability = detect_climate_raster_capabilities(file_path)
+            capability['source_type'] = ZIP_SOURCE_ADF
+            return capability
+        return {
+            'detected_mode': 'unknown',
+            'inferred_metric': None,
+            'supported_metrics': [],
+            'unsupported_for_climate': True,
+            'manual_selection_required': False,
+            'detected_category': 'unknown_zip',
+            'reason': 'ZIP 文件未识别为 ADF 栅格目录，也不是完整的 Shapefile 压缩包。',
+            'filename_hint': os.path.basename(file_path).lower(),
+            'source_type': ZIP_SOURCE_UNKNOWN,
+        }
+
+    capability = detect_climate_raster_capabilities(file_path)
+    capability['source_type'] = 'single_metric_raster'
+    return capability
 
 
 def detect_climate_raster_capabilities(file_path):
@@ -528,13 +852,13 @@ def _infer_climate_metric(file_path):
     name = os.path.basename(file_path).lower()
     if any(key in name for key in NON_CLIMATE_KEYWORDS):
         return 'remote_sensing_index'
-    if any(key in name for key in ['降水', 'precip', 'rain']):
+    if any(key in name for key in ['降水', '降雨', '雨量', 'precip', 'rain']):
         return 'precipitation'
     if any(key in name for key in ['湿度', 'humidity', 'wet']):
         return 'humidity'
     if any(key in name for key in ['风速', 'wind']):
         return 'wind_speed'
-    if any(key in name for key in ['温度', '地温', 'lst', 'temp']):
+    if any(key in name for key in ['气温', '平均气温', '均温', '温度', '地温', 'lst', 'temp']):
         return 'temperature'
     return 'unknown'
 
@@ -548,6 +872,121 @@ def _sample_raster_values(path, max_points=240):
         indices = np.linspace(0, valid.size - 1, max_points).astype(int)
         valid = valid[indices]
     return [round(float(value), 4) for value in valid]
+
+
+def analyze_climate_vector(file_path: str, preferred_metric: Optional[str] = None) -> Dict:
+    cleanup_dir = None
+    try:
+        shp_path, cleanup_dir = _extract_shapefile_zip_for_analysis(file_path)
+        df = _load_shapefile_dataframe(shp_path)
+        if df.empty:
+            return {'error': 'Shapefile 属性表为空，无法进行气候统计分析'}
+
+        field_mapping = _detect_climate_metric_fields(df.columns.tolist())
+        year_fields = _detect_year_value_fields(df.columns.tolist())
+        year_table_metric = _infer_metric_from_context(file_path, shp_path)
+        if year_fields and year_table_metric:
+            field_mapping = {year_table_metric: [field_name for _, field_name in year_fields]}
+
+        capability = {
+            'detected_mode': 'vector_attribute_table',
+            'inferred_metric': list(field_mapping.keys())[0] if len(field_mapping) == 1 else None,
+            'supported_metrics': list(field_mapping.keys()) or (['temperature', 'precipitation', 'humidity', 'wind_speed'] if year_fields else []),
+            'unsupported_for_climate': not bool(field_mapping) and not bool(year_fields),
+            'manual_selection_required': False,
+            'detected_category': 'shapefile_year_wide_table' if year_fields else 'shapefile_attribute_table',
+            'reason': None if (field_mapping or year_fields) else '已识别为 Shapefile 属性表，但未检测到温度、降水、湿度或风速字段，请检查字段命名。',
+            'filename_hint': os.path.basename(file_path).lower(),
+            'source_type': ZIP_SOURCE_SHAPEFILE,
+            'field_mapping': field_mapping,
+            'year_fields': [year for year, _ in year_fields],
+        }
+        if capability.get('unsupported_for_climate'):
+            return {
+                'error': capability.get('reason') or '当前 Shapefile 未识别出可用的气候统计字段',
+                'capabilities': capability,
+            }
+
+        target_metric = preferred_metric
+        if target_metric == 'wind':
+            target_metric = 'wind_speed'
+
+        if year_fields:
+            metric = year_table_metric or target_metric
+            if not metric or metric not in {'temperature', 'precipitation', 'humidity', 'wind_speed'}:
+                return {
+                    'error': '当前 Shapefile 是年份宽表，但无法判断指标类型，请选择温度、降水、湿度或风速后再分析。',
+                    'capabilities': {
+                        **capability,
+                        'manual_selection_required': True,
+                        'supported_metrics': ['temperature', 'precipitation', 'humidity', 'wind_speed'],
+                    },
+                }
+
+            capability['inferred_metric'] = metric
+            capability['supported_metrics'] = [metric]
+            capability['field_mapping'] = {metric: [field_name for _, field_name in year_fields]}
+            return _build_year_wide_vector_analysis(
+                df=df,
+                year_fields=year_fields,
+                metric=metric,
+                capability=capability,
+                file_path=file_path,
+            )
+
+        metric_fields = field_mapping
+        if target_metric and target_metric in {'temperature', 'precipitation', 'humidity', 'wind_speed'}:
+            if target_metric not in metric_fields:
+                return {
+                    'error': f'当前 Shapefile 属性表中未识别出“{target_metric}”对应字段',
+                    'capabilities': capability,
+                }
+            metric_fields = {target_metric: metric_fields[target_metric]}
+
+        statistics = {}
+        chart_data = {}
+        for metric, fields in metric_fields.items():
+            series_list = []
+            for field_name in fields:
+                numeric_series = _clean_climate_numeric_series(df[field_name])
+                if not numeric_series.empty:
+                    series_list.append(numeric_series)
+
+            if not series_list:
+                continue
+
+            merged_series = pd.concat(series_list, ignore_index=True)
+            statistics[metric] = {
+                'avg': round(float(merged_series.mean()), 4),
+                'max': round(float(merged_series.max()), 4),
+                'min': round(float(merged_series.min()), 4),
+                'std': round(float(merged_series.std(ddof=1)) if len(merged_series) > 1 else 0.0, 4),
+            }
+            chart_data[metric] = _sample_series_values(merged_series)
+
+        if not statistics:
+            return {
+                'error': 'Shapefile 属性表中未解析出有效的气候数值字段',
+                'capabilities': capability,
+            }
+
+        chart_data['vector_metadata'] = {
+            'filename': os.path.basename(file_path),
+            'feature_count': int(len(df)),
+            'source_type': 'vector_attribute_table',
+            'available_metrics': list(statistics.keys()),
+            'field_mapping': metric_fields,
+            'detected_category': capability.get('detected_category'),
+        }
+        return {
+            'statistics': statistics,
+            'chart_data': chart_data,
+            'charts': {},
+            'data_count': int(len(df)),
+        }
+    finally:
+        if cleanup_dir:
+            remove_tree(cleanup_dir)
 
 
 def analyze_climate_raster(file_path: str, file_type: str, preferred_metric: Optional[str] = None) -> Dict:
@@ -565,7 +1004,7 @@ def analyze_climate_raster(file_path: str, file_type: str, preferred_metric: Opt
             height = dataset.height
             crs = str(dataset.crs) if dataset.crs else None
 
-        capability = detect_climate_raster_capabilities(file_path)
+        capability = detect_climate_file_capabilities(file_path, file_type)
         metric = preferred_metric or capability['inferred_metric']
         if preferred_metric == 'wind':
             metric = 'wind_speed'
