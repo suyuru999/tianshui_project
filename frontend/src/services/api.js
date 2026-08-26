@@ -135,13 +135,13 @@ export const remoteSensingService = {
   },
 
   // 获取影像的生态指数结果
-  getIndices(imageId) {
+  getIndices(imageId, config = {}) {
     const url = buildApiUrl(API_ENDPOINTS.REMOTE_SENSING.GET_INDICES(imageId));
     console.log('getIndices 调用详情:', {
       url: url,
       imageId: imageId
     });
-    return request.get(url)
+    return request.get(url, {}, config)
   }
 }
 

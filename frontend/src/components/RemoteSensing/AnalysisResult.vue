@@ -202,6 +202,10 @@ const primaryCompareOverlay = computed(() => {
   return primary?.compare_overlay || null;
 });
 
+function isUuidLike(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+}
+
 function normalizeVisualizationUrl(url) {
   if (!url || typeof url !== 'string') return null;
 
@@ -228,10 +232,15 @@ watch(() => props.status, async (newStatus) => {
   }
 });
 
+watch(() => props.resultData, async (newResultData) => {
+  if (props.status === 'done' && newResultData) {
+    await loadIndicesData();
+  }
+});
+
 // 加载生态指数数据
 async function loadIndicesData() {
   if (!props.resultData) {
-    console.log('没有结果数据，无法加载指数');
     return;
   }
 
@@ -239,6 +248,13 @@ async function loadIndicesData() {
   visualizationLoadError.value = '';
 
   try {
+    if (Array.isArray(props.resultData.indices) && props.resultData.indices.length > 0) {
+      indicesData.value = props.resultData.indices;
+      await nextTick();
+      initCharts();
+      return;
+    }
+
     // 尝试多种方式获取影像ID
     let imageId = null;
 
@@ -248,43 +264,23 @@ async function loadIndicesData() {
       imageId = props.resultData.remote_sensing_image.id || props.resultData.remote_sensing_image;
     }
 
-    if (!imageId) {
-      if (Array.isArray(props.resultData.indices)) {
-        indicesData.value = props.resultData.indices;
-        await nextTick();
-        initCharts();
-        return;
-      }
-
-      console.error('无法获取影像ID，resultData:', props.resultData);
-      ElMessage.warning('无法获取影像ID');
+    if (!isUuidLike(imageId)) {
+      indicesData.value = [];
       return;
     }
 
-    console.log('加载影像指数数据，影像ID:', imageId);
-
-    const response = await remoteSensingService.getIndices(imageId);
-    console.log('获取到的指数数据:', response);
-    console.log('响应结构:', {
-      hasIndices: !!response.indices,
-      indicesLength: response.indices?.length,
-      indicesData: response.indices
-    });
+    const response = await remoteSensingService.getIndices(imageId, { silentError: true });
 
     if (response && response.indices) {
       indicesData.value = response.indices;
-      console.log('设置indicesData:', indicesData.value);
-      console.log('indicesData长度:', indicesData.value.length);
 
       // 等待DOM更新后初始化图表
       await nextTick();
       initCharts();
     } else {
-      console.log('暂无指数数据，响应:', response);
       indicesData.value = Array.isArray(props.resultData.indices) ? props.resultData.indices : [];
     }
   } catch (error) {
-    console.error('加载指数数据失败:', error);
     if (Array.isArray(props.resultData.indices)) {
       indicesData.value = props.resultData.indices;
       await nextTick();
@@ -299,12 +295,8 @@ async function loadIndicesData() {
 
 // 初始化图表
 function initCharts() {
-  console.log('开始初始化图表，数据长度:', indicesData.value.length);
-  console.log('图表数据:', indicesData.value);
-
   // 初始化饼图
   if (pieChartRef.value) {
-    console.log('初始化饼图，DOM元素:', pieChartRef.value);
     pieChart = echarts.init(pieChartRef.value);
     updatePieChart();
 
@@ -325,8 +317,6 @@ function initCharts() {
 
     window.addEventListener('resize', onResize);
     removeResizeListener = () => window.removeEventListener('resize', onResize);
-  } else {
-    console.log('饼图DOM元素不存在');
   }
 
 }
@@ -358,15 +348,6 @@ function updatePieChart() {
     pieChart.setOption({ series: [] });
     return;
   }
-  
-  console.log('饼图数据 - 第一个指数:', firstIndex);
-  console.log('面积字段:', {
-    excellent_area: firstIndex.excellent_area,
-    good_area: firstIndex.good_area,
-    moderate_area: firstIndex.moderate_area,
-    poor_area: firstIndex.poor_area,
-    bad_area: firstIndex.bad_area
-  });
 
   const pieData = [
     { value: firstIndex.excellent_area || 0, name: '优秀', itemStyle: { color: '#67C23A' } },
@@ -375,8 +356,6 @@ function updatePieChart() {
     { value: firstIndex.poor_area || 0, name: '较差', itemStyle: { color: '#F56C6C' } },
     { value: firstIndex.bad_area || 0, name: '差', itemStyle: { color: '#C0392B' } }
   ].filter(item => item.value > 0);
-  
-  console.log('过滤后的饼图数据:', pieData);
 
   // 如果没有面积数据，显示提示信息
   if (pieData.length === 0) {
@@ -449,22 +428,6 @@ function updatePieChart() {
   };
 
   pieChart.setOption(option);
-  console.log('饼图配置已设置，数据项数:', pieData.length);
-  
-  // 检查图表是否正确渲染
-  setTimeout(() => {
-    if (pieChart && !pieChart.isDisposed()) {
-      console.log('饼图渲染状态检查:', {
-        isDisposed: pieChart.isDisposed(),
-        width: pieChart.getWidth(),
-        height: pieChart.getHeight(),
-        containerVisible: pieChartRef.value?.offsetWidth > 0 && pieChartRef.value?.offsetHeight > 0
-      });
-      
-      // 强制重新渲染
-      pieChart.resize();
-    }
-  }, 100);
 }
 
 
