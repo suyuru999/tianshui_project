@@ -26,6 +26,12 @@ gdal.UseExceptions()
 
 logger = logging.getLogger(__name__)
 
+# Landscape-connectivity calculations allocate several arrays of the same size.
+# Keeping the longest analysis dimension bounded prevents a single uploaded TIFF
+# from exhausting the deployment machine while still retaining a useful spatial
+# resolution for interactive analysis.
+MAX_ANALYSIS_SIDE = 4096
+
 
 class LandUseAnalyzer:
     """土地利用分析器"""
@@ -42,6 +48,10 @@ class LandUseAnalyzer:
         self.landuse_data = None
         self.geotransform = None
         self.projection = None
+        self.source_width = None
+        self.source_height = None
+        self.analysis_scale_x = 1.0
+        self.analysis_scale_y = 1.0
         
         # 土地利用分类定义
         self.landuse_classes = {
@@ -67,12 +77,37 @@ class LandUseAnalyzer:
             self.projection = self.dataset.GetProjection()
             
             # 获取影像尺寸
-            self.width = self.dataset.RasterXSize
-            self.height = self.dataset.RasterYSize
+            self.source_width = self.dataset.RasterXSize
+            self.source_height = self.dataset.RasterYSize
+            self.width = self.source_width
+            self.height = self.source_height
             
             # 读取土地利用数据
             band = self.dataset.GetRasterBand(1)
-            self.landuse_data = band.ReadAsArray().astype(np.int32)
+            longest_side = max(self.source_width, self.source_height)
+            if longest_side > MAX_ANALYSIS_SIDE:
+                scale = int(np.ceil(longest_side / MAX_ANALYSIS_SIDE))
+                self.width = max(1, int(np.ceil(self.source_width / scale)))
+                self.height = max(1, int(np.ceil(self.source_height / scale)))
+                self.analysis_scale_x = self.source_width / self.width
+                self.analysis_scale_y = self.source_height / self.height
+                # Nearest-neighbour keeps the land-use category values intact.
+                self.landuse_data = band.ReadAsArray(
+                    buf_xsize=self.width,
+                    buf_ysize=self.height,
+                    resample_alg=gdal.GRIORA_NearestNeighbour,
+                ).astype(np.int32)
+                gt = self.geotransform
+                self.geotransform = (
+                    gt[0], gt[1] * self.analysis_scale_x, gt[2],
+                    gt[3], gt[4], gt[5] * self.analysis_scale_y,
+                )
+                logger.warning(
+                    '土地利用数据过大，已按最近邻重采样用于交互分析: %sx%s -> %sx%s',
+                    self.source_width, self.source_height, self.width, self.height,
+                )
+            else:
+                self.landuse_data = band.ReadAsArray().astype(np.int32)
             
             # 获取无效值
             self.no_data_value = band.GetNoDataValue()
@@ -80,7 +115,7 @@ class LandUseAnalyzer:
                 self.landuse_data[self.landuse_data == self.no_data_value] = -9999
             
             logger.info(f"成功加载土地利用数据: {self.landuse_path}")
-            logger.info(f"数据尺寸: {self.width} x {self.height}")
+            logger.info(f"分析数据尺寸: {self.width} x {self.height}")
             return True
             
         except Exception as e:
@@ -221,7 +256,11 @@ class LandUseAnalyzer:
                 'cohesion_index': float(cohesion_index),
                 'total_patches': int(num_features),
                 'total_area': int(total_area),
-                'patch_areas': patch_areas.tolist()
+                # Returning every patch area can create a response with millions
+                # of values.  The aggregate index and patch count are sufficient
+                # for the web UI and keep the API response bounded.
+                'largest_patch_area': int(patch_areas.max()) if patch_areas.size else 0,
+                'mean_patch_area': float(patch_areas.mean()) if patch_areas.size else 0.0,
             }
             
         except Exception as e:

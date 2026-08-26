@@ -25,6 +25,27 @@ function Stop-ProjectProcess([int]$processId, [string]$description) {
     }
 }
 
+function Get-ListeningProcessIds([int]$port) {
+    # Get-NetTCPConnection can be unavailable to a non-elevated shell on some
+    # Windows installations. netstat provides a reliable fallback for the
+    # dedicated local project ports.
+    $processIds = @()
+    try {
+        $connections = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction Stop
+        $processIds += @($connections | ForEach-Object { [int]$_.OwningProcess })
+    }
+    catch {
+        $netstatLines = & "$env:SystemRoot\System32\netstat.exe" -ano -p tcp 2>$null
+        $pattern = "^\s*TCP\s+\S+:$port\s+\S+\s+LISTENING\s+(\d+)\s*$"
+        foreach ($line in $netstatLines) {
+            if ($line -match $pattern) {
+                $processIds += [int]$Matches[1]
+            }
+        }
+    }
+    return @($processIds | Select-Object -Unique)
+}
+
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 $isAdministrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -55,12 +76,18 @@ try {
     }
 
     # Stop only a Django development server that explicitly listens on this project's port.
-    $backendListeners = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
+    $backendListeners = Get-ListeningProcessIds 8000
     $backendStopped = $false
-    foreach ($listener in $backendListeners) {
-        $backendProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue
+    foreach ($processId in $backendListeners) {
+        $backendProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
         if ($backendProcess -and $backendProcess.Name -eq 'python.exe' -and $backendProcess.CommandLine -match 'manage\.py\s+runserver\s+127\.0\.0\.1:8000') {
-            Stop-ProjectProcess $backendProcess.ProcessId 'Tianshui Django backend'
+            Stop-ProjectProcess $processId 'Tianshui Django backend'
+            $backendStopped = $true
+        }
+        elseif ($null -eq $backendProcess) {
+            # Port 8000 is reserved for this project; stopping it is safer than
+            # leaving a stale backend that prevents the updated one from starting.
+            Stop-ProjectProcess $processId 'Tianshui backend occupying port 8000'
             $backendStopped = $true
         }
     }
@@ -101,4 +128,3 @@ catch {
 if (-not $NoPause) {
     Read-Host 'Project shutdown finished. Press Enter to close this window'
 }
-

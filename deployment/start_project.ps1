@@ -13,6 +13,8 @@ $runtimeRoot = Join-Path $projectRoot 'runtime'
 $pythonExe = 'C:\Program\python.exe'
 $nginxRoot = 'D:\nginx-1.30.4\nginx-1.30.4'
 $nginxExe = Join-Path $nginxRoot 'nginx.exe'
+$nginxConfigSource = Join-Path $projectRoot 'deployment\nginx.conf'
+$nginxConfigTarget = Join-Path $nginxRoot 'conf\nginx.conf'
 $projectUrl = 'http://localhost:8081/'
 
 function Write-Step([string]$message) {
@@ -100,6 +102,13 @@ try {
     if (-not (Test-Path -LiteralPath $nginxExe)) {
         throw "Nginx not found: $nginxExe"
     }
+    if (-not (Test-Path -LiteralPath $nginxConfigSource)) {
+        throw "Nginx configuration not found: $nginxConfigSource"
+    }
+
+    # Keep the dedicated Nginx installation in sync with this project's
+    # deployment settings before it is started.
+    Copy-Item -LiteralPath $nginxConfigSource -Destination $nginxConfigTarget -Force
 
     # Load the Redis and GeoServer values saved for the current Windows user.
     foreach ($variableName in @(
@@ -154,7 +163,13 @@ try {
     }
 
     if (Test-ListeningPort 8081) {
-        Write-Ok 'Nginx is already listening on port 8081'
+        Write-Step 'Reloading Nginx configuration on port 8081'
+        Start-Process -FilePath $nginxExe `
+            -ArgumentList @('-s', 'reload', '-p', $nginxRoot, '-c', 'conf/nginx.conf') `
+            -WorkingDirectory $nginxRoot `
+            -Wait `
+            -WindowStyle Hidden
+        Write-Ok 'Nginx configuration reloaded'
     }
     else {
         Write-Step 'Starting Nginx on port 8081'

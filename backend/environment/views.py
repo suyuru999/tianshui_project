@@ -1247,10 +1247,11 @@ def _landuse_analysis_meta(analyzer_cls):
     return {
         'analysis_engine': 'gdal' if is_gdal_engine else 'rasterio_fallback',
         'analysis_engine_label': 'GDAL精确计算' if is_gdal_engine else 'Rasterio兼容计算',
-        'analysis_precision': 'full_resolution' if is_gdal_engine else 'mixed_resolution',
+        'analysis_precision': 'adaptive_resolution' if is_gdal_engine else 'mixed_resolution',
         'analysis_notes': (
             [
-                '当前结果基于全量栅格像元进行计算，适合直接用于正式分析。'
+                '系统会根据数据大小自动选择计算分辨率，超大数据采用最近邻重采样以保证可完成计算。',
+                '面积统计会使用对应的像元面积修正；破碎度和内聚力为交互分析结果，正式成果建议以原始分辨率复核。'
             ]
             if is_gdal_engine else
             [

@@ -893,6 +893,7 @@ export default {
     const getPrecisionLabel = (precision) => {
       const labelMap = {
         full_resolution: '全分辨率统计',
+        adaptive_resolution: '自适应分辨率分析',
         mixed_resolution: '全量统计 + 预览估算'
       }
       return labelMap[precision] || precision || '未知'
