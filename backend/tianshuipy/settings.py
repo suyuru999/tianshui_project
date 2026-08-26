@@ -169,6 +169,12 @@ CSRF_TRUSTED_ORIGINS = [
     'http://127.0.0.1:5173',
 ]
 
+# Celery 异步任务配置。连接信息由当前 Windows 用户的环境变量提供，
+# 避免将 Redis 密码写入源码。
+CELERY_BROKER_URL = os.getenv('TIANSHUI_CELERY_BROKER_URL')
+CELERY_RESULT_BACKEND = os.getenv('TIANSHUI_CELERY_RESULT_BACKEND')
+CELERY_TASK_TRACK_STARTED = True
+
 # 文件上传配置
 # 大遥感栅格不能放进内存处理；超过 10MB 的上传交给 Django 临时文件处理器落盘。
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
@@ -210,7 +216,7 @@ LOGGING = {
 os.makedirs(BASE_DIR / 'logs', exist_ok=True)
 
 # GeoServer配置
-GEOSERVER_URL = os.getenv('GEOSERVER_URL', 'http://localhost:8080/geoserver')
+GEOSERVER_URL = os.getenv('GEOSERVER_URL', 'http://localhost:8651/geoserver')
 GEOSERVER_USERNAME = os.getenv('GEOSERVER_USERNAME', 'admin')
 GEOSERVER_PASSWORD = os.getenv('GEOSERVER_PASSWORD', 'geoserver')
 GEOSERVER_WORKSPACE = os.getenv('GEOSERVER_WORKSPACE', 'tianshuipy')
