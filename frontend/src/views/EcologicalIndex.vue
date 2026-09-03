@@ -1167,26 +1167,51 @@ export default {
       }
       return labelMap[precision] || precision || '未知'
     }
+
+    const escapeCsvCell = (value) => {
+      const text = value === null || value === undefined ? '' : String(value)
+      return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+    }
     
     const downloadResults = async () => {
       try {
-        // 准备下载数据
-        const downloadData = {
-          timestamp: new Date().toISOString(),
-          filename: fileList.value[0]?.name || 'unknown',
-          results: indexResults,
-          summary: {
-            total_indices: Object.keys(indexResults).length,
-            calculated_time: new Date().toLocaleString('zh-CN')
-          }
-        }
-        
-        // 创建Blob对象
-        const blob = new Blob([JSON.stringify(downloadData, null, 2)], {
-          type: 'application/json'
+        const allIndices = [...structureIndices, ...stressIndices]
+        const typeMap = new Map([
+          ...structureIndices.map(index => [index.apiKey, '生态环境结构指数']),
+          ...stressIndices.map(index => [index.apiKey, '生态环境胁迫指数'])
+        ])
+        const resultKeys = allIndices
+          .map(index => index.apiKey)
+          .filter(key => indexResults[key] !== undefined)
+
+        const rows = [
+          ['源文件', fileList.value[0]?.name || restoredFileName.value || '未知'],
+          ['导出时间', new Date().toLocaleString('zh-CN')],
+          ['指标数量', resultKeys.length],
+          [],
+          ['指标分类', '指标名称', '指标编码', '数值', '单位', '等级']
+        ]
+
+        resultKeys.forEach(key => {
+          const value = indexResults[key]
+          rows.push([
+            typeMap.get(key) || '生态环境指数',
+            getIndexName(key),
+            key,
+            formatIndexValue(key, value),
+            getIndexUnit(key),
+            getStatusText(key, value)
+          ])
         })
-        
-        await saveBlobAsFile(blob, buildDownloadName('json'), 'application/json')
+
+        const csvContent = rows
+          .map(row => row.map(escapeCsvCell).join(','))
+          .join('\n')
+        const blob = new Blob(['\ufeff' + csvContent], {
+          type: 'text/csv;charset=utf-8;'
+        })
+
+        await saveBlobAsFile(blob, buildDownloadName('csv'), 'text/csv')
         ElMessage.success('计算结果已下载')
       } catch (error) {
         if (error?.name === 'AbortError') return
@@ -1204,14 +1229,192 @@ export default {
       return `${safeName}_${new Date().getTime()}.${extension}`
     }
 
+    const loadCanvasImage = async (url) => {
+      const response = await fetch(url)
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+
+      const objectUrl = URL.createObjectURL(await response.blob())
+      try {
+        const image = new Image()
+        image.decoding = 'async'
+        image.src = objectUrl
+        await image.decode()
+        return image
+      } finally {
+        URL.revokeObjectURL(objectUrl)
+      }
+    }
+
+    const canvasToPngBlob = (canvas) => new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) {
+          resolve(blob)
+          return
+        }
+        reject(new Error('PNG 图片生成失败'))
+      }, 'image/png')
+    })
+
+    const drawLanduseDownloadImage = async () => {
+      const mapUrl = normalizeMediaUrl(compareOverlay.value?.overlay_image_url)
+      if (!mapUrl) {
+        throw new Error('当前结果缺少独立土地利用分布图，请重新分析后下载')
+      }
+
+      if (document.fonts?.ready) {
+        await document.fonts.ready
+      }
+      const mapImage = await loadCanvasImage(mapUrl)
+      const items = landuseLegendItems.value
+      const canvas = document.createElement('canvas')
+      canvas.width = 2400
+      canvas.height = 800
+      const context = canvas.getContext('2d')
+      if (!context) {
+        throw new Error('浏览器不支持图片绘制')
+      }
+
+      const fontFamily = '"Microsoft YaHei", "PingFang SC", sans-serif'
+      context.fillStyle = '#ffffff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.textBaseline = 'middle'
+
+      // Left legend
+      const legendX = 54
+      const legendRowHeight = 50
+      const legendStartY = (canvas.height - items.length * legendRowHeight) / 2
+      items.forEach((item, index) => {
+        const y = legendStartY + index * legendRowHeight
+        context.fillStyle = item.color
+        context.fillRect(legendX, y - 11, 26, 20)
+        context.strokeStyle = 'rgba(17, 24, 39, 0.24)'
+        context.lineWidth = 1
+        context.strokeRect(legendX, y - 11, 26, 20)
+
+        context.fillStyle = '#1f2937'
+        context.font = `22px ${fontFamily}`
+        context.textAlign = 'left'
+        context.fillText(item.name, legendX + 42, y)
+        context.fillStyle = '#4b5563'
+        context.textAlign = 'right'
+        context.fillText(item.ratioText, 292, y)
+      })
+
+      // Center distribution map
+      const mapBox = { x: 340, y: 126, width: 1180, height: 594 }
+      context.fillStyle = '#111827'
+      context.font = `700 26px ${fontFamily}`
+      context.textAlign = 'center'
+      context.fillText('土地利用分布图', mapBox.x + mapBox.width / 2, 82)
+      const mapScale = Math.min(mapBox.width / mapImage.naturalWidth, mapBox.height / mapImage.naturalHeight)
+      const mapWidth = mapImage.naturalWidth * mapScale
+      const mapHeight = mapImage.naturalHeight * mapScale
+      context.drawImage(
+        mapImage,
+        mapBox.x + (mapBox.width - mapWidth) / 2,
+        mapBox.y + (mapBox.height - mapHeight) / 2,
+        mapWidth,
+        mapHeight
+      )
+
+      // Right area-ratio pie chart
+      const centerX = 1960
+      const centerY = 405
+      const radius = 220
+      const total = items.reduce((sum, item) => sum + Math.max(0, Number(item.ratio_percent || 0)), 0)
+      context.fillStyle = '#111827'
+      context.font = `700 26px ${fontFamily}`
+      context.textAlign = 'center'
+      context.fillText('土地利用面积比例', centerX, 82)
+
+      const slices = []
+      let startAngle = -Math.PI / 2
+      items.forEach(item => {
+        const percent = Math.max(0, Number(item.ratio_percent || 0))
+        if (percent <= 0 || total <= 0) return
+        const endAngle = startAngle + (percent / total) * Math.PI * 2
+        context.beginPath()
+        context.moveTo(centerX, centerY)
+        context.arc(centerX, centerY, radius, startAngle, endAngle)
+        context.closePath()
+        context.fillStyle = item.color
+        context.fill()
+        context.strokeStyle = '#ffffff'
+        context.lineWidth = 2
+        context.stroke()
+        slices.push({ item, percent, startAngle, endAngle })
+        startAngle = endAngle
+      })
+
+      context.fillStyle = '#111827'
+      context.font = `600 20px ${fontFamily}`
+      slices.forEach(({ percent, startAngle: sliceStart, endAngle: sliceEnd }) => {
+        if (percent < 3) return
+        const angle = (sliceStart + sliceEnd) / 2
+        context.textAlign = 'center'
+        context.fillText(
+          `${percent.toFixed(1)}%`,
+          centerX + Math.cos(angle) * radius * 0.58,
+          centerY + Math.sin(angle) * radius * 0.58
+        )
+      })
+
+      const outerLabels = slices.map(({ item, percent, startAngle: sliceStart, endAngle: sliceEnd }) => {
+        const angle = (sliceStart + sliceEnd) / 2
+        const cosine = Math.cos(angle)
+        return {
+          name: item.name,
+          text: `${percent.toFixed(1)}%`,
+          side: cosine >= 0 ? 'right' : 'left',
+          x: centerX + cosine * (radius + 68),
+          y: centerY + Math.sin(angle) * (radius + 68)
+        }
+      })
+      const spreadLabels = (labels) => {
+        const sorted = labels.sort((a, b) => a.y - b.y)
+        const minY = 126
+        const maxY = 704
+        const gap = 48
+        sorted.forEach(label => {
+          label.y = Math.max(minY, Math.min(maxY, label.y))
+        })
+        for (let index = 1; index < sorted.length; index += 1) {
+          sorted[index].y = Math.max(sorted[index].y, sorted[index - 1].y + gap)
+        }
+        for (let index = sorted.length - 2; index >= 0; index -= 1) {
+          sorted[index].y = Math.min(sorted[index].y, sorted[index + 1].y - gap)
+        }
+        sorted.forEach(label => {
+          label.y = Math.max(minY, Math.min(maxY, label.y))
+        })
+      }
+      spreadLabels(outerLabels.filter(label => label.side === 'left'))
+      spreadLabels(outerLabels.filter(label => label.side === 'right'))
+
+      context.fillStyle = '#111827'
+      context.font = `600 20px ${fontFamily}`
+      outerLabels.forEach(label => {
+        context.textAlign = label.side === 'right' ? 'left' : 'right'
+        context.fillText(label.name, label.x, label.y - 12)
+        context.font = `18px ${fontFamily}`
+        context.fillText(`(${label.text})`, label.x, label.y + 13)
+        context.font = `600 20px ${fontFamily}`
+      })
+
+      return canvasToPngBlob(canvas)
+    }
+
     const downloadLandusePng = async () => {
       try {
-        await saveUrlAsFile(landuseVisualizationUrl.value, buildDownloadName('png'), 'image/png')
+        const blob = await drawLanduseDownloadImage()
+        await saveBlobAsFile(blob, buildDownloadName('png'), 'image/png')
         ElMessage.success('结果图片已下载')
       } catch (error) {
         if (error?.name === 'AbortError') return
         console.error('下载结果图片失败:', error)
-        ElMessage.error('下载结果图片失败，请确认结果图片仍然可访问')
+        ElMessage.error(error?.message || '下载结果图片失败，请确认结果图片仍然可访问')
       }
     }
 

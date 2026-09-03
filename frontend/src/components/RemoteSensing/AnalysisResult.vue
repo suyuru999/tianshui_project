@@ -662,6 +662,11 @@ function formatValue(value) {
   return typeof value === 'number' ? value.toFixed(4) : value;
 }
 
+function escapeCsvCell(value) {
+  const text = value === null || value === undefined ? '' : String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
 function handleVisualizationError(event) {
   const failedUrl = event?.target?.currentSrc || event?.target?.src || primaryVisualizationUrl.value || '';
   console.error('可视化图片加载失败:', failedUrl);
@@ -741,7 +746,7 @@ async function downloadResults() {
     formatValue(item.bad_area)
   ]);
 
-  const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
+  const csvContent = [headers, ...rows].map(row => row.map(escapeCsvCell).join(',')).join('\n');
   const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
   try {
     await saveBlobAsFile(blob, `遥感生态指数分析结果_${new Date().getTime()}.csv`, 'text/csv');
