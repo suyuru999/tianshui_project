@@ -578,11 +578,10 @@ const getRiskIcon = (level) => {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background: rgba(255, 255, 255, 0.98);
-  border: 1px solid rgba(219, 227, 236, 0.92);
-  border-radius: 24px;
-  box-shadow: 0 24px 54px rgba(31, 53, 83, 0.18);
-  backdrop-filter: blur(14px);
+  background: #132a48;
+  border: 1px solid #203b60;
+  border-radius: 12px;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.36);
   min-width: 460px;
   max-width: 640px;
   max-height: 82vh;
@@ -594,13 +593,11 @@ const getRiskIcon = (level) => {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  padding: 24px 28px 22px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
-  background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.22), transparent 32%),
-    linear-gradient(135deg, #1c7ed6 0%, #4ba3ea 100%);
+  padding: 18px 20px 16px;
+  border-bottom: 1px solid #203b60;
+  background: #132a48;
   color: white;
-  border-radius: 24px 24px 0 0;
+  border-radius: 12px 12px 0 0;
 }
 
 .header-copy {
@@ -613,62 +610,52 @@ const getRiskIcon = (level) => {
   font-size: 11px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.72);
+  color: #8299bc;
 }
 
 .popup-header h3 {
   margin: 0;
-  font-size: 30px;
-  line-height: 1.05;
-  font-weight: 800;
-  letter-spacing: -0.03em;
+  font-size: 18px;
+  line-height: 1.25;
+  font-weight: 700;
+  letter-spacing: 0;
 }
 
 .close-btn {
-  background: rgba(255, 255, 255, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  font-size: 28px;
+  background: #132a48;
+  border: 1px solid #203b60;
+  font-size: 24px;
   cursor: pointer;
   color: white;
   padding: 0;
-  width: 42px;
-  height: 42px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  transition: background 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+  border-radius: 6px;
+  transition: background 0.2s ease, border-color 0.2s ease;
 }
 
 .close-btn:hover {
-  background: rgba(255, 255, 255, 0.24);
-  border-color: rgba(255, 255, 255, 0.32);
-  transform: rotate(90deg);
+  background: #183358;
+  border-color: #1677ff;
 }
 
 .popup-content {
-  padding: 20px 28px 28px;
-  background:
-    linear-gradient(180deg, rgba(244, 247, 250, 0.42) 0%, rgba(255, 255, 255, 0.96) 20%),
-    #ffffff;
+  padding: 16px 18px 18px;
+  background: #132a48;
   position: relative;
 }
 
 .popup-content::before {
-  content: '';
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 120px;
-  background:
-    radial-gradient(circle at 15% 0%, rgba(73, 163, 234, 0.12), transparent 38%),
-    radial-gradient(circle at 90% 10%, rgba(28, 126, 214, 0.08), transparent 30%);
-  pointer-events: none;
+  content: none;
 }
 
 .section {
   margin-bottom: 18px;
-  padding: 18px 4px 20px;
-  border-bottom: 1px solid #e8eff5;
+  padding: 16px 4px 18px;
+  border-bottom: 1px solid #203b60;
 }
 
 .section:last-child {
@@ -680,7 +667,7 @@ const getRiskIcon = (level) => {
 .section-title {
   font-size: 14px;
   font-weight: 700;
-  color: #24384d;
+  color: #ffffff;
   margin-bottom: 14px;
   display: flex;
   align-items: center;
@@ -698,9 +685,10 @@ const getRiskIcon = (level) => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #eef5fb 0%, #f8fbfd 100%);
-  box-shadow: inset 0 0 0 1px #dbe6f0;
+  border-radius: 8px;
+  background: #183358;
+  border: 1px solid #203b60;
+  box-shadow: none;
 }
 
 .info-grid {
@@ -715,22 +703,22 @@ const getRiskIcon = (level) => {
   gap: 6px;
   min-height: 92px;
   padding: 14px 16px;
-  border-radius: 16px;
-  background: linear-gradient(180deg, #fbfdff 0%, #f4f8fb 100%);
-  border: 1px solid #e1e9f0;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  border-radius: 8px;
+  background: #183358;
+  border: 1px solid #203b60;
+  box-shadow: none;
 }
 
 .info-item .label {
   font-size: 12px;
-  color: #708398;
+  color: #8299bc;
   font-weight: 600;
   letter-spacing: 0.03em;
 }
 
 .info-item .value {
   font-size: 15px;
-  color: #26384a;
+  color: #ffffff;
   font-weight: 700;
   line-height: 1.5;
   word-break: break-word;
@@ -744,7 +732,7 @@ const getRiskIcon = (level) => {
 
 .value.value-subtle {
   font-size: 13px;
-  color: #667d92;
+  color: #8299bc;
   font-weight: 600;
 }
 
@@ -785,7 +773,7 @@ const getRiskIcon = (level) => {
 .risk-indicator {
   margin-top: 14px;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -794,21 +782,21 @@ const getRiskIcon = (level) => {
 }
 
 .risk-indicator.high-risk {
-  background: #fff4f2;
-  border: 1px solid #ffd6d2;
-  color: #be3f3f;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  color: #ffaaa3;
 }
 
 .risk-indicator.medium-risk {
-  background: #fff9ec;
-  border: 1px solid #f4deb0;
-  color: #b97b12;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  color: #ffd08a;
 }
 
 .risk-indicator.low-risk {
-  background: #f3fbf4;
-  border: 1px solid #cfe7d3;
-  color: #2e7b45;
+  background: rgba(47, 194, 107, 0.12);
+  border: 1px solid rgba(47, 194, 107, 0.28);
+  color: #9ff1bf;
 }
 
 .indicator-icon {
@@ -821,17 +809,16 @@ const getRiskIcon = (level) => {
   align-items: center;
   gap: 10px;
   padding: 14px 16px;
-  border-radius: 16px;
-  background:
-    linear-gradient(135deg, rgba(214, 69, 69, 0.12) 0%, rgba(255, 245, 242, 0.96) 100%);
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.12);
   border: 1px solid rgba(214, 69, 69, 0.24);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62);
+  box-shadow: none;
 }
 
 .banner-badge {
   flex: 0 0 auto;
   padding: 5px 10px;
-  border-radius: 999px;
+  border-radius: 6px;
   background: #d64545;
   color: #fff;
   font-size: 12px;
@@ -840,19 +827,19 @@ const getRiskIcon = (level) => {
 }
 
 .banner-text {
-  color: #8d2e2e;
+  color: #ffaaa3;
   font-size: 13px;
   font-weight: 700;
   line-height: 1.6;
 }
 
 .no-data {
-  color: #8a9aab;
+  color: #8299bc;
   font-size: 13px;
   padding: 16px 18px;
-  border-radius: 16px;
-  background: linear-gradient(180deg, #fbfdff 0%, #f5f8fb 100%);
-  border: 1px dashed #d4e0ea;
+  border-radius: 8px;
+  background: #183358;
+  border: 1px dashed #203b60;
 }
 
 .project-list {
@@ -862,13 +849,11 @@ const getRiskIcon = (level) => {
 }
 
 .project-item {
-  background:
-    radial-gradient(circle at top right, rgba(75, 163, 234, 0.08), transparent 28%),
-    linear-gradient(180deg, #fbfdff 0%, #f5f8fb 100%);
-  border-radius: 18px;
+  background: #183358;
+  border-radius: 8px;
   padding: 16px;
-  border: 1px solid #dfe7ef;
-  box-shadow: 0 10px 22px rgba(46, 72, 98, 0.06);
+  border: 1px solid #203b60;
+  box-shadow: none;
 }
 
 .project-header {
@@ -882,15 +867,16 @@ const getRiskIcon = (level) => {
 .project-name {
   font-size: 15px;
   font-weight: 700;
-  color: #25384a;
+  color: #ffffff;
 }
 
 .project-status {
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: 6px;
   font-size: 11px;
   font-weight: 700;
-  white-space: nowrap;
+  white-space: normal;
+  text-align: center;
 }
 
 .project-status.completed {
@@ -921,15 +907,15 @@ const getRiskIcon = (level) => {
 .subsection-title {
   font-size: 12px;
   font-weight: 700;
-  color: #567089;
+  color: #8299bc;
   letter-spacing: 0.04em;
 }
 
 .attribute-panel {
   margin-top: 16px;
-  border: 1px solid #dbe7f1;
-  border-radius: 16px;
-  background: linear-gradient(180deg, #fcfeff 0%, #f5f9fc 100%);
+  border: 1px solid #203b60;
+  border-radius: 8px;
+  background: #183358;
   overflow: hidden;
 }
 
@@ -941,7 +927,7 @@ const getRiskIcon = (level) => {
   justify-content: space-between;
   gap: 14px;
   padding: 14px 16px;
-  color: #2a4258;
+  color: #ffffff;
   user-select: none;
 }
 
@@ -951,8 +937,9 @@ const getRiskIcon = (level) => {
 
 .summary-hint {
   font-size: 12px;
-  color: #7b90a4;
-  white-space: nowrap;
+  color: #8299bc;
+  white-space: normal;
+  text-align: right;
 }
 
 .attribute-list {
@@ -967,14 +954,14 @@ const getRiskIcon = (level) => {
   justify-content: space-between;
   gap: 16px;
   padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid #e3ecf3;
+  border-radius: 8px;
+  background: #132a48;
+  border: 1px solid #203b60;
 }
 
 .attribute-key {
   flex: 0 0 38%;
-  color: #6f8498;
+  color: #8299bc;
   font-size: 12px;
   font-weight: 600;
   word-break: break-word;
@@ -982,7 +969,7 @@ const getRiskIcon = (level) => {
 
 .attribute-value {
   flex: 1;
-  color: #26384a;
+  color: #ffffff;
   font-size: 13px;
   font-weight: 600;
   text-align: right;
@@ -995,24 +982,24 @@ const getRiskIcon = (level) => {
   gap: 16px;
   font-size: 12px;
   padding-top: 8px;
-  border-top: 1px dashed #dde6ee;
+  border-top: 1px dashed #203b60;
 }
 
 .detail-item .label {
-  color: #718396;
+  color: #8299bc;
 }
 
 .detail-item .value {
-  color: #24384d;
+  color: #ffffff;
   font-weight: 600;
   text-align: right;
 }
 
 .risk-analysis {
-  background: linear-gradient(180deg, #f9fbfd 0%, #f4f8fb 100%);
-  border-radius: 18px;
+  background: #183358;
+  border-radius: 8px;
   padding: 16px;
-  border: 1px solid #dce6ef;
+  border: 1px solid #203b60;
 }
 
 .risk-summary {
@@ -1028,7 +1015,7 @@ const getRiskIcon = (level) => {
   font-size: 14px;
   font-weight: 700;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: 8px;
 }
 
 .risk-item.critical {
@@ -1057,12 +1044,12 @@ const getRiskIcon = (level) => {
 
 .risk-details {
   padding: 12px 14px;
-  background: white;
-  border-radius: 14px;
+  background: #132a48;
+  border-radius: 8px;
   font-size: 13px;
-  color: #627486;
+  color: #c4d4eb;
   line-height: 1.7;
-  border: 1px solid #e5edf4;
+  border: 1px solid #203b60;
 }
 
 .detail-text {
@@ -1070,25 +1057,25 @@ const getRiskIcon = (level) => {
 }
 
 .decision-recommendation {
-  background: linear-gradient(180deg, #f4fbff 0%, #eef7fc 100%);
-  border-radius: 18px;
+  background: #183358;
+  border-radius: 8px;
   padding: 16px;
-  border: 1px solid #d7e7f3;
+  border: 1px solid #203b60;
 }
 
 .recommendation-content {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: rgba(255, 255, 255, 0.9);
+  background: #132a48;
   padding: 14px 16px;
-  border-radius: 14px;
-  border: 1px solid #e4edf4;
+  border-radius: 8px;
+  border: 1px solid #203b60;
 }
 
 .recommendation-text {
   font-size: 14px;
-  color: #314456;
+  color: #c4d4eb;
   line-height: 1.7;
 }
 
@@ -1098,16 +1085,16 @@ const getRiskIcon = (level) => {
     width: calc(100vw - 24px);
     max-width: calc(100vw - 24px);
     max-height: 78vh;
-    border-radius: 20px;
+    border-radius: 8px;
   }
 
   .popup-header {
-    padding: 20px 20px 18px;
-    border-radius: 20px 20px 0 0;
+    padding: 16px;
+    border-radius: 8px 8px 0 0;
   }
 
   .popup-header h3 {
-    font-size: 24px;
+    font-size: 18px;
   }
 
   .popup-content {

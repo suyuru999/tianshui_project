@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.utils.text import get_valid_filename
 import os
 import json
+import base64
 import logging
 import requests
 import time
@@ -108,6 +109,9 @@ except ImportError as exc:
 from .file_utils import safe_file_cleanup, get_cleanup_files
 
 logger = logging.getLogger(__name__)
+TRANSPARENT_PNG_BYTES = base64.b64decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg=='
+)
 
 
 def _is_authenticated(user):
@@ -252,6 +256,57 @@ def _clear_overlay_metadata(layer_type):
     _save_overlay_metadata(metadata)
 
 
+def _overlay_vector_geojson_url(layer_type):
+    return f'/api/v1/environment/overlay-analysis-tasks/uploaded-vector-geojson/?data_type={layer_type}'
+
+
+def _overlay_vector_shp_path(layer_type):
+    config = _get_overlay_layer_configs().get(layer_type)
+    if not config or config.get('kind') != 'vector':
+        return None
+    return os.path.join(config['paths'][0], f"{config['layer_name']}.shp")
+
+
+def _geojson_geometry_bounds(geometry):
+    bounds = [float('inf'), float('inf'), float('-inf'), float('-inf')]
+
+    def visit_coordinates(coords):
+        if not coords:
+            return
+        if isinstance(coords[0], (int, float)) and len(coords) >= 2:
+            x, y = coords[0], coords[1]
+            bounds[0] = min(bounds[0], x)
+            bounds[1] = min(bounds[1], y)
+            bounds[2] = max(bounds[2], x)
+            bounds[3] = max(bounds[3], y)
+            return
+        for item in coords:
+            visit_coordinates(item)
+
+    if geometry:
+        visit_coordinates(geometry.get('coordinates') or [])
+
+    if bounds[0] == float('inf'):
+        return None
+    return bounds
+
+
+def _geojson_feature_collection_bounds(geojson):
+    aggregate = [float('inf'), float('inf'), float('-inf'), float('-inf')]
+    for feature in geojson.get('features') or []:
+        feature_bounds = _geojson_geometry_bounds(feature.get('geometry'))
+        if not feature_bounds:
+            continue
+        aggregate[0] = min(aggregate[0], feature_bounds[0])
+        aggregate[1] = min(aggregate[1], feature_bounds[1])
+        aggregate[2] = max(aggregate[2], feature_bounds[2])
+        aggregate[3] = max(aggregate[3], feature_bounds[3])
+
+    if aggregate[0] == float('inf'):
+        return None
+    return aggregate
+
+
 def _get_rsei_source(remote_sensing_image_id=None):
     rsei_queryset = (
         RSEIResult.objects
@@ -362,6 +417,7 @@ def _sync_latest_rsei_to_overlay(remote_sensing_image_id=None):
             'reason': 'copy_failed'
         }
 
+    publish_success = False
     try:
         from .geoserver_config import geoserver_manager
 
@@ -373,18 +429,6 @@ def _sync_latest_rsei_to_overlay(remote_sensing_image_id=None):
         )
     except Exception as exc:
         logger.error(f"发布同步后的RSEI图层失败: {exc}")
-        return {
-            'success': False,
-            'message': f'已同步RSEI结果文件，但发布到GeoServer失败: {exc}',
-            'reason': 'geoserver_publish_exception'
-        }
-
-    if not publish_success:
-        return {
-            'success': False,
-            'message': '已同步RSEI结果文件，但发布到GeoServer失败。',
-            'reason': 'geoserver_publish_failed'
-        }
 
     image_name = getattr(source_image, 'name', '') or ''
     metadata = _update_overlay_metadata(
@@ -397,11 +441,14 @@ def _sync_latest_rsei_to_overlay(remote_sensing_image_id=None):
         source_image_name=image_name,
         source_result_id=str(source_index.id),
         source_result_created_at=source_created_at.isoformat() if source_created_at else None,
+        service_mode='geoserver' if publish_success else 'local',
+        geoserver_published=bool(publish_success),
     )
 
     return {
         'success': True,
-        'message': 'RSEI结果已同步到叠加分析生态图层。',
+        'message': 'RSEI结果已同步到叠加分析生态图层。' if publish_success else 'RSEI结果已同步，GeoServer未连接，当前使用本地栅格覆盖图显示。',
+        'warning': None if publish_success else 'GeoServer发布失败，已启用本地覆盖图兜底。',
         'metadata': metadata,
         'layer_name': overlay_config['layer_name'],
         'source_path': source_path,
@@ -757,6 +804,7 @@ REMOTE_INDEX_LABELS = {
     'heat': '热度指数(LST/Heat)',
     'greenness': '绿度指数',
     'rsei': '遥感生态指数(RSEI)',
+    'uploaded_raster': '上传成果栅格',
 }
 
 
@@ -1761,20 +1809,11 @@ def _build_compare_overlay_payload(
 
 
 def _continuous_overlay_colormap(style_hint=None):
-    style = str(style_hint or '').lower()
-    if style in {'rsei', 'ecology_rsei'}:
-        return mpl_colors.LinearSegmentedColormap.from_list(
-            'rsei_overlay',
-            ['#8B0000', '#FF0000', '#FFA500', '#FFFF00', '#00FF00', '#006400'],
-            N=256,
-        )
-    if style in {'ndwi', 'wetness'}:
-        return mpl_colormaps['Blues']
-    if style in {'heat', 'lst'}:
-        return mpl_colormaps['inferno']
-    if style in {'dryness', 'ndbi', 'ndbsi'}:
-        return mpl_colormaps['YlOrBr']
-    return mpl_colormaps['RdYlGn']
+    return mpl_colors.LinearSegmentedColormap.from_list(
+        'analysis_result_overlay',
+        ['#8B0000', '#FF0000', '#FFA500', '#FFFF00', '#00FF00', '#006400'],
+        N=256,
+    )
 
 
 def _trim_uploaded_raster_background(data, valid_mask):
@@ -2052,6 +2091,162 @@ def _extract_shapefile_zip(zip_path, target_dir):
     if not shp_files:
         raise ValueError('ZIP文件中未找到.shp文件')
     return shp_files[0]
+
+
+def _json_safe_property(value):
+    if value is None:
+        return None
+    if hasattr(value, 'isoformat'):
+        return value.isoformat()
+    if isinstance(value, bytes):
+        for encoding in ('utf-8', 'gbk', 'gb18030'):
+            try:
+                return value.decode(encoding)
+            except Exception:
+                continue
+        return value.decode('utf-8', errors='ignore')
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return float(value)
+    return value
+
+
+def _shapefile_to_geojson_with_ogr(shp_path):
+    from osgeo import ogr, osr
+
+    datasource = ogr.Open(shp_path)
+    if datasource is None:
+        raise ValueError('Shapefile 无法读取，请检查 ZIP 内文件是否完整')
+
+    layer = datasource.GetLayer(0)
+    if layer is None:
+        raise ValueError('Shapefile 中没有可读取图层')
+
+    source_srs = layer.GetSpatialRef()
+    target_srs = osr.SpatialReference()
+    target_srs.ImportFromEPSG(4326)
+    coordinate_transform = None
+    if source_srs and not source_srs.IsSame(target_srs):
+        coordinate_transform = osr.CoordinateTransformation(source_srs, target_srs)
+
+    layer_defn = layer.GetLayerDefn()
+    field_names = [
+        layer_defn.GetFieldDefn(index).GetName()
+        for index in range(layer_defn.GetFieldCount())
+    ]
+
+    features = []
+    for feature in layer:
+        geometry = feature.GetGeometryRef()
+        if geometry is None:
+            continue
+        geometry_clone = geometry.Clone()
+        if coordinate_transform:
+            geometry_clone.Transform(coordinate_transform)
+        try:
+            geometry_json = json.loads(geometry_clone.ExportToJson())
+        finally:
+            geometry_clone = None
+        properties = {
+            field_name: _json_safe_property(feature.GetField(field_name))
+            for field_name in field_names
+        }
+        features.append({
+            'type': 'Feature',
+            'geometry': geometry_json,
+            'properties': properties,
+        })
+
+    datasource = None
+    return {
+        'type': 'FeatureCollection',
+        'features': features,
+    }
+
+
+def _shapefile_to_geojson_with_pyshp(shp_path):
+    if shapefile is None:
+        raise RuntimeError(f'当前环境缺少 Shapefile 解析依赖: {SHAPEFILE_IMPORT_ERROR}')
+
+    last_error = None
+    for encoding in ('utf-8', 'gbk', 'gb18030'):
+        try:
+            with shapefile.Reader(shp_path, encoding=encoding) as reader:
+                field_names = [field[0] for field in reader.fields[1:] if field and field[0]]
+                features = []
+                for shape_record in reader.iterShapeRecords():
+                    geometry = getattr(shape_record.shape, '__geo_interface__', None)
+                    if not geometry:
+                        continue
+                    properties = {
+                        field_name: _json_safe_property(value)
+                        for field_name, value in zip(field_names, shape_record.record)
+                    }
+                    features.append({
+                        'type': 'Feature',
+                        'geometry': geometry,
+                        'properties': properties,
+                    })
+                return {
+                    'type': 'FeatureCollection',
+                    'features': features,
+                }
+        except Exception as exc:
+            last_error = exc
+
+    raise ValueError(f'Shapefile 属性编码或几何读取失败: {last_error}')
+
+
+def _shapefile_to_geojson(shp_path):
+    try:
+        return _shapefile_to_geojson_with_ogr(shp_path)
+    except Exception as exc:
+        logger.warning(f'OGR 转换 Shapefile 失败，尝试 pyshp 兜底: {exc}')
+        return _shapefile_to_geojson_with_pyshp(shp_path)
+
+
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def parse_local_vector_layer(request):
+    """解析本地 Shapefile ZIP，用于主地图临时图层预览。"""
+    if 'file' not in request.FILES:
+        return Response({'error': '请上传 Shapefile ZIP 文件'}, status=400)
+
+    uploaded_file = request.FILES['file']
+    if not uploaded_file.name.lower().endswith('.zip'):
+        return Response({'error': '当前接口仅支持完整 Shapefile ZIP'}, status=400)
+
+    upload_rel, upload_abs = _save_uploaded_file(uploaded_file, 'analysis_tmp')
+    extract_dir = os.path.join(settings.MEDIA_ROOT, 'analysis_tmp', f'vector_{uuid.uuid4().hex}')
+    try:
+        is_valid_zip, zip_message = validate_shapefile_zip(upload_abs)
+        if not is_valid_zip:
+            return Response({'error': zip_message}, status=400)
+
+        shp_path = _extract_shapefile_zip(upload_abs, extract_dir)
+        geojson = _shapefile_to_geojson(shp_path)
+        feature_count = len(geojson.get('features') or [])
+        if feature_count == 0:
+            return Response({'error': 'Shapefile ZIP 中未解析到有效要素'}, status=400)
+
+        return Response({
+            'success': True,
+            'filename': uploaded_file.name,
+            'feature_count': feature_count,
+            'geojson': geojson,
+        })
+    except Exception as exc:
+        logger.exception('解析本地Shapefile ZIP失败')
+        return Response({'error': f'Shapefile ZIP 解析失败: {exc}'}, status=400)
+    finally:
+        try:
+            if os.path.exists(upload_abs):
+                os.remove(upload_abs)
+        except Exception as cleanup_error:
+            logger.warning(f'清理本地矢量上传文件失败: {cleanup_error}')
+        remove_tree(extract_dir)
 
 
 def _convert_kml_to_shapefile(kml_path, target_dir, output_name):
@@ -2452,6 +2647,21 @@ def geoserver_ows_proxy(request):
 
     geoserver = get_geoserver_manager()
     logger.info(f"GeoServer OWS proxy request: params={dict(request.GET)}")
+
+    def is_getmap_image_request():
+        request_type = str(request.GET.get('REQUEST') or request.GET.get('request') or '').lower()
+        output_format = str(request.GET.get('FORMAT') or request.GET.get('format') or '').lower()
+        return request_type == 'getmap' and ('png' in output_format or not output_format)
+
+    def transparent_map_response(reason, upstream_status=200):
+        logger.warning("GeoServer GetMap fallback transparent image: %s", reason)
+        response = HttpResponse(TRANSPARENT_PNG_BYTES, status=200, content_type='image/png')
+        response['Cache-Control'] = 'no-store'
+        response['X-GeoServer-Fallback'] = 'transparent'
+        response['X-GeoServer-Upstream-Status'] = str(upstream_status)
+        response['Access-Control-Allow-Origin'] = '*'
+        return response
+
     try:
         upstream = requests.get(
             f'{geoserver.base_url}/ows',
@@ -2460,6 +2670,8 @@ def geoserver_ows_proxy(request):
             timeout=120,
         )
     except requests.RequestException as exc:
+        if is_getmap_image_request():
+            return transparent_map_response(str(exc), 502)
         return Response({'error': f'GeoServer代理请求失败: {exc}'}, status=502)
 
     if upstream.status_code >= 400:
@@ -2469,6 +2681,8 @@ def geoserver_ows_proxy(request):
             upstream.headers.get('Content-Type'),
             upstream.text[:500],
         )
+        if is_getmap_image_request():
+            return transparent_map_response(upstream.text[:300], upstream.status_code)
 
     content_type = upstream.headers.get('Content-Type', 'application/octet-stream')
     response = HttpResponse(
@@ -2489,14 +2703,25 @@ def _landuse_visualization_payload(request, analyzer, source_file_name, raster_a
     os.makedirs(result_dir_abs, exist_ok=True)
     visualization_rel = f'{result_dir_rel}/land_use_visualization.png'
     visualization_abs = os.path.join(settings.MEDIA_ROOT, visualization_rel)
+    result_file_rel = None
+    if raster_abs and os.path.exists(raster_abs):
+        result_file_rel = f'{result_dir_rel}/land_use_result.tif'
+        result_file_abs = os.path.join(settings.MEDIA_ROOT, result_file_rel)
+        try:
+            shutil.copy2(raster_abs, result_file_abs)
+        except Exception as exc:
+            logger.warning(f"复制土地利用结果TIF失败: {exc}")
+            result_file_rel = None
     analyzer.create_landuse_visualization(visualization_abs)
     return {
         'source_filename': source_file_name,
         'visualization_file_url': _media_url(request, visualization_rel),
+        'result_file_url': _media_url(request, result_file_rel) if result_file_rel else None,
         'landuse_statistics': analyzer.get_landuse_statistics(),
         'compare_overlay': _build_compare_overlay_payload(
             request=request,
             raster_abs=raster_abs,
+            result_file_rel=result_file_rel,
             visualization_rel=visualization_rel,
             source_filename=source_file_name,
             style_hint='landuse',
@@ -2572,23 +2797,26 @@ def analyze_remote_sensing_upload(request):
                 'supported_index_labels': [REMOTE_INDEX_LABELS[item] for item in ['ndvi', 'ndwi', 'ndbi']],
             }, status=400)
 
-        if band_count == 1 and extension in ['.tif', '.tiff'] and index_type == 'rsei':
-            return Response({
-                'error': '当前上传的是单波段成果栅格或分类栅格，不能直接计算 RSEI，也不会生成可同步到叠加分析的 RSEI 结果。',
-                'details': '请上传原始多波段遥感影像后再选择“遥感生态指数（RSEI）”进行分析；像土地利用分类图这类 1-6 等级值栅格，只能做成果展示，不能反推 RSEI。',
-                'bands_count': band_count,
-                'requested_index': index_type,
-            }, status=400)
-
         if band_count == 1 and extension in ['.tif', '.tiff']:
             label = '上传成果栅格'
             index_data, stats = _single_band_statistics(raster_abs)
             index_result_type = 'uploaded_raster'
+            result_tif_rel = f'{result_dir_rel}/{index_result_type}.tif'
+            result_tif_abs = os.path.join(settings.MEDIA_ROOT, result_tif_rel)
+            shutil.copy2(raster_abs, result_tif_abs)
+            if index_type == 'rsei':
+                preview_message = (
+                    '当前上传的是单波段成果栅格，系统已生成预览和缓存；'
+                    '但它不能反推标准 RSEI，也不会作为可同步到叠加分析的 RSEI 计算成果。'
+                )
         elif extension in ['.tif', '.tiff'] and index_type in ['ndvi', 'ndwi'] and band_count and band_count >= 3 and not preview_mode:
             index_result_type = index_type
             label = REMOTE_INDEX_METHODS[index_type][0]
-            index_data, stats = calculate_normalized_index_preview_stats(raster_abs, index_type)
-            result_file_url = None
+            result_tif_rel = f'{result_dir_rel}/{index_result_type}.tif'
+            result_tif_abs = os.path.join(settings.MEDIA_ROOT, result_tif_rel)
+            _, stats = calculate_normalized_index_windowed(raster_abs, result_tif_abs, index_type)
+            index_data = preview_array(result_tif_abs)
+            result_file_url = _media_url(request, result_tif_rel)
         elif extension in ['.tif', '.tiff'] and preview_mode and index_type in ['ndvi', 'ndwi', 'ndbi'] and band_count and band_count >= 3:
             index_result_type = index_type
             label = REMOTE_INDEX_METHODS[index_type][0]
@@ -2705,7 +2933,8 @@ def analyze_remote_sensing_upload(request):
                 calculator.save_result(index_data, result_tif_abs)
                 result_file_url = _media_url(request, result_tif_rel)
             else:
-                result_tif_rel = None
+                result_tif_rel = locals().get('result_tif_rel')
+                result_tif_abs = locals().get('result_tif_abs')
 
             preview_calculator = calculator or EcologicalIndexCalculator(raster_abs)
             preview_calculator.create_visualization(index_data, label, result_png_abs)
@@ -3396,8 +3625,6 @@ class BusinessLayerViewSet(viewsets.ModelViewSet):
         public_actions = {'list', 'retrieve'}
         if self.action in public_actions:
             return [permissions.AllowAny()]
-        if _allow_anonymous_business_layer_admin():
-            return [permissions.AllowAny()]
         return [permissions.IsAuthenticated()]
 
     def get_serializer_class(self):
@@ -3912,7 +4139,7 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
     parser_classes = [MultiPartParser, FormParser, JSONParser]  # 支持文件上传
 
     def get_permissions(self):
-        public_actions = {'list', 'retrieve', 'risk_statistics', 'available_rsei_sources', 'uploaded_layer_metadata'}
+        public_actions = {'list', 'retrieve', 'risk_statistics', 'available_rsei_sources', 'uploaded_layer_metadata', 'uploaded_vector_geojson'}
         if self.action in public_actions:
             return [permissions.AllowAny()]
         if _allow_anonymous_overlay_admin():
@@ -3963,6 +4190,8 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                 'source_image_name': layer_meta.get('source_image_name') or '',
                 'source_result_id': layer_meta.get('source_result_id') or '',
                 'source_result_created_at': layer_meta.get('source_result_created_at'),
+                'service_mode': layer_meta.get('service_mode') or ('geoserver' if layer_meta.get('geoserver_published') else 'local'),
+                'geoserver_published': bool(layer_meta.get('geoserver_published')),
                 'published': published,
             }
 
@@ -4007,11 +4236,61 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                         payload[layer_type]['overlay_image_url'] = compare_overlay.get('overlay_image_url')
                 except Exception as exc:
                     logger.warning(f"生成叠加生态透明覆盖图失败: {exc}")
+            elif config['kind'] == 'vector' and published:
+                shp_path = _overlay_vector_shp_path(layer_type)
+                if shp_path and os.path.exists(shp_path):
+                    payload[layer_type]['geojson_url'] = _overlay_vector_geojson_url(layer_type)
+                    try:
+                        if shapefile is not None:
+                            with shapefile.Reader(shp_path) as reader:
+                                payload[layer_type]['bounds'] = list(reader.bbox) if reader.bbox else None
+                                payload[layer_type]['feature_count'] = len(reader)
+                        else:
+                            geojson = _shapefile_to_geojson(shp_path)
+                            payload[layer_type]['bounds'] = _geojson_feature_collection_bounds(geojson)
+                            payload[layer_type]['feature_count'] = len(geojson.get('features') or [])
+                    except Exception as exc:
+                        logger.warning(f"读取叠加矢量元数据失败: {exc}")
 
         return Response({
             'success': True,
             'data': payload,
         })
+
+    @action(detail=False, methods=['get'], url_path='uploaded-vector-geojson')
+    def uploaded_vector_geojson(self, request):
+        """返回叠加分析已上传矢量的 GeoJSON，用于 GeoServer 不可用时本地显示。"""
+        layer_type = request.query_params.get('data_type')
+        configs = _get_overlay_layer_configs()
+        config = configs.get(layer_type)
+        if not config or config.get('kind') != 'vector':
+            return Response({
+                'success': False,
+                'message': '不支持的矢量图层类型'
+            }, status=400)
+
+        shp_path = _overlay_vector_shp_path(layer_type)
+        if not shp_path or not os.path.exists(shp_path):
+            return Response({
+                'success': False,
+                'message': f"{config['label']}文件不存在，请先上传。"
+            }, status=404)
+
+        try:
+            geojson = _shapefile_to_geojson(shp_path)
+            feature_count = len(geojson.get('features') or [])
+            return Response({
+                'success': True,
+                'data_type': layer_type,
+                'feature_count': feature_count,
+                'geojson': geojson,
+            })
+        except Exception as exc:
+            logger.exception(f"读取{config['label']}GeoJSON失败")
+            return Response({
+                'success': False,
+                'message': f"{config['label']}解析失败: {exc}"
+            }, status=500)
 
     @action(detail=False, methods=['post'], url_path='sync-latest-rsei')
     def sync_latest_rsei(self, request):
@@ -4669,6 +4948,8 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                         source_image_name='',
                         source_result_id='',
                         source_result_created_at=None,
+                        service_mode='geoserver',
+                        geoserver_published=True,
                     )
                     return Response({
                         'success': True,
@@ -4680,22 +4961,52 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                     })
                 else:
                     logger.warning("⚠️ GeoServer发布失败")
+                    metadata = _update_overlay_metadata(
+                        'ecology_uploaded',
+                        description=description,
+                        file_name=file_name,
+                        layer_name=overlay_config['layer_name'],
+                        source_type='uploaded_raster',
+                        source_image_id='',
+                        source_image_name='',
+                        source_result_id='',
+                        source_result_created_at=None,
+                        service_mode='local',
+                        geoserver_published=False,
+                    )
                     return Response({
-                        'success': False,
-                        'message': '文件已上传，但GeoServer发布失败。请检查GeoServer服务状态、工作区配置或数据坐标系。',
+                        'success': True,
+                        'message': '生态指数栅格已上传，GeoServer未连接，当前使用本地栅格覆盖图显示。',
+                        'warning': 'GeoServer发布失败，已启用本地覆盖图兜底。',
                         'file_name': file_name,
-                        'save_path': save_path
-                    }, status=502)
+                        'save_path': save_path,
+                        'metadata': metadata,
+                    })
             except Exception as geo_error:
                 logger.error(f"GeoServer发布异常: {str(geo_error)}")
                 import traceback
                 logger.error(traceback.format_exc())
+                metadata = _update_overlay_metadata(
+                    'ecology_uploaded',
+                    description=description,
+                    file_name=file_name,
+                    layer_name=overlay_config['layer_name'],
+                    source_type='uploaded_raster',
+                    source_image_id='',
+                    source_image_name='',
+                    source_result_id='',
+                    source_result_created_at=None,
+                    service_mode='local',
+                    geoserver_published=False,
+                )
                 return Response({
-                    'success': False,
-                    'message': f'文件已上传，但GeoServer发布失败: {str(geo_error)}',
+                    'success': True,
+                    'message': f'生态指数栅格已上传，GeoServer发布失败，当前使用本地栅格覆盖图显示。',
+                    'warning': str(geo_error),
                     'file_name': file_name,
-                    'save_path': save_path
-                }, status=502)
+                    'save_path': save_path,
+                    'metadata': metadata,
+                })
                 
         except Exception as e:
             logger.error(f"❌ 上传生态栅格失败: {str(e)}")
@@ -4814,6 +5125,9 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                     description=description,
                     file_name=file_name,
                     layer_name='economy_vector',
+                    source_type='uploaded_vector',
+                    service_mode='geoserver',
+                    geoserver_published=True,
                 )
                 return Response({
                     'success': True,
@@ -4827,13 +5141,25 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                     'metadata': metadata,
                 })
             else:
+                metadata = _update_overlay_metadata(
+                    'economy',
+                    description=description,
+                    file_name=file_name,
+                    layer_name='economy_vector',
+                    source_type='uploaded_vector',
+                    service_mode='local',
+                    geoserver_published=False,
+                )
                 return Response({
-                    'success': False,
-                    'message': '经济数据矢量已上传，但发布到GeoServer失败。请检查GeoServer服务状态、工作区配置或矢量坐标系。',
+                    'success': True,
+                    'message': '经济数据矢量已上传，GeoServer未连接，当前使用本地矢量图层显示。',
+                    'warning': 'GeoServer发布失败，已启用本地GeoJSON兜底。',
                     'file_name': file_name,
                     'shp_path': shp_path,
-                    'warning': 'GeoServer发布失败'
-                }, status=502)
+                    'layer_name': 'economy_vector',
+                    'description': description,
+                    'metadata': metadata,
+                })
                 
         except Exception as e:
             logger.error(f"上传经济矢量失败: {str(e)}")
@@ -4938,6 +5264,9 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                     description=description,
                     file_name=file_name,
                     layer_name='engineering_vector',
+                    source_type='uploaded_vector',
+                    service_mode='geoserver',
+                    geoserver_published=True,
                 )
                 return Response({
                     'success': True,
@@ -4949,13 +5278,25 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                     'metadata': metadata,
                 })
             else:
+                metadata = _update_overlay_metadata(
+                    'engineering',
+                    description=description,
+                    file_name=file_name,
+                    layer_name='engineering_vector',
+                    source_type='uploaded_vector',
+                    service_mode='local',
+                    geoserver_published=False,
+                )
                 return Response({
-                    'success': False,
-                    'message': '工程项目矢量已上传，但发布到GeoServer失败。请检查GeoServer服务状态、工作区配置或矢量坐标系。',
+                    'success': True,
+                    'message': '工程项目矢量已上传，GeoServer未连接，当前使用本地矢量图层显示。',
+                    'warning': 'GeoServer发布失败，已启用本地GeoJSON兜底。',
                     'file_name': file_name,
                     'shp_path': shp_path,
-                    'warning': 'GeoServer发布失败'
-                }, status=502)
+                    'layer_name': 'engineering_vector',
+                    'description': description,
+                    'metadata': metadata,
+                })
                 
         except Exception as e:
             logger.error(f"上传工程矢量失败: {str(e)}")

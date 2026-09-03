@@ -14,8 +14,8 @@ export const authService = {
   },
   
   // 用户注册
-  register(userData) {
-    return request.post(buildApiUrl(API_ENDPOINTS.AUTH.REGISTER), userData)
+  register(userData, config = {}) {
+    return request.post(buildApiUrl(API_ENDPOINTS.AUTH.REGISTER), userData, config)
   },
   
   // 获取用户信息
@@ -241,37 +241,43 @@ export const spatialService = {
     if (metadata.description) {
       formData.append('description', metadata.description)
     }
-    return request.upload(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYERS), formData, { skipAuth: true })
+    return request.upload(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYERS), formData)
   },
 
   // 接入外部标准服务业务图层
   createBusinessServiceLayer(data) {
-    return request.post(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYERS), data, { skipAuth: true })
+    return request.post(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYERS), data)
   },
 
   // 重新发布业务图层
   publishBusinessLayer(id) {
-    return request.post(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYER_PUBLISH(id)), {}, { skipAuth: true })
+    return request.post(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYER_PUBLISH(id)))
   },
 
   // 撤销GeoServer发布，保留上传记录
   unpublishBusinessLayer(id) {
-    return request.post(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYER_UNPUBLISH(id)), {}, { skipAuth: true })
+    return request.post(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYER_UNPUBLISH(id)))
   },
 
   // 删除业务图层记录
   deleteBusinessLayer(id) {
-    return request.delete(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYER_DETAIL(id)), { skipAuth: true })
+    return request.delete(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYER_DETAIL(id)))
   },
 
   // 更新业务图层样式
   updateBusinessLayerStyle(id, data) {
-    return request.post(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYER_STYLE(id)), data, { skipAuth: true })
+    return request.post(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYER_STYLE(id)), data)
+  },
+
+  parseLocalVectorLayer(file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request.upload(buildApiUrl(API_ENDPOINTS.SPATIAL.PARSE_LOCAL_VECTOR_LAYER), formData, { skipAuth: true })
   },
 
   // 获取业务图层操作日志
   getBusinessLayerLogs(id) {
-    return request.get(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYER_LOGS(id)), {}, { skipAuth: true })
+    return request.get(buildApiUrl(API_ENDPOINTS.SPATIAL.BUSINESS_LAYER_LOGS(id)))
   },
   
   // 发布图层到GeoServer

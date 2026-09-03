@@ -13,6 +13,13 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 import os
 
+
+def env_bool(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -143,8 +150,16 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = 'users.User'
 
 # REST Framework 配置 - 科研展示版本
+ALLOW_PUBLIC_USER_REGISTRATION = env_bool('ALLOW_PUBLIC_USER_REGISTRATION', True)
+ALLOW_ANONYMOUS_ANALYSIS_UPLOADS = env_bool('ALLOW_ANONYMOUS_ANALYSIS_UPLOADS', True)
+ALLOW_ANONYMOUS_BUSINESS_LAYER_ADMIN = env_bool('ALLOW_ANONYMOUS_BUSINESS_LAYER_ADMIN', True)
+ALLOW_ANONYMOUS_OVERLAY_ADMIN = env_bool('ALLOW_ANONYMOUS_OVERLAY_ADMIN', True)
+ALLOW_PUBLIC_FEEDBACK_MANAGEMENT = env_bool('ALLOW_PUBLIC_FEEDBACK_MANAGEMENT', True)
+
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': [],  # 完全不需要认证
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+    ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',  # 允许所有请求
     ],
@@ -156,6 +171,8 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PARSER_CLASSES': [
         'rest_framework.parsers.JSONParser',
+        'rest_framework.parsers.FormParser',
+        'rest_framework.parsers.MultiPartParser',
     ],
 }
 
@@ -216,7 +233,7 @@ LOGGING = {
 os.makedirs(BASE_DIR / 'logs', exist_ok=True)
 
 # GeoServer配置
-GEOSERVER_URL = os.getenv('GEOSERVER_URL', 'http://localhost:8651/geoserver')
+GEOSERVER_URL = os.getenv('GEOSERVER_URL', 'http://localhost:8080/geoserver')
 GEOSERVER_USERNAME = os.getenv('GEOSERVER_USERNAME', 'admin')
 GEOSERVER_PASSWORD = os.getenv('GEOSERVER_PASSWORD', 'geoserver')
 GEOSERVER_WORKSPACE = os.getenv('GEOSERVER_WORKSPACE', 'tianshuipy')

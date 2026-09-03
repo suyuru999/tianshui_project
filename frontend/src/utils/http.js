@@ -6,6 +6,7 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { API_CONFIG, API_ENDPOINTS, buildApiUrl } from '../config/api.js'
+import { saveBlobAsFile } from './fileSave.js'
 
 // 创建axios实例
 const http = axios.create({
@@ -73,6 +74,16 @@ http.interceptors.request.use(
   async (config) => {
     if (!config.headers) {
       config.headers = {}
+    }
+
+    if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+      if (typeof config.headers.delete === 'function') {
+        config.headers.delete('Content-Type')
+        config.headers.delete('content-type')
+      } else {
+        delete config.headers['Content-Type']
+        delete config.headers['content-type']
+      }
     }
 
     // 添加认证token
@@ -187,13 +198,13 @@ export const request = {
   // 文件上传
   async upload(url, formData, config = {}) {
     const nextConfig = await buildUnsafeRequestConfig({
-      // 不手动设置Content-Type，让浏览器自动设置boundary
-      headers: {
-        // 移除默认的Content-Type，让浏览器自动设置multipart/form-data
-        'Content-Type': undefined,
-      },
       ...config,
+      headers: {
+        ...(config.headers || {}),
+      },
     })
+    delete nextConfig.headers['Content-Type']
+    delete nextConfig.headers['content-type']
     return http.post(url, formData, nextConfig)
   },
   
@@ -203,13 +214,8 @@ export const request = {
       params,
       responseType: 'blob',
     }).then((data) => {
-      const blob = new Blob([data])
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = filename
-      link.click()
-      window.URL.revokeObjectURL(url)
+      const blob = data instanceof Blob ? data : new Blob([data])
+      return saveBlobAsFile(blob, filename, blob.type)
     })
   }
 }

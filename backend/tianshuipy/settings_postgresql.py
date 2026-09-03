@@ -22,6 +22,19 @@ def env_list(name, default=None):
         return list(default or [])
     return [item.strip() for item in value.split(',') if item.strip()]
 
+
+def env_int(name, default=0):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed_value = int(value)
+    except ValueError as exc:
+        raise ImproperlyConfigured(f'{name} 必须是整数') from exc
+    if parsed_value < 0:
+        raise ImproperlyConfigured(f'{name} 不能小于 0')
+    return parsed_value
+
 # 加载环境变量
 load_dotenv()
 
@@ -182,11 +195,15 @@ CORS_ALLOWED_ORIGINS = env_list('CORS_ALLOWED_ORIGINS', [
 ])
 CSRF_TRUSTED_ORIGINS = env_list('CSRF_TRUSTED_ORIGINS', CORS_ALLOWED_ORIGINS)
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SECURE = env_bool('SESSION_COOKIE_SECURE', False)
+SESSION_COOKIE_SECURE = env_bool('SESSION_COOKIE_SECURE', True)
 SESSION_COOKIE_SAMESITE = os.getenv('SESSION_COOKIE_SAMESITE', 'Lax')
-CSRF_COOKIE_SECURE = env_bool('CSRF_COOKIE_SECURE', False)
+CSRF_COOKIE_SECURE = env_bool('CSRF_COOKIE_SECURE', True)
 CSRF_COOKIE_HTTPONLY = env_bool('CSRF_COOKIE_HTTPONLY', False)
 CSRF_COOKIE_SAMESITE = os.getenv('CSRF_COOKIE_SAMESITE', 'Lax')
+SECURE_SSL_REDIRECT = env_bool('SECURE_SSL_REDIRECT', True)
+SECURE_HSTS_SECONDS = env_int('SECURE_HSTS_SECONDS', 31536000)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool('SECURE_HSTS_INCLUDE_SUBDOMAINS', True)
+SECURE_HSTS_PRELOAD = env_bool('SECURE_HSTS_PRELOAD', False)
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = os.getenv('SECURE_REFERRER_POLICY', 'same-origin')
 X_FRAME_OPTIONS = os.getenv('X_FRAME_OPTIONS', 'DENY')

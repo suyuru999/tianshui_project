@@ -88,8 +88,7 @@ const computedProgress = computed(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(4px);
+  background: rgba(8, 23, 43, 0.82);
   z-index: 9999;
 }
 
@@ -104,8 +103,8 @@ const computedProgress = computed(() => {
 .spinner-circle {
   width: 40px;
   height: 40px;
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #409eff;
+  border: 4px solid #203b60;
+  border-top: 4px solid #1677ff;
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
@@ -127,7 +126,7 @@ const computedProgress = computed(() => {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #409eff;
+  background: #1677ff;
   animation: pulse 1.4s ease-in-out infinite both;
 }
 
@@ -157,8 +156,8 @@ const computedProgress = computed(() => {
   width: 50px;
   height: 50px;
   border: 3px solid transparent;
-  border-top: 3px solid #409eff;
-  border-right: 3px solid #409eff;
+  border-top: 3px solid #1677ff;
+  border-right: 3px solid #1677ff;
   border-radius: 50%;
   animation: rotate 1s linear infinite;
 }
@@ -180,14 +179,14 @@ const computedProgress = computed(() => {
 .progress-bar {
   width: 100%;
   height: 8px;
-  background: #f0f0f0;
+  background: #0f223d;
   border-radius: 4px;
   overflow: hidden;
 }
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #409eff, #67c23a);
+  background: #1677ff;
   border-radius: 4px;
   transition: width 0.3s ease;
 }
@@ -204,8 +203,7 @@ const computedProgress = computed(() => {
 .skeleton-item {
   width: 100%;
   height: 20px;
-  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-  background-size: 200% 100%;
+  background: #183358;
   border-radius: 4px;
   animation: skeleton-loading 1.5s infinite;
 }
@@ -217,7 +215,7 @@ const computedProgress = computed(() => {
 
 /* 加载文本 */
 .spinner-text {
-  color: #606266;
+  color: #c4d4eb;
   font-size: 14px;
   text-align: center;
   user-select: none;

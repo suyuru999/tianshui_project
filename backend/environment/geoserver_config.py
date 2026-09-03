@@ -20,13 +20,6 @@ class GeoServerManager:
     
     def __init__(self):
         self.base_url = getattr(settings, 'GEOSERVER_URL', 'http://localhost:8080/geoserver')
-        # 当前 Windows 服务使用 8651 端口。旧部署遗留的 8080 地址会导致
-        # WMS/WFS 接口无法连接，因此在本机默认地址仍为 8080 时予以兼容。
-        if self.base_url in {
-            'http://localhost:8080/geoserver',
-            'http://127.0.0.1:8080/geoserver',
-        }:
-            self.base_url = 'http://127.0.0.1:8651/geoserver'
         self.username = getattr(settings, 'GEOSERVER_USERNAME', 'admin')
         self.password = getattr(settings, 'GEOSERVER_PASSWORD', 'geoserver')
         self.workspace = getattr(settings, 'GEOSERVER_WORKSPACE', 'tianshuipy')

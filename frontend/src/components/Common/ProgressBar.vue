@@ -254,11 +254,11 @@ defineExpose({
 .progress-bar {
   position: relative;
   height: 8px;
-  background: #f0f0f0;
+  background: #0f223d;
   border-radius: 4px;
   overflow: hidden;
   margin-bottom: 8px;
-  border: 1px solid #ddd; /* 添加边框以便调试 */
+  border: 1px solid #203b60;
 }
 
 .progress-fill {
@@ -268,45 +268,33 @@ defineExpose({
   position: relative;
   min-width: 0%; /* 确保最小宽度为0 */
   max-width: 100%; /* 确保最大宽度不超过100% */
-  background-color: #409eff !important; /* 强制显示颜色 */
+  background-color: #1677ff !important;
 }
 
 /* 进度条类型样式 */
 .progress-primary .progress-fill {
-  background: linear-gradient(90deg, #409eff, #67c23a);
+  background: #1677ff;
 }
 
 .progress-success .progress-fill {
-  background: linear-gradient(90deg, #67c23a, #85ce61);
+  background: #2fc26b;
 }
 
 .progress-warning .progress-fill {
-  background: linear-gradient(90deg, #e6a23c, #ebb563);
+  background: #f59e0b;
 }
 
 .progress-danger .progress-fill {
-  background: linear-gradient(90deg, #f56c6c, #f78989);
+  background: #ef4444;
 }
 
 .progress-info .progress-fill {
-  background: linear-gradient(90deg, #909399, #c0c4cc);
+  background: #8299bc;
 }
 
 /* 动画效果 */
 .progress-animated .progress-fill::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.3),
-    transparent
-  );
-  animation: progress-shine 2s infinite;
+  content: none;
 }
 
 @keyframes progress-shine {
@@ -324,7 +312,7 @@ defineExpose({
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: #606266;
+  color: #c4d4eb;
   font-weight: 500;
 }
 

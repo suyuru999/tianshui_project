@@ -98,6 +98,7 @@ export const API_ENDPOINTS = {
     BUSINESS_LAYER_UNPUBLISH: (id) => `/environment/business-layers/${id}/unpublish/`,
     BUSINESS_LAYER_STYLE: (id) => `/environment/business-layers/${id}/style/`,
     BUSINESS_LAYER_LOGS: (id) => `/environment/business-layers/${id}/logs/`,
+    PARSE_LOCAL_VECTOR_LAYER: '/environment/spatial/parse-local-vector-layer/',
     PUBLISH_TO_GEOSERVER: '/environment/spatial/publish/',
     GEOSERVER_STATUS: '/environment/spatial/geoserver/status/',
   },

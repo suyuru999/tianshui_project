@@ -166,7 +166,7 @@ function initMap() {
       zoom: 2
     }),
     controls: defaultControls({ zoom: true, rotate: false, attribution: false }).extend([
-      new ScaleLine({ units: 'metric', bar: true, text: true, minWidth: 120 })
+      new ScaleLine({ units: 'metric', minWidth: 120 })
     ])
   })
 
@@ -328,10 +328,10 @@ async function toggleReferenceImagery() {
 .compare-card {
   margin-top: 18px;
   padding: 16px;
-  border: 1px solid #dbe6f0;
-  border-radius: 16px;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fbfe 100%);
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.07);
+  border: 1px solid #203b60;
+  border-radius: 10px;
+  background: #132a48;
+  box-shadow: none;
 }
 
 .compare-head {
@@ -343,14 +343,14 @@ async function toggleReferenceImagery() {
 
 .compare-head h3 {
   margin: 0;
-  color: #22354a;
+  color: #ffffff;
   font-size: 17px;
   font-weight: 700;
 }
 
 .compare-head p {
   margin: 6px 0 0;
-  color: #64748b;
+  color: #8299bc;
   font-size: 13px;
   line-height: 1.5;
 }
@@ -365,13 +365,13 @@ async function toggleReferenceImagery() {
 .imagery-toggle {
   min-height: 38px;
   padding: 8px 12px;
-  border: 1px solid #cddaea;
+  border: 1px solid #203b60;
   border-radius: 10px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #35506d;
-  background: #fff;
+  color: #c4d4eb;
+  background: #0d2745;
   cursor: pointer;
 }
 
@@ -380,9 +380,9 @@ async function toggleReferenceImagery() {
 }
 
 .imagery-toggle.active {
-  border-color: #5f7f9d;
-  background: #edf5fc;
-  color: #264f77;
+  border-color: #1677ff;
+  background: #183358;
+  color: #ffffff;
 }
 
 .imagery-toggle.disabled {
@@ -393,13 +393,13 @@ async function toggleReferenceImagery() {
 .opacity-control {
   min-height: 36px;
   padding: 0 12px;
-  border: 1px solid #d5e1ed;
+  border: 1px solid #203b60;
   border-radius: 10px;
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  color: #42576c;
-  background: #fff;
+  color: #c4d4eb;
+  background: #0d2745;
   font-size: 13px;
 }
 
@@ -411,25 +411,42 @@ async function toggleReferenceImagery() {
   margin-top: 14px;
   width: 100%;
   height: 360px;
-  border: 1px solid #dbe6f0;
-  border-radius: 14px;
+  border: 1px solid #203b60;
+  border-radius: 8px;
   overflow: hidden;
-  background: #eef4f8;
+  background: #f7fbfd;
 }
 
 .compare-empty {
   margin-top: 14px;
   padding: 32px 18px;
-  border: 1px dashed #c9d6e3;
-  border-radius: 14px;
-  color: #70859a;
-  background: #fbfdff;
+  border: 1px dashed #203b60;
+  border-radius: 8px;
+  color: #8299bc;
+  background: #0d2745;
   text-align: center;
 }
 
-:deep(.ol-scale-bar) {
+:deep(.ol-scale-line) {
   left: 14px;
   bottom: 14px;
+  padding: 6px 10px 7px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(111, 132, 152, 0.38);
+  border-radius: 4px;
+  box-shadow: 0 6px 16px rgba(28, 45, 64, 0.16);
+}
+
+:deep(.ol-scale-line-inner) {
+  margin: 0;
+  border: 2px solid #1f3854;
+  border-top: none;
+  color: #1f3854;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  text-shadow: none;
 }
 
 @media (max-width: 960px) {

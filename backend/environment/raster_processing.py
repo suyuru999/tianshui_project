@@ -432,6 +432,7 @@ class RasterioLandUseAnalyzer:
             ratio = pixels / self.valid_pixels * 100 if self.valid_pixels else 0
             classes[class_id] = {
                 'name': info['name'],
+                'color': info['color'],
                 'pixels': int(pixels),
                 'area_km2': float(pixels * pixel_area),
                 'ratio_percent': float(ratio),

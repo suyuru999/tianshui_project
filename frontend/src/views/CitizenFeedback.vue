@@ -1,15 +1,16 @@
 <template>
   <ErrorBoundary>
     <div class="feedback-page-apple">
+      <header class="feedback-topbar-apple">
+        <RouterLink to="/" class="feedback-back-link" title="返回主界面">
+          <ArrowLeft class="back-home-icon" />
+          <span>主界面</span>
+        </RouterLink>
+      </header>
+
       <div class="feedback-layout-apple">
         <section class="feedback-card-apple form-panel-apple">
-          <RouterLink to="/" class="feedback-back-link" title="返回主界面">
-            <ArrowLeft class="back-home-icon" />
-            <span>主界面</span>
-          </RouterLink>
-
           <div class="page-heading-apple">
-            <span class="heading-kicker-apple">公众参与</span>
             <h1 class="title-apple">民众意见反馈</h1>
             <p class="subtitle-apple">请留下你看到的问题、建议或数据纠错信息，我们会认真处理。</p>
           </div>
@@ -63,13 +64,7 @@
         <aside class="feedback-side-apple">
           <div class="side-summary-apple">
             <div>
-              <span class="heading-kicker-apple">管理</span>
-              <h2 class="side-title-apple">反馈记录</h2>
-              <p class="side-copy-apple">记录默认收起，避免干扰提交流程；需要查看时再打开。</p>
-            </div>
-            <div class="record-count-apple">
-              <strong>{{ feedbackRecords.length }}</strong>
-              <span>条记录</span>
+              <h2 class="side-title-apple">反馈记录（{{ feedbackRecords.length }}条）</h2>
             </div>
           </div>
 
@@ -343,52 +338,90 @@ onMounted(() => {
 <style scoped>
 .feedback-page-apple {
   min-height: 100vh;
-  overflow-y: auto;
-  background: #f4f7fa;
-  padding: 24px 20px;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: #08172b;
+  padding: 16px 20px;
+  box-sizing: border-box;
+}
+
+.feedback-topbar-apple {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  background: #132a48;
+  border: 1px solid #203b60;
+  border-radius: 10px;
+  box-sizing: border-box;
+}
+
+.feedback-topbar-title-apple {
+  margin: 0;
+  color: #ffffff;
+  font-size: 19px;
+  line-height: 1.25;
+  font-weight: 700;
+  letter-spacing: 0;
 }
 
 .feedback-layout-apple {
-  width: min(1120px, 100%);
-  min-height: calc(100vh - 64px);
-  margin: 0 auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  margin: 0;
   display: grid;
-  grid-template-columns: minmax(460px, 760px) minmax(300px, 360px);
-  gap: 24px;
-  align-items: start;
+  grid-template-columns: minmax(0, 3fr) minmax(320px, 1fr);
+  gap: 12px;
+  align-items: stretch;
 }
 
 .feedback-card-apple,
 .feedback-side-apple {
-  background: rgba(255, 255, 255, 0.98);
-  border: 1px solid #dbe6f0;
-  border-radius: 8px;
-  box-shadow: 0 14px 34px rgba(30, 50, 70, 0.08);
+  background: #132a48;
+  border: 1px solid #203b60;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
 }
 
 .form-panel-apple {
-  padding: 28px 30px 26px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 28px 18px;
+  overflow: auto;
+  box-sizing: border-box;
 }
 
 .feedback-side-apple {
-  position: sticky;
-  top: 32px;
-  padding: 24px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: static;
+  top: auto;
+  padding: 58px 22px 24px;
+  box-sizing: border-box;
 }
 
 .page-heading-apple {
-  margin-bottom: 28px;
+  margin-bottom: 16px;
 }
 
 .feedback-back-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 18px;
+  flex: 0 0 auto;
+  margin: 0;
   padding: 6px 10px;
   border-radius: 8px;
-  color: #315f8c;
-  background: #eef5fb;
+  color: #c4d4eb;
+  background: #102d4d;
+  border: 1px solid #203b60;
   text-decoration: none;
   font-size: 12px;
   font-weight: 600;
@@ -396,8 +429,8 @@ onMounted(() => {
 }
 
 .feedback-back-link:hover {
-  background: #e4eff9;
-  transform: translateY(-1px);
+  background: #183358;
+  transform: none;
 }
 
 .back-home-icon {
@@ -408,47 +441,78 @@ onMounted(() => {
 .heading-kicker-apple {
   display: inline-flex;
   margin-bottom: 8px;
-  color: #315f8c;
-  font-size: 12px;
+  color: #c4d4eb;
+  font-size: 18px;
   font-weight: 700;
   letter-spacing: 0;
 }
 
 .title-apple {
-  margin: 0 0 8px;
-  font-size: 30px;
+  margin: 0 0 6px;
+  font-size: 26px;
   line-height: 1.2;
   font-weight: 750;
   letter-spacing: 0;
-  color: #26384a;
+  color: #ffffff;
 }
 
 .subtitle-apple,
 .side-copy-apple,
 .drawer-subtitle-apple {
   margin: 0;
-  color: #667789;
-  font-size: 14px;
-  line-height: 1.65;
+  color: #8299bc;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.form-apple {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
 }
 
 .form-apple :deep(.el-form-item) {
-  margin-bottom: 22px;
+  margin-bottom: 18px;
 }
 
 .form-apple :deep(.el-form-item__label) {
-  color: #26384a;
+  padding-bottom: 2px;
+  color: #d6e4f5;
   font-weight: 700;
+  line-height: 1.35;
+}
+
+.form-apple :deep(.el-select),
+.form-apple :deep(.el-input) {
+  width: 100%;
 }
 
 .form-apple :deep(.el-input__wrapper),
 .form-apple :deep(.el-textarea__inner),
 .form-apple :deep(.el-select__wrapper) {
-  border-radius: 7px;
-  box-shadow: 0 0 0 1px #dbe3ec inset;
+  min-height: 44px;
+  border-radius: 6px;
+  background: #0f2746;
+  box-shadow: 0 0 0 1px #315d86 inset;
+  color: #ffffff;
+}
+
+.form-apple :deep(.el-input__count) {
+  right: 10px;
+  bottom: 4px;
+  color: #526b87;
+  background: transparent;
+}
+
+.form-apple :deep(.el-form-item__error) {
+  position: static;
+  padding-top: 4px;
+  line-height: 1.3;
 }
 
 .form-apple :deep(.el-textarea__inner) {
+  min-height: 300px;
   resize: vertical;
 }
 
@@ -456,51 +520,91 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  margin-top: 6px;
+  justify-content: flex-start;
+  margin-top: 2px;
 }
 
 .actions-apple :deep(.el-button),
 .side-actions-apple :deep(.el-button),
 .drawer-toolbar-apple :deep(.el-button) {
-  border-radius: 7px;
+  height: 46px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.actions-apple :deep(.el-button) {
+  min-width: 128px;
+  padding: 0 26px;
+  font-size: 15px;
+}
+
+.actions-apple :deep(.el-button--primary) {
+  background: #1677ff;
+  border-color: #1677ff;
+  color: #ffffff;
+}
+
+.actions-apple :deep(.el-button:not(.el-button--primary)) {
+  background: #0f2746;
+  border-color: #3c6f9d;
+  color: #c4d4eb;
 }
 
 .privacy-apple {
-  margin: 22px 0 0;
-  color: #8a98a8;
-  font-size: 12px;
-  line-height: 1.7;
+  margin: auto 0 0;
+  padding-top: 14px;
+  color: #526b87;
+  font-size: 11px;
+  line-height: 1.55;
 }
 
 .side-summary-apple {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 18px;
-  align-items: start;
-  padding-bottom: 18px;
-  border-bottom: 1px solid #e7eef5;
+  display: flex;
+  width: 100%;
+  min-height: 56px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  box-sizing: border-box;
+  background: #102d4d;
+  border: 1px solid #203b60;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.side-summary-apple > div {
+  min-width: 0;
+  width: 100%;
+}
+
+.feedback-side-apple .side-summary-apple {
+  align-items: center;
 }
 
 .side-title-apple,
 .records-title-apple {
-  margin: 0 0 8px;
-  color: #26384a;
-  font-size: 22px;
+  min-width: 0;
+  margin: 0;
+  color: #ffffff;
+  font-size: 17px;
   line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .record-count-apple {
   min-width: 76px;
   padding: 12px 10px;
-  border: 1px solid #dbe6f0;
+  border: 1px solid #203b60;
   border-radius: 8px;
-  background: #f8fbfd;
+  background: #183358;
   text-align: center;
 }
 
 .record-count-apple strong {
   display: block;
-  color: #315f8c;
+  color: #ffffff;
   font-size: 28px;
   line-height: 1;
 }
@@ -508,35 +612,49 @@ onMounted(() => {
 .record-count-apple span {
   display: block;
   margin-top: 6px;
-  color: #667789;
+  color: #8299bc;
   font-size: 12px;
 }
 
 .side-actions-apple {
   display: grid;
-  gap: 10px;
-  margin-top: 22px;
+  gap: 18px;
+  margin-top: 34px;
 }
 
-.records-open-button {
+.records-open-button,
+.side-actions-apple :deep(.el-button) {
   width: 100%;
+  margin-left: 0;
 }
 
 .side-actions-apple :deep(.el-button) {
+  justify-content: center;
+}
+
+.records-open-button {
+  height: 50px !important;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.side-actions-apple :deep(.el-button:not(.el-button--primary)) {
   height: 40px;
-  font-weight: 600;
+  background: #0f2746;
+  border-color: #315d86;
+  color: #c4d4eb;
 }
 
 .side-note-apple {
   display: flex;
   gap: 8px;
-  margin-top: 18px;
+  margin-top: auto;
   padding: 12px 14px;
   border-radius: 8px;
-  background: #eef4f9;
-  color: #5f7f9d;
+  background: #183358;
+  color: #8299bc;
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.55;
 }
 
 .side-note-apple .el-icon {
@@ -548,13 +666,13 @@ onMounted(() => {
   display: flex;
   min-height: 100%;
   flex-direction: column;
-  background: #f4f7fa;
+  background: #08172b;
 }
 
 .drawer-header-apple,
 .drawer-toolbar-apple {
-  background: #ffffff;
-  border-bottom: 1px solid #dbe6f0;
+  background: #132a48;
+  border-bottom: 1px solid #203b60;
 }
 
 .drawer-header-apple {
@@ -588,10 +706,10 @@ onMounted(() => {
 
 .record-item-apple {
   padding: 16px;
-  border: 1px solid #dbe6f0;
+  border: 1px solid #203b60;
   border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 6px 16px rgba(30, 50, 70, 0.06);
+  background: #132a48;
+  box-shadow: none;
 }
 
 .record-title-row-apple {
@@ -605,7 +723,7 @@ onMounted(() => {
   min-width: 0;
   margin: 0;
   overflow: hidden;
-  color: #26384a;
+  color: #ffffff;
   font-size: 16px;
   font-weight: 750;
   line-height: 1.4;
@@ -615,7 +733,7 @@ onMounted(() => {
 
 .record-content-apple {
   margin: 10px 0 12px;
-  color: #425466;
+  color: #c4d4eb;
   font-size: 14px;
   line-height: 1.7;
   word-break: break-word;
@@ -625,7 +743,7 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 14px;
-  color: #8a98a8;
+  color: #8299bc;
   font-size: 12px;
 }
 
@@ -641,6 +759,9 @@ onMounted(() => {
 
 @media (max-width: 900px) {
   .feedback-page-apple {
+    height: auto;
+    min-height: 100vh;
+    overflow: auto;
     padding: 18px;
   }
 
@@ -658,6 +779,15 @@ onMounted(() => {
   .form-panel-apple,
   .feedback-side-apple {
     padding: 22px 16px;
+  }
+
+  .feedback-topbar-apple {
+    min-height: 52px;
+    padding: 0 12px;
+  }
+
+  .feedback-topbar-title-apple {
+    font-size: 19px;
   }
 
   .title-apple {

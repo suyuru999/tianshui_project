@@ -273,6 +273,14 @@ export class MapUtils {
   // 获取WMS GetFeatureInfo（用于点击获取信息）
   static async getFeatureInfo(layerSource, coordinate, map) {
     try {
+      if (
+        !layerSource ||
+        typeof layerSource.getParams !== 'function' ||
+        (typeof layerSource.getUrls !== 'function' && typeof layerSource.getUrl !== 'function')
+      ) {
+        return null
+      }
+
       const viewResolution = map.getView().getResolution()
       const viewProjection = map.getView().getProjection()
       const viewSize = map.getSize()
@@ -285,7 +293,8 @@ export class MapUtils {
       // 对于TileWMS，需要手动构建GetFeatureInfo URL
       // 因为TileWMS可能不支持getFeatureInfoUrl方法
       const params = layerSource.getParams()
-      const baseUrl = layerSource.getUrls()[0] || layerSource.getUrl()
+      const urls = typeof layerSource.getUrls === 'function' ? layerSource.getUrls() : []
+      const baseUrl = urls?.[0] || (typeof layerSource.getUrl === 'function' ? layerSource.getUrl() : '')
       
       if (!baseUrl) {
         console.warn('无法获取WMS基础URL')
@@ -544,18 +553,24 @@ export class MapUtils {
 
   // 加载WFS服务
   static loadWFS(url, typeName, options = {}) {
+    const dataProjection = options.dataProjection || 'EPSG:3857'
+    const featureProjection = options.featureProjection || 'EPSG:3857'
     const source = new VectorSource({
-      format: new GeoJSON(),
+      format: new GeoJSON({
+        dataProjection,
+        featureProjection
+      }),
       url: function(extent) {
-        return url + '?' +
-          'service=WFS&' +
-          'version=1.0.0&' +
-          'request=GetFeature&' +
-          'typeName=' + typeName + '&' +
-          'maxFeatures=50&' +
-          'outputFormat=application/json&' +
-          'srsname=EPSG:3857&' +
-          'bbox=' + extent.join(',') + ',EPSG:3857'
+        const requestUrl = new URL(url, window.location.origin)
+        requestUrl.searchParams.set('service', 'WFS')
+        requestUrl.searchParams.set('version', '1.0.0')
+        requestUrl.searchParams.set('request', 'GetFeature')
+        requestUrl.searchParams.set('typeName', typeName)
+        requestUrl.searchParams.set('maxFeatures', String(options.maxFeatures || 5000))
+        requestUrl.searchParams.set('outputFormat', 'application/json')
+        requestUrl.searchParams.set('srsname', dataProjection)
+        requestUrl.searchParams.set('bbox', `${extent.join(',')},${featureProjection}`)
+        return requestUrl.toString()
       },
       strategy: options.strategy
     })

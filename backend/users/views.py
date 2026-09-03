@@ -40,6 +40,43 @@ def _set_csrf_cookie(request, response):
     return response
 
 
+def _default_permissions_for_role(role):
+    if role == 'admin':
+        return {
+            module: permissions_list[:]
+            for module, permissions_list in MODULE_PERMISSION_CHOICES.items()
+        }
+    if role == 'expert':
+        return {
+            'remote_sensing': ['view', 'use'],
+            'ecological_index': ['view', 'use'],
+            'overlay_analysis': ['view', 'use'],
+            'climate_monitoring': ['view', 'use'],
+            'feedback': ['view'],
+            'business_layers': ['view'],
+        }
+    return {
+        'remote_sensing': ['view', 'use'],
+        'ecological_index': ['view', 'use'],
+        'overlay_analysis': ['view'],
+        'climate_monitoring': ['view', 'use'],
+        'feedback': ['view'],
+        'business_layers': ['view'],
+    }
+
+
+def _apply_default_role_permissions(user):
+    permissions_map = _default_permissions_for_role(user.role)
+    UserPermission.objects.filter(user=user).delete()
+    created_items = [
+        UserPermission(user=user, module=module, permission=permission_name, granted=True)
+        for module, permission_names in permissions_map.items()
+        for permission_name in permission_names
+    ]
+    if created_items:
+        UserPermission.objects.bulk_create(created_items)
+
+
 class UserViewSet(viewsets.ModelViewSet):
     """用户视图集"""
     queryset = User.objects.all()
@@ -66,18 +103,27 @@ class UserViewSet(viewsets.ModelViewSet):
     
     def get_permissions(self):
         """设置权限"""
-        if self.action in ['login', 'csrf']:
+        if self.request.method == 'OPTIONS' or self.action in ['login', 'csrf', 'register']:
             permission_classes = [permissions.AllowAny]
         elif self.action == 'create':
-            permission_classes = [permissions.AllowAny] if _allow_public_user_registration() else [permissions.IsAuthenticated]
+            permission_classes = [permissions.IsAuthenticated]
         else:
             permission_classes = [permissions.IsAuthenticated]
         return [permission() for permission in permission_classes]
 
     def create(self, request, *args, **kwargs):
-        if not _allow_public_user_registration() and not _is_admin_user(request.user):
+        if not _is_admin_user(request.user):
             return Response({'error': '仅管理员可创建用户'}, status=status.HTTP_403_FORBIDDEN)
-        return super().create(request, *args, **kwargs)
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                'error': '用户创建失败，请检查表单内容',
+                'details': serializer.errors,
+            }, status=status.HTTP_400_BAD_REQUEST)
+        user = serializer.save()
+        _apply_default_role_permissions(user)
+        headers = self.get_success_headers(serializer.data)
+        return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED, headers=headers)
 
     def list(self, request, *args, **kwargs):
         if not _is_admin_user(request.user):
@@ -109,8 +155,34 @@ class UserViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         if instance.id == request.user.id:
             return Response({'error': '不能删除当前登录管理员'}, status=status.HTTP_400_BAD_REQUEST)
+        if instance.is_superuser and not request.user.is_superuser:
+            return Response({'error': '仅超级管理员可删除超级管理员账号'}, status=status.HTTP_403_FORBIDDEN)
+        if instance.is_superuser and User.objects.filter(is_superuser=True, is_active=True).count() <= 1:
+            return Response({'error': '系统至少需要保留一个启用的超级管理员账号'}, status=status.HTTP_400_BAD_REQUEST)
         return super().destroy(request, *args, **kwargs)
     
+    @action(detail=False, methods=['post'])
+    def register(self, request):
+        """公开注册普通用户"""
+        if not _allow_public_user_registration():
+            return Response({'error': '当前系统未开放自助注册，请联系管理员新增账号'}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data.copy()
+        data['role'] = 'user'
+        serializer = UserCreateSerializer(data=data)
+        if not serializer.is_valid():
+            return Response({
+                'error': '注册失败，请检查表单内容',
+                'details': serializer.errors,
+            }, status=status.HTTP_400_BAD_REQUEST)
+        user = serializer.save(role='user', is_staff=False, is_superuser=False, is_active=True)
+        _apply_default_role_permissions(user)
+        response = Response({
+            'message': '注册成功，请使用新账号登录',
+            'user': UserSerializer(user).data
+        }, status=status.HTTP_201_CREATED)
+        return _set_csrf_cookie(request, response)
+
     @action(detail=False, methods=['post'])
     def login(self, request):
         """用户登录"""

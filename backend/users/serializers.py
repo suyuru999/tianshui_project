@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from rest_framework.validators import UniqueValidator
 from .models import User, UserPermission, UserSession
 
 
@@ -40,6 +41,16 @@ class UserSerializer(serializers.ModelSerializer):
 
 class UserCreateSerializer(serializers.ModelSerializer):
     """用户创建序列化器"""
+    username = serializers.CharField(
+        validators=[
+            UniqueValidator(
+                queryset=User.objects.all(),
+                lookup='iexact',
+                message='用户名已存在，请更换用户名',
+            )
+        ]
+    )
+    email = serializers.EmailField(required=False, allow_blank=True)
     password = serializers.CharField(write_only=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True)
     
@@ -47,8 +58,22 @@ class UserCreateSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'username', 'email', 'password', 'password_confirm', 'first_name', 'last_name',
-            'role', 'phone', 'organization', 'department', 'position'
+            'role', 'phone', 'organization', 'department', 'position', 'is_active'
         ]
+
+    def validate_username(self, value):
+        value = str(value or '').strip()
+        if not value:
+            raise serializers.ValidationError('用户名不能为空')
+        if User.objects.filter(username__iexact=value).exists():
+            raise serializers.ValidationError('用户名已存在，请更换用户名')
+        return value
+
+    def validate_email(self, value):
+        value = str(value or '').strip()
+        if value and User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError('邮箱已被占用，请更换邮箱')
+        return value
     
     def validate(self, attrs):
         if attrs['password'] != attrs['password_confirm']:

@@ -146,6 +146,7 @@ class LandUseAnalyzer:
                 
                 class_stats[class_id] = {
                     'name': class_info['name'],
+                    'color': class_info['color'],
                     'pixels': int(class_pixels),
                     'area_km2': float(class_area),
                     'ratio_percent': float(class_ratio),
@@ -579,39 +580,82 @@ class LandUseAnalyzer:
             cmap = cmap.copy()
             cmap.set_bad((1, 1, 1, 0))
             
-            # 创建图形
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
+            # 创建图形：左侧独立图例，中间分布图，右侧面积比例图，避免图例压在图上。
+            fig = plt.figure(figsize=(16, 8), facecolor='white')
+            gs = fig.add_gridspec(
+                1,
+                3,
+                width_ratios=[0.26, 1.12, 0.9],
+                left=0.04,
+                right=0.98,
+                top=0.88,
+                bottom=0.12,
+                wspace=0.08,
+            )
+            ax_legend = fig.add_subplot(gs[0, 0])
+            ax1 = fig.add_subplot(gs[0, 1])
+            ax2 = fig.add_subplot(gs[0, 2])
             
             # 主图：土地利用分布
             im1 = ax1.imshow(masked_data, cmap=cmap, vmin=1, vmax=len(self.landuse_classes), interpolation='nearest')
-            ax1.set_title('土地利用分布图')
+            ax1.set_title('土地利用分布图', fontsize=14, fontweight='bold', pad=12)
             ax1.axis('off')
             
-            # 添加图例
-            legend_elements = [patches.Patch(color=class_info['color'], label=f"{class_id}: {class_info['name']}")
-                             for class_id, class_info in self.landuse_classes.items()]
-            ax1.legend(handles=legend_elements, loc='upper right', bbox_to_anchor=(1.15, 1))
+            stats = self.get_landuse_statistics()
+
+            # 左侧图例：独立展示，减少对地图和饼图的遮挡。
+            ax_legend.axis('off')
+            legend_elements = []
+            for class_id, class_info in self.landuse_classes.items():
+                ratio = None
+                if stats and class_id in stats.get('classes', {}):
+                    ratio = stats['classes'][class_id].get('ratio_percent')
+                suffix = f"  {ratio:.1f}%" if ratio is not None else ""
+                legend_elements.append(
+                    patches.Patch(color=class_info['color'], label=f"{class_id}: {class_info['name']}{suffix}")
+                )
+            if legend_elements:
+                ax_legend.legend(
+                    handles=legend_elements,
+                    loc='center left',
+                    ncol=1,
+                    frameon=True,
+                    facecolor='white',
+                    edgecolor='#d8dee8',
+                    fontsize=9,
+                    labelspacing=0.8,
+                    handlelength=1.2,
+                    borderpad=0.8
+                )
             
             # 子图：面积比例饼图
-            stats = self.get_landuse_statistics()
             if stats:
                 areas = []
-                labels_pie = []
                 colors_pie = []
                 
                 for class_id, class_info in self.landuse_classes.items():
                     if class_id in stats['classes']:
-                        areas.append(stats['classes'][class_id]['area_km2'])
-                        labels_pie.append(f"{class_info['name']}\n({stats['classes'][class_id]['ratio_percent']:.1f}%)")
-                        colors_pie.append(class_info['color'])
+                        area = stats['classes'][class_id]['area_km2']
+                        if area > 0:
+                            areas.append(area)
+                            colors_pie.append(class_info['color'])
                 
                 if areas:
-                    ax2.pie(areas, labels=labels_pie, colors=colors_pie, autopct='%1.1f%%', startangle=90)
-                    ax2.set_title('土地利用面积比例')
+                    wedges, texts, autotexts = ax2.pie(
+                        areas,
+                        labels=None,
+                        colors=colors_pie,
+                        autopct=None,
+                        startangle=90,
+                        counterclock=False,
+                        radius=0.92,
+                        wedgeprops={'linewidth': 0.8, 'edgecolor': 'white'}
+                    )
+                    ax2.set_title('土地利用面积比例', fontsize=14, fontweight='bold', pad=12)
+                    ax2.axis('equal')
             
-            plt.tight_layout()
-            plt.savefig(output_path, dpi=300, bbox_inches='tight')
-            plt.close()
+            plt.savefig(output_path, dpi=220, bbox_inches='tight', pad_inches=0.12)
+            plt.close(fig)
             
             logger.info(f"土地利用可视化图片已保存到: {output_path}")
             return True

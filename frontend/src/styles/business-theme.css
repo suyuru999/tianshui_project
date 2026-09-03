@@ -1,486 +1,2702 @@
-.remote-sensing-analysis,
-.ecological-analysis,
-.overlay-analysis,
-.climate-monitoring,
-.feedback-page-apple {
-  --biz-primary: #5f7f9d;
-  --biz-primary-strong: #315f8c;
-  --biz-panel: #ffffff;
-  --biz-page: #f4f7fa;
-  --biz-border: #dbe3ec;
-  --biz-border-soft: #edf2f7;
-  --biz-text: #26384a;
-  --biz-muted: #667789;
-  --biz-soft: #eef4f9;
-  color: var(--biz-text);
+/* Professional GIS / remote-sensing design system. */
+:root {
+  --ds-page: #06182d;
+  --ds-workspace: #06182d;
+  --ds-sidebar: #0b2340;
+  --ds-header: #06182d;
+  --ds-card: #102d4d;
+  --ds-panel: #122f50;
+  --ds-module: #0d2745;
+  --ds-hover: #183b61;
+  --ds-primary: #1677ff;
+  --ds-primary-hover: #2688ff;
+  --ds-primary-active: #0e62dd;
+  --ds-accent: #26b6e8;
+  --ds-success: #2fc26b;
+  --ds-warning: #f59e0b;
+  --ds-danger: #ef4444;
+  --ds-border: #1c4265;
+  --ds-border-soft: #1d4264;
+  --ds-border-strong: #285a82;
+  --ds-text: #ffffff;
+  --ds-muted: #c4d4eb;
+  --ds-subtle: #8299bc;
+  --ds-disabled: #5d7494;
+  --ds-radius-button: 6px;
+  --ds-radius-input: 6px;
+  --ds-radius-card: 10px;
+  --ds-radius-module: 8px;
+  --ds-radius-dialog: 12px;
+  --ds-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --ds-shadow-hover: 0 8px 28px rgba(0, 0, 0, 0.34);
+  --ds-header-height: 64px;
+  --ds-sidebar-width: 360px;
+  --el-color-primary: #1677ff;
+  --el-color-success: #2fc26b;
+  --el-color-warning: #f59e0b;
+  --el-color-danger: #ef4444;
+  --el-bg-color: #102d4d;
+  --el-bg-color-overlay: #102d4d;
+  --el-text-color-primary: #ffffff;
+  --el-text-color-regular: #c4d4eb;
+  --el-text-color-secondary: #8299bc;
+  --el-border-color: #1c4265;
+  --el-border-color-light: #1d4264;
+  --el-fill-color-blank: #0d2745;
 }
 
-.remote-sensing-analysis .control-panel,
-.ecological-analysis .left-panel,
-.overlay-analysis .left-panel,
-.climate-monitoring .left-panel {
-  width: 350px;
-  background: var(--biz-panel);
-  border-right: 1px solid var(--biz-border);
-  box-shadow: 2px 0 10px rgba(30, 50, 70, 0.08);
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  background: var(--ds-page);
+  color: var(--ds-text);
+  font-family: "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", Inter, Roboto, Arial, sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 
-.remote-sensing-analysis .result-area,
-.ecological-analysis .right-panel,
-.overlay-analysis .map-area,
-.climate-monitoring .right-panel {
-  background: var(--biz-page);
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
 }
 
-.remote-sensing-analysis .panel-header,
-.ecological-analysis .panel-header,
-.overlay-analysis .panel-header,
-.climate-monitoring .panel-header,
-.data-upload-panel .panel-header {
-  background: #1890ff;
-  color: #ffffff;
-  border-bottom: 1px solid var(--biz-border);
-  box-shadow: none;
-  text-align: left;
-}
-
-.remote-sensing-analysis .panel-header h1,
-.ecological-analysis .panel-header h1,
-.overlay-analysis .panel-header h1,
-.climate-monitoring .panel-header h1,
-.data-upload-panel .panel-header h3 {
-  color: #ffffff;
-  font-size: 16px;
-  font-weight: 700;
+button {
   letter-spacing: 0;
 }
 
-.remote-sensing-analysis .panel-header p,
-.ecological-analysis .panel-header p,
-.overlay-analysis .panel-header p,
-.climate-monitoring .panel-header p,
-.remote-sensing-analysis .panel-subtitle {
-  color: rgba(255, 255, 255, 0.86);
-  opacity: 1;
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
 
-.remote-sensing-analysis .section,
-.ecological-analysis .section,
-.overlay-analysis .section,
-.climate-monitoring .section {
-  padding: 16px;
-  border-bottom: 1px solid var(--biz-border-soft);
+::-webkit-scrollbar-track {
+  background: rgba(6, 20, 38, 0.6);
 }
 
-.remote-sensing-analysis .section-title,
-.ecological-analysis .section-header,
-.overlay-analysis .section-header,
-.climate-monitoring .section-header {
-  color: var(--biz-text);
-  font-size: 14px;
-  font-weight: 700;
-  margin-bottom: 12px;
-}
-
-.remote-sensing-analysis .section-icon,
-.ecological-analysis .section-icon,
-.overlay-analysis .section-icon,
-.climate-monitoring .section-icon {
-  color: var(--biz-primary);
-  font-size: 15px;
-}
-
-.remote-sensing-analysis .upload-zone,
-.ecological-analysis .upload-zone,
-.climate-monitoring .upload-zone,
-.data-upload-panel .upload-zone {
-  background: #f8fbfd;
-  border: 1px dashed #cbd8e4;
+::-webkit-scrollbar-thumb {
+  background: rgba(120, 147, 174, 0.42);
   border-radius: 8px;
-  padding: 20px 14px;
-  box-shadow: none;
 }
 
-.remote-sensing-analysis .upload-zone:hover,
-.ecological-analysis .upload-zone:hover,
-.climate-monitoring .upload-zone:hover,
-.data-upload-panel .upload-zone:hover {
-  background: var(--biz-soft);
-  border-color: #9bb6cf;
-  box-shadow: none;
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(154, 181, 207, 0.58);
 }
 
-.remote-sensing-analysis .upload-icon svg path,
-.ecological-analysis .upload-icon svg path,
-.climate-monitoring .upload-icon svg path,
-.data-upload-panel .upload-icon svg path {
-  stroke: var(--biz-primary);
-}
-
-.remote-sensing-analysis .upload-text,
-.ecological-analysis .upload-text,
-.climate-monitoring .upload-text,
-.data-upload-panel .upload-text {
-  color: var(--biz-text);
-  font-size: 13px;
-}
-
-.remote-sensing-analysis .upload-hint,
-.remote-sensing-analysis .upload-types,
-.ecological-analysis .upload-hint,
-.ecological-analysis .upload-types,
-.climate-monitoring .upload-hint,
-.climate-monitoring .upload-types,
-.data-upload-panel .upload-hint,
-.data-upload-panel .upload-types {
-  color: var(--biz-muted);
-}
-
-.remote-sensing-analysis .analysis-btn,
-.remote-sensing-analysis .cache-btn,
-.ecological-analysis .start-analysis-btn,
-.climate-monitoring .analysis-btn,
-.data-upload-panel .upload-btn {
-  border-radius: 7px;
-  border: 1px solid var(--biz-primary);
-  background: var(--biz-primary);
-  color: #fff;
-  box-shadow: none;
-  transform: none;
-}
-
-.remote-sensing-analysis .analysis-btn:hover:not(:disabled),
-.remote-sensing-analysis .cache-btn:hover,
-.ecological-analysis .start-analysis-btn:hover:not(:disabled),
-.climate-monitoring .analysis-btn:hover:not(.disabled),
-.data-upload-panel .upload-btn:hover:not(:disabled) {
-  background: var(--biz-primary-strong);
-  border-color: var(--biz-primary-strong);
-  box-shadow: none;
-  transform: none;
-}
-
-.remote-sensing-analysis .index-btn,
-.ecological-analysis .index-btn,
-.data-upload-panel .type-tab {
-  border-radius: 7px;
-  border: 1px solid var(--biz-border);
-  background: #fff;
-  color: var(--biz-text);
-  box-shadow: none;
-}
-
-.remote-sensing-analysis .index-btn:hover:not(:disabled),
-.ecological-analysis .index-btn:hover:not(:disabled),
-.data-upload-panel .type-tab:hover {
-  background: var(--biz-soft);
-  border-color: #9bb6cf;
-  color: var(--biz-primary-strong);
-  transform: none;
-}
-
-.remote-sensing-analysis .index-btn.active,
-.data-upload-panel .type-tab.active {
-  background: var(--biz-soft);
-  border-color: var(--biz-primary);
-  color: var(--biz-primary-strong);
-  box-shadow: inset 3px 0 0 var(--biz-primary);
-}
-
-.remote-sensing-analysis .result-area,
-.ecological-analysis .right-panel,
-.climate-monitoring .right-panel {
-  padding: 20px;
-}
-
-.remote-sensing-analysis .stat-card,
-.remote-sensing-analysis .chart-container,
-.ecological-analysis .value-item,
-.ecological-analysis .chart-container,
-.climate-monitoring .stat-item,
-.climate-monitoring .chart-container,
-.data-upload-panel .data-requirements {
-  background: #fff;
-  border: 1px solid var(--biz-border);
-  border-radius: 8px;
-  box-shadow: none;
-}
-
-.feedback-page-apple {
-  background: var(--biz-page);
-  padding: 32px 24px;
-}
-
-.feedback-card-apple {
-  max-width: 760px;
-  border-radius: 8px;
-  border: 1px solid var(--biz-border);
-  box-shadow: 0 10px 28px rgba(30, 50, 70, 0.10);
-}
-
-.title-apple {
-  color: var(--biz-text);
-}
-
-/* 强制统一业务功能页的基础骨架，覆盖各页面 scoped 样式中的旧渐变和大图标。 */
+/* Route shells */
+.map-view,
 .remote-sensing-analysis,
 .ecological-analysis,
 .overlay-analysis,
 .climate-monitoring {
-  width: 100vw !important;
-  height: 100vh !important;
+  width: 100% !important;
+  height: 100% !important;
   min-height: 0 !important;
   overflow: hidden !important;
-  background: var(--biz-page) !important;
+  background: var(--ds-page) !important;
+  color: var(--ds-text) !important;
 }
 
 .remote-sensing-analysis,
 .ecological-analysis .ecological-container,
 .overlay-analysis .main-container,
 .climate-monitoring .main-container {
+  display: flex !important;
+  width: 100% !important;
+  height: 100% !important;
   min-width: 0 !important;
-  height: 100vh !important;
   min-height: 0 !important;
-  overflow: hidden !important;
+  background: var(--ds-workspace) !important;
 }
 
-.remote-sensing-analysis .control-panel,
-.ecological-analysis .left-panel,
-.overlay-analysis .left-panel,
-.climate-monitoring .left-panel {
-  width: 350px !important;
-  height: 100vh !important;
-  min-height: 0 !important;
-  flex-shrink: 0 !important;
-  overflow-y: auto !important;
-  overflow-x: hidden !important;
-  padding: 0 !important;
+.map-view {
+  display: flex !important;
 }
 
+.map-view .main-content,
 .remote-sensing-analysis .result-area,
 .ecological-analysis .right-panel,
 .climate-monitoring .right-panel {
-  height: 100vh !important;
-  min-height: 0 !important;
+  flex: 1 1 auto !important;
   min-width: 0 !important;
-  overflow-y: auto !important;
-  overflow-x: hidden !important;
-  padding: 20px !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow: auto !important;
+  padding: 24px !important;
+  background: var(--ds-workspace) !important;
+}
+
+.map-view .main-content {
+  padding: 12px !important;
+  overflow: hidden !important;
+  background: var(--ds-page) !important;
+}
+
+.map-view .map-stage {
+  width: 100% !important;
+  height: 100% !important;
+  overflow: hidden !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+  box-shadow: var(--ds-shadow) !important;
 }
 
 .overlay-analysis .map-area {
-  height: 100vh !important;
+  flex: 1 1 auto !important;
   min-width: 0 !important;
+  min-height: 0 !important;
+  height: 100% !important;
   overflow: hidden !important;
+  background: var(--ds-page) !important;
+  border-left: 1px solid var(--ds-border) !important;
 }
 
+/* Sidebar and left panels */
+.map-view .sidebar,
+.remote-sensing-analysis .control-panel,
+.ecological-analysis .left-panel,
+.overlay-analysis .left-panel,
+.climate-monitoring .left-panel,
+.analysis-sidebar {
+  width: var(--ds-sidebar-width) !important;
+  flex: 0 0 var(--ds-sidebar-width) !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  background: var(--ds-sidebar) !important;
+  border-right: 1px solid var(--ds-border) !important;
+  box-shadow: 2px 0 18px rgba(0, 0, 0, 0.22) !important;
+  color: var(--ds-muted) !important;
+}
+
+.map-view .sidebar-header,
 .remote-sensing-analysis .panel-header,
 .ecological-analysis .panel-header,
 .overlay-analysis .panel-header,
-.climate-monitoring .panel-header {
+.climate-monitoring .panel-header,
+.analysis-sidebar .panel-header,
+.data-upload-panel .panel-header,
+.overlay-analysis-popup .popup-header {
   position: relative !important;
-  background: #1890ff !important;
-  color: #ffffff !important;
-  padding: 14px 16px !important;
-  text-align: left !important;
-  border-bottom: 1px solid #1683e8 !important;
+  min-height: 72px !important;
+  padding: 16px 18px !important;
+  background: var(--ds-header) !important;
+  border-bottom: 1px solid var(--ds-border) !important;
   box-shadow: none !important;
+  text-align: left !important;
+  color: var(--ds-text) !important;
+}
+
+.map-view .sidebar-header {
+  min-height: 110px !important;
+  padding: 0 !important;
+  background: var(--ds-sidebar) !important;
+  border-bottom-color: #18385d !important;
+  overflow: hidden !important;
+  clip-path: none !important;
+}
+
+.map-view .brand-header-decoration {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none !important;
+}
+
+.map-view .brand-header-shape {
+  fill: var(--ds-header) !important;
+}
+
+.map-view .brand-row {
+  position: relative !important;
+  z-index: 1 !important;
+  display: flex !important;
+  align-items: center !important;
+  min-height: 110px !important;
+  padding: 22px 34px 20px 24px !important;
+  min-width: 0 !important;
+}
+
+.map-view .brand-logo {
+  position: relative !important;
+  width: 18px !important;
+  height: 18px !important;
+  flex: 0 0 18px !important;
+  border: 1px solid rgba(255, 255, 255, 0.28) !important;
+  border-radius: 50% !important;
+  background: #ffffff !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+}
+
+.map-view .brand-logo-svg {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.map-view .brand-copy {
+  min-width: 0 !important;
+  width: 100% !important;
+}
+
+.map-view .brand-org-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+  min-width: 0 !important;
+}
+
+.map-view .brand-org {
+  color: #91a9c4 !important;
+  font-size: 14px !important;
+  line-height: 1.3 !important;
+  font-weight: 400 !important;
+  white-space: nowrap !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.map-view .sidebar-header h1 {
+  margin: 9px 0 0 !important;
+  color: var(--ds-text) !important;
+  font-size: 21px !important;
+  line-height: 1.22 !important;
+  font-weight: 700 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: clip !important;
 }
 
 .remote-sensing-analysis .panel-header h1,
 .ecological-analysis .panel-header h1,
 .overlay-analysis .panel-header h1,
-.climate-monitoring .panel-header h1 {
+.climate-monitoring .panel-header h1,
+.analysis-sidebar .panel-header h1,
+.data-upload-panel .panel-header h3,
+.overlay-analysis-popup .popup-header h3 {
   margin: 0 !important;
-  color: #ffffff !important;
-  font-size: 16px !important;
+  padding-right: 78px !important;
+  color: var(--ds-text) !important;
+  font-size: 18px !important;
   line-height: 1.35 !important;
   font-weight: 700 !important;
   letter-spacing: 0 !important;
 }
 
 .remote-sensing-analysis .panel-header p,
-.remote-sensing-analysis .panel-subtitle,
 .ecological-analysis .panel-header p,
 .overlay-analysis .panel-header p,
-.climate-monitoring .panel-header p {
-  margin: 6px 0 0 !important;
-  padding-right: 76px !important;
-  color: rgba(255, 255, 255, 0.86) !important;
+.climate-monitoring .panel-header p,
+.analysis-sidebar .panel-subtitle,
+.data-upload-panel .panel-header p,
+.overlay-analysis-popup .header-kicker {
+  margin: 8px 0 0 !important;
+  padding-right: 78px !important;
+  color: var(--ds-muted) !important;
   font-size: 12px !important;
-  line-height: 1.45 !important;
+  line-height: 1.55 !important;
   opacity: 1 !important;
-}
-
-.remote-sensing-analysis .panel-header h1,
-.ecological-analysis .panel-header h1,
-.overlay-analysis .panel-header h1,
-.climate-monitoring .panel-header h1 {
-  padding-right: 76px !important;
+  overflow-wrap: anywhere !important;
 }
 
 .back-home-link,
 .feedback-back-link {
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border-radius: 6px;
-  text-decoration: none;
-  font-size: 12px;
-  line-height: 1;
-  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+  min-height: 30px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  border-radius: var(--ds-radius-button) !important;
+  border: 1px solid var(--ds-border) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: var(--ds-muted) !important;
+  text-decoration: none !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease !important;
 }
 
-.back-home-link {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  padding: 0 8px;
-  color: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.34);
-  background: rgba(255, 255, 255, 0.10);
+.remote-sensing-analysis .back-home-link,
+.ecological-analysis .back-home-link,
+.overlay-analysis .back-home-link,
+.climate-monitoring .back-home-link {
+  position: absolute !important;
+  top: 16px !important;
+  right: 16px !important;
+  margin: 0 !important;
+  padding: 0 9px !important;
 }
 
-.back-home-link:hover {
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.58);
-  background: rgba(255, 255, 255, 0.18);
-}
-
-.back-home-icon {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
-
-.feedback-card-apple {
-  position: relative;
-}
-
-.feedback-back-link {
-  margin-bottom: 14px;
-  padding: 0 9px;
-  color: var(--biz-primary-strong);
-  border: 1px solid #cfddea;
-  background: #eef4f9;
-}
-
+.back-home-link:hover,
 .feedback-back-link:hover {
-  color: #214a70;
-  border-color: #aebfd1;
-  background: #e6eff7;
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-border-strong) !important;
+  color: var(--ds-text) !important;
+  transform: none !important;
 }
 
+/* Sidebar sections */
+.map-view .user-section,
+.map-view .section,
 .remote-sensing-analysis .section,
 .ecological-analysis .section,
 .overlay-analysis .section,
-.climate-monitoring .section {
-  padding: 14px 16px !important;
-  border-bottom: 1px solid var(--biz-border-soft) !important;
+.climate-monitoring .section,
+.analysis-sidebar .section {
+  margin: 12px !important;
+  padding: 14px !important;
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-card) !important;
+  box-shadow: none !important;
 }
 
+.map-view .user-section {
+  margin: 14px 16px 18px !important;
+  background: var(--ds-card) !important;
+  border-color: var(--ds-border-soft) !important;
+}
+
+.map-view .section {
+  margin: 0 16px 20px !important;
+  padding: 0 0 18px !important;
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid #18385d !important;
+  border-radius: 0 !important;
+}
+
+.map-view .user-section {
+  display: grid !important;
+  gap: 12px !important;
+}
+
+.map-view .user-actions {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  width: 100% !important;
+}
+
+.map-view .user-actions .admin-btn,
+.map-view .user-actions .login-btn {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 36px !important;
+  padding: 8px 6px !important;
+  white-space: nowrap !important;
+}
+
+.map-view .layer-main-row > .layer-icon {
+  display: none !important;
+}
+
+.map-view .layer-main-row {
+  gap: 0 !important;
+}
+
+.map-view .section + .section,
+.remote-sensing-analysis .section + .section,
+.ecological-analysis .section + .section,
+.overlay-analysis .section + .section,
+.climate-monitoring .section + .section {
+  margin-top: 0 !important;
+}
+
+.map-view .section-header,
 .remote-sensing-analysis .section-title,
+.remote-sensing-analysis .section-header,
 .ecological-analysis .section-header,
 .overlay-analysis .section-header,
-.climate-monitoring .section-header {
-  min-height: 28px !important;
-  margin-bottom: 10px !important;
+.climate-monitoring .section-header,
+.analysis-sidebar .section-title,
+.analysis-sidebar .history-card__title-row {
+  min-height: 26px !important;
+  display: flex !important;
+  align-items: center !important;
   gap: 8px !important;
-  color: var(--biz-text) !important;
-  font-size: 14px !important;
+  margin: 0 0 12px !important;
+  padding: 0 2px !important;
+  color: var(--ds-text) !important;
+  font-size: 15px !important;
   line-height: 1.35 !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
 }
 
-.remote-sensing-analysis .section-icon,
-.ecological-analysis .section-icon,
-.overlay-analysis .section-icon,
-.climate-monitoring .section-icon {
+.map-view .section-header::before,
+.remote-sensing-analysis .section-title::before,
+.remote-sensing-analysis .section-header::before,
+.ecological-analysis .section-header::before,
+.overlay-analysis .section-header::before,
+.climate-monitoring .section-header::before,
+.analysis-sidebar .section-title::before {
+  content: "" !important;
+  width: 3px !important;
+  height: 16px !important;
+  border-radius: 2px !important;
+  background: var(--ds-primary) !important;
+  flex: 0 0 auto !important;
+}
+
+.map-view .section-header::before {
+  display: none !important;
+}
+
+#app .app-workspace .map-view .user-section-title {
+  padding-bottom: 0 !important;
+  border-bottom: 0 !important;
+  color: var(--ds-accent) !important;
+  font-size: 15px !important;
+  line-height: 1.4 !important;
+  font-weight: 700 !important;
+  text-align: left !important;
+}
+
+#app .app-workspace .map-view .user-section.user-section--guest {
+  align-items: stretch !important;
+  gap: 14px !important;
+  padding: 16px 14px 16px 18px !important;
+  text-align: left !important;
+}
+
+#app .app-workspace .map-view .user-section.user-section--guest .user-info {
+  width: 100% !important;
+  min-width: 0 !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+}
+
+#app .app-workspace .map-view .user-identity {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex: 0 1 auto !important;
+  min-width: 0 !important;
+}
+
+#app .app-workspace .map-view .user-section.user-section--guest .user-identity span {
+  display: block !important;
+  width: auto !important;
+  min-width: 0 !important;
+  color: var(--ds-muted) !important;
+  font-size: 14px !important;
+  line-height: 1.4 !important;
+  white-space: nowrap !important;
+  text-align: left !important;
+}
+
+#app .app-workspace .map-view .user-section.user-section--guest .user-icon {
+  width: 36px !important;
+  height: 36px !important;
+  padding: 7px !important;
+  border-color: var(--ds-primary) !important;
+  color: var(--ds-accent) !important;
+  flex: 0 0 36px !important;
+}
+
+#app .app-workspace .map-view .user-section.user-section--guest .user-login-inline {
+  width: 96px !important;
+  min-width: 96px !important;
+  min-height: 40px !important;
+  margin: 0 !important;
+  padding: 0 18px !important;
+  border: 1px solid var(--ds-primary) !important;
+  border-radius: var(--ds-radius-button) !important;
+  background: var(--ds-primary) !important;
+  color: #ffffff !important;
+  font-size: 14px !important;
+  line-height: 1 !important;
+  font-weight: 700 !important;
+  flex: 0 0 96px !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .map-view .user-section.user-section--guest .user-login-inline:hover {
+  border-color: var(--ds-primary-hover) !important;
+  background: var(--ds-primary-hover) !important;
+  color: #ffffff !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2) !important;
+}
+
+.map-view .section-header:hover {
+  background: transparent !important;
+}
+
+.section-icon,
+.map-view .layer-icon,
+.map-view .function-icon,
+.analysis-sidebar .history-card__icon {
   width: 16px !important;
   height: 16px !important;
-  font-size: 16px !important;
-  color: var(--biz-primary) !important;
-  flex-shrink: 0 !important;
+  color: var(--ds-accent) !important;
+  flex: 0 0 auto !important;
 }
 
-.remote-sensing-analysis .upload-icon,
-.ecological-analysis .upload-icon,
-.climate-monitoring .upload-icon,
-.data-upload-panel .upload-icon {
-  margin-bottom: 4px !important;
+.map-view .user-icon {
+  width: 28px !important;
+  height: 28px !important;
+  padding: 5px !important;
+  border: 1px solid var(--ds-primary) !important;
+  border-radius: 50% !important;
+  color: var(--ds-accent) !important;
+  flex: 0 0 28px !important;
 }
 
-.remote-sensing-analysis .upload-icon svg,
-.ecological-analysis .upload-icon svg,
-.climate-monitoring .upload-icon svg,
-.data-upload-panel .upload-icon svg {
-  width: 32px !important;
-  height: 32px !important;
+.section-content,
+.layer-group-content {
+  min-width: 0 !important;
 }
 
-.remote-sensing-analysis .upload-zone,
-.ecological-analysis .upload-zone,
-.climate-monitoring .upload-zone,
-.data-upload-panel .upload-zone {
-  padding: 16px 12px !important;
-  gap: 6px !important;
-}
-
-.remote-sensing-analysis .analysis-btn,
-.remote-sensing-analysis .cache-btn,
-.ecological-analysis .start-analysis-btn,
-.climate-monitoring .analysis-btn,
-.data-upload-panel .upload-btn {
-  height: 38px !important;
-  padding: 0 12px !important;
+.layer-group-header h4,
+.group-title,
+.coordinate-section h4,
+.analysis-layer-head,
+.capability-title,
+.metric-selector-label {
+  color: var(--ds-muted) !important;
   font-size: 13px !important;
-  border-radius: 7px !important;
+  line-height: 1.4 !important;
+  font-weight: 700 !important;
+}
+
+.tool-tip,
+.upload-hint,
+.upload-types,
+.file-status,
+.history-card__description,
+.history-card__count,
+.history-collapsed-tip,
+.history-empty,
+.analysis-layer-empty,
+.capability-mode,
+.capability-reason,
+.metric-selector-current,
+.permission-subtitle {
+  color: var(--ds-subtle) !important;
+}
+
+/* Cards and modules */
+.upload-zone,
+.file-status,
+.supported-hint,
+.history-card,
+.history-toolbar,
+.history-collapsed-tip,
+.history-empty,
+.history-item,
+.capability-card,
+.metric-display-panel,
+.stats-overview,
+.charts-section,
+.analysis-results,
+.analysis-progress,
+.analysis-status,
+.visualization-card,
+.landuse-table-card,
+.analysis-meta-card,
+.result-panel-apple,
+.result-content-apple,
+.result-notice,
+.error-state-card,
+.data-requirements,
+.rsei-card,
+.file-card,
+.layer-control,
+.usage-info,
+.feedback-card-apple,
+.feedback-side-apple,
+.drawer-shell-apple,
+.record-item-apple,
+.record-count-apple,
+.side-note-apple,
+.overlay-analysis-popup,
+.overlay-analysis-popup .section,
+.overlay-analysis-popup .attribute-panel,
+.result-compare-map,
+.compare-map-shell {
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-card) !important;
+  box-shadow: var(--ds-shadow) !important;
+  color: var(--ds-muted) !important;
+}
+
+.upload-zone,
+.analysis-layer-box,
+.analysis-layer-item,
+.layer-item,
+.managed-layer,
+.metric-option,
+.metric-display-btn,
+.value-item,
+.stat-item,
+.chart-container,
+.meta-note,
+.mini-opacity-control,
+.layer-source-select,
+.permission-group,
+.governance-policy-card,
+.governance-history-item {
+  background: var(--ds-module) !important;
+  border: 1px solid var(--ds-border-soft) !important;
+  border-radius: var(--ds-radius-module) !important;
+  color: var(--ds-muted) !important;
+  box-shadow: none !important;
+}
+
+.upload-zone {
+  padding: 18px 14px !important;
+  border-style: dashed !important;
+  border-color: var(--ds-border-soft) !important;
+}
+
+.upload-zone:hover,
+.analysis-layer-item:hover,
+.managed-layer:hover,
+.history-item:hover,
+.metric-option:hover:not(:disabled),
+.metric-display-btn:hover:not(:disabled) {
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-border-strong) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.upload-icon svg {
+  width: 34px !important;
+  height: 34px !important;
+}
+
+.upload-icon svg path {
+  stroke: var(--ds-accent) !important;
+}
+
+.upload-text,
+.history-card__title,
+.history-item-title,
+.analysis-layer-item span,
+.managed-layer-text strong,
+.values-title,
+.chart-title,
+.progress-title,
+.status-text,
+.results-title,
+.results-header-title,
+.metric-display-title,
+.stats-overview h3,
+.charts-section h3,
+.chart-container h4,
+.value-name,
+.stat-label,
+.title-apple,
+.side-title-apple,
+.records-title-apple,
+.record-title-text-apple,
+.login-title,
+.permission-group-title,
+.governance-policy-title {
+  color: var(--ds-text) !important;
+}
+
+.upload-hint,
+.upload-types,
+.history-item-subtitle,
+.history-item-time,
+.analysis-layer-item small,
+.managed-layer-text small,
+.value-unit,
+.stat-value .label,
+.meta-label,
+.subtitle-apple,
+.side-copy-apple,
+.drawer-subtitle-apple,
+.privacy-apple,
+.record-content-apple,
+.record-meta-apple,
+.chart-source,
+.chart-empty {
+  color: var(--ds-subtle) !important;
+}
+
+.value-number,
+.stat-value .value,
+.result-panel-apple .stat-value,
+.record-count-apple strong {
+  color: var(--ds-text) !important;
+  font-size: 28px !important;
+  line-height: 1.15 !important;
+  font-weight: 750 !important;
+}
+
+.value-item,
+.stat-item {
+  min-height: 118px !important;
+  padding: 18px !important;
+}
+
+.values-grid,
+.stats-grid,
+.charts-grid,
+.charts-section {
+  gap: 20px !important;
+  min-width: 0 !important;
+}
+
+.results-content,
+.analysis-results,
+.result-panel-apple .result-content-apple {
+  width: 100% !important;
+  max-width: 1320px !important;
+  margin: 0 auto !important;
+  padding: 0 !important;
+}
+
+.results-header-bar,
+.result-panel-apple .result-header-apple,
+.drawer-header-apple,
+.drawer-toolbar-apple {
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-card) !important;
+  color: var(--ds-text) !important;
+  box-shadow: none !important;
+}
+
+.placeholder,
+.placeholder-apple {
+  min-height: 100% !important;
+}
+
+.placeholder-text,
+.placeholder-apple,
+.empty-state,
+.no-data-apple,
+.metric-inline-empty {
+  background: var(--ds-card) !important;
+  border: 1px dashed var(--ds-border-soft) !important;
+  border-radius: var(--ds-radius-card) !important;
+  color: var(--ds-subtle) !important;
+  box-shadow: none !important;
+}
+
+/* Buttons and interactive controls */
+.admin-btn,
+.login-btn,
+.upload-btn,
+.publish-btn,
+.export-btn,
+.locate-btn,
+.analysis-btn,
+.cache-btn,
+.start-analysis-btn,
+.result-download-btn,
+.image-download-btn,
+.dialog-confirm,
+.data-upload-panel .upload-btn,
+.data-upload-panel .rsei-action-btn.sync-btn,
+.feedback-page-apple .el-button--primary {
+  min-height: 36px !important;
+  border: 1px solid var(--ds-primary) !important;
+  border-radius: var(--ds-radius-button) !important;
+  background: var(--ds-primary) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+  font-weight: 600 !important;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease !important;
+  transform: none !important;
+}
+
+.login-dialog .login-actions button,
+.service-dialog .login-actions button {
+  min-height: 36px !important;
+  padding: 0 16px !important;
+  border-radius: var(--ds-radius-button) !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  flex: 0 0 auto !important;
+}
+
+.login-dialog .login-actions .dialog-confirm,
+.service-dialog .login-actions .dialog-confirm {
+  min-width: 84px !important;
+}
+
+.login-dialog .login-actions .dialog-cancel,
+.service-dialog .login-actions .dialog-cancel {
+  background: #102d4d !important;
+  border: 1px solid #24527d !important;
+  color: var(--ds-muted) !important;
+}
+
+.login-dialog .login-actions .dialog-cancel:hover,
+.service-dialog .login-actions .dialog-cancel:hover {
+  background: #183b61 !important;
+  border-color: #2d6a9f !important;
+  color: var(--ds-text) !important;
+}
+
+.admin-btn:hover,
+.login-btn:hover,
+.upload-btn:hover:not(:disabled),
+.publish-btn:hover:not(:disabled),
+.export-btn:hover,
+.locate-btn:hover,
+.analysis-btn:hover:not(:disabled):not(.disabled),
+.cache-btn:hover,
+.start-analysis-btn:hover:not(:disabled),
+.result-download-btn:hover,
+.image-download-btn:hover,
+.dialog-confirm:hover:not(:disabled),
+.data-upload-panel .upload-btn:hover:not(:disabled),
+.data-upload-panel .rsei-action-btn.sync-btn:hover:not(:disabled),
+.feedback-page-apple .el-button--primary:hover {
+  background: var(--ds-primary-hover) !important;
+  border-color: var(--ds-primary-hover) !important;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22) !important;
+  transform: none !important;
+}
+
+.map-view .login-btn,
+.map-view .service-btn {
+  min-height: 36px !important;
+  border: 1px solid #24527d !important;
+  border-radius: var(--ds-radius-button) !important;
+  background: var(--ds-card) !important;
+  color: var(--ds-muted) !important;
+  box-shadow: none !important;
+}
+
+.map-view .login-btn:hover,
+.map-view .service-btn:hover:not(:disabled) {
+  background: var(--ds-hover) !important;
+  border-color: #2d6a9f !important;
+  color: var(--ds-text) !important;
+  box-shadow: none !important;
+}
+
+.admin-btn:disabled,
+.login-btn:disabled,
+.upload-btn:disabled,
+.analysis-btn:disabled,
+.analysis-btn.disabled,
+.start-analysis-btn:disabled,
+.result-download-btn:disabled {
+  background: #14314f !important;
+  border-color: var(--ds-border-soft) !important;
+  color: var(--ds-disabled) !important;
+  cursor: not-allowed !important;
+  opacity: 1 !important;
+}
+
+.dialog-cancel,
+.mini-text-btn,
+.load-btn,
+.log-toggle-btn,
+.layer-action-btn,
+.history-action-btn,
+.history-text-btn,
+.history-toggle-btn,
+.retry-btn,
+.dismiss-btn,
+.re-upload-btn,
+.index-btn,
+.metric-option,
+.metric-display-btn,
+.chart-icon-btn,
+.data-upload-panel .rsei-action-btn,
+.data-upload-panel .remove-btn,
+.feedback-page-apple .el-button:not(.el-button--primary) {
+  min-height: 32px !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-button) !important;
+  background: var(--ds-module) !important;
+  color: var(--ds-muted) !important;
+  box-shadow: none !important;
+  font-weight: 600 !important;
+  transform: none !important;
+}
+
+.dialog-cancel:hover,
+.mini-text-btn:hover,
+.load-btn:hover,
+.log-toggle-btn:hover,
+.layer-action-btn:hover:not(:disabled),
+.history-action-btn:hover,
+.history-text-btn:hover,
+.history-toggle-btn:hover,
+.retry-btn:hover,
+.dismiss-btn:hover,
+.re-upload-btn:hover,
+.index-btn:hover:not(:disabled),
+.metric-option:hover:not(:disabled),
+.metric-display-btn:hover:not(:disabled),
+.chart-icon-btn:hover:not(:disabled),
+.data-upload-panel .rsei-action-btn:hover:not(:disabled),
+.data-upload-panel .remove-btn:hover,
+.feedback-page-apple .el-button:not(.el-button--primary):hover {
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-border-strong) !important;
+  color: var(--ds-text) !important;
+  box-shadow: none !important;
+}
+
+.index-btn.active,
+.metric-option.active,
+.metric-display-btn.active,
+.history-action-btn.primary {
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-border-strong) !important;
+  color: var(--ds-text) !important;
+  box-shadow: inset 3px 0 0 var(--ds-primary) !important;
+}
+
+.history-delete-btn,
+.layer-action-btn.danger,
+.chart-icon-btn.danger,
+.delete-layer-btn,
+.clear-cache-btn,
+.feedback-page-apple .el-button--danger,
+.feedback-page-apple .el-button.is-text.el-button--danger {
+  border-color: rgba(239, 68, 68, 0.34) !important;
+  background: rgba(239, 68, 68, 0.12) !important;
+  color: #ffb0a5 !important;
+}
+
+.history-delete-btn:hover,
+.layer-action-btn.danger:hover:not(:disabled),
+.chart-icon-btn.danger:hover:not(:disabled),
+.delete-layer-btn:hover:not(:disabled),
+.clear-cache-btn:hover:not(:disabled),
+.feedback-page-apple .el-button--danger:hover,
+.feedback-page-apple .el-button.is-text.el-button--danger:hover {
+  border-color: rgba(239, 68, 68, 0.58) !important;
+  background: rgba(239, 68, 68, 0.2) !important;
+  color: #ffd0cb !important;
+}
+
+.function-item {
+  position: relative !important;
+  min-height: 48px !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: var(--ds-radius-module) !important;
+  color: #9fb5ca !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.function-item:hover {
+  background: var(--ds-module) !important;
+  border-color: var(--ds-border) !important;
+  color: var(--ds-text) !important;
+}
+
+.function-item.active {
+  background: #123b67 !important;
+  border-color: var(--ds-border-strong) !important;
+  color: var(--ds-text) !important;
+  box-shadow: inset 3px 0 0 var(--ds-primary) !important;
+}
+
+.function-icon-box {
+  width: 28px !important;
+  height: 28px !important;
+  background: var(--ds-module) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-module) !important;
+  color: var(--ds-accent) !important;
+  overflow: hidden !important;
+}
+
+.function-icon-box svg {
+  width: 15px !important;
+  height: 15px !important;
+}
+
+.function-name {
+  color: inherit !important;
+  line-height: 1.35 !important;
+  white-space: normal !important;
+  word-break: break-word !important;
+}
+
+.function-arrow,
+.collapse-icon {
+  color: var(--ds-subtle) !important;
+}
+
+/* Feature page button consistency */
+.remote-sensing-analysis .index-buttons,
+.ecological-analysis .index-buttons,
+.climate-monitoring .metric-selector-options,
+.climate-monitoring .metric-display-actions {
+  gap: 8px !important;
 }
 
 .remote-sensing-analysis .index-btn,
 .ecological-analysis .index-btn,
+.climate-monitoring .metric-option,
+.climate-monitoring .metric-display-btn {
+  width: 100% !important;
+  min-height: 38px !important;
+  height: auto !important;
+  padding: 8px 12px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  white-space: normal !important;
+  text-align: center !important;
+  line-height: 1.35 !important;
+}
+
+.remote-sensing-analysis .index-btn .btn-text,
+.ecological-analysis .index-btn > span {
+  min-width: 0 !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  line-height: 1.35 !important;
+}
+
+.ecological-analysis .el-button.index-btn.el-button--success,
+.ecological-analysis .index-btn:has(.el-tag--success) {
+  background: rgba(47, 194, 107, 0.16) !important;
+  border-color: rgba(47, 194, 107, 0.38) !important;
+  color: #a6f4c5 !important;
+  box-shadow: inset 3px 0 0 var(--ds-success) !important;
+}
+
+.data-upload-panel .data-type-selector {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  padding-bottom: 14px !important;
+  margin-bottom: 16px !important;
+  border-bottom: 1px solid var(--ds-border) !important;
+}
+
 .data-upload-panel .type-tab {
+  min-width: 0 !important;
+  min-height: 40px !important;
+  padding: 0 8px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-button) !important;
+  background: var(--ds-module) !important;
+  color: var(--ds-muted) !important;
+  box-shadow: none !important;
+}
+
+.data-upload-panel .type-tab:hover {
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-border-strong) !important;
+  color: var(--ds-text) !important;
+}
+
+.data-upload-panel .type-tab.active {
+  background: #123b67 !important;
+  border-color: var(--ds-border-strong) !important;
+  color: var(--ds-text) !important;
+  box-shadow: inset 3px 0 0 var(--ds-primary) !important;
+}
+
+.data-upload-panel .type-label {
+  min-width: 0 !important;
+  color: inherit !important;
+  font-size: 12px !important;
+  line-height: 1.35 !important;
+  white-space: normal !important;
+  word-break: keep-all !important;
+}
+
+.data-upload-panel .auto-sync-card,
+.data-upload-panel .manual-ecology-upload,
+.data-upload-panel .published-row,
+.data-upload-panel .status-message {
+  background: var(--ds-module) !important;
+  border: 1px solid var(--ds-border-soft) !important;
+  border-radius: var(--ds-radius-module) !important;
+  color: var(--ds-muted) !important;
+  box-shadow: none !important;
+}
+
+.data-upload-panel .auto-sync-title,
+.data-upload-panel .manual-upload-title,
+.data-upload-panel .published-row strong,
+.data-upload-panel .data-requirements h4,
+.data-upload-panel .data-requirements strong {
+  color: var(--ds-text) !important;
+}
+
+.data-upload-panel .auto-sync-hint,
+.data-upload-panel .description-label,
+.data-upload-panel .published-row span,
+.data-upload-panel .data-requirements li {
+  color: var(--ds-subtle) !important;
+}
+
+.data-upload-panel .goto-remote-link {
   min-height: 36px !important;
-  height: 36px !important;
-  font-size: 13px !important;
-  border-radius: 7px !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-button) !important;
+  background: var(--ds-module) !important;
+  color: var(--ds-muted) !important;
+  text-decoration: none !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
-.climate-monitoring .placeholder,
-.remote-sensing-analysis .placeholder-apple,
-.ecological-analysis .placeholder {
-  color: #8a98a8 !important;
-  font-size: 13px !important;
+.data-upload-panel .goto-remote-link:hover {
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-border-strong) !important;
+  color: var(--ds-text) !important;
 }
 
-.climate-monitoring .placeholder-icon,
-.climate-monitoring .success-icon,
-.climate-monitoring .error-icon {
-  width: 18px !important;
-  height: 18px !important;
+.data-upload-panel .status-message.success {
+  background: rgba(47, 194, 107, 0.12) !important;
+  border-color: rgba(47, 194, 107, 0.28) !important;
+  color: #9ff1bf !important;
+}
+
+.data-upload-panel .status-message.error {
+  background: rgba(239, 68, 68, 0.12) !important;
+  border-color: rgba(239, 68, 68, 0.28) !important;
+  color: #ffaaa3 !important;
+}
+
+.data-upload-panel .status-message.info {
+  background: rgba(54, 191, 234, 0.1) !important;
+  border-color: rgba(54, 191, 234, 0.28) !important;
+  color: var(--ds-accent) !important;
+}
+
+.data-upload-panel .data-requirements {
+  margin-top: 20px !important;
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border) !important;
+}
+
+/* Forms */
+input,
+select,
+textarea,
+.coordinate-inputs input,
+.layer-source-select,
+.login-field input,
+.login-field select,
+.feedback-page-apple .el-input__wrapper,
+.feedback-page-apple .el-select__wrapper,
+.feedback-page-apple .el-textarea__inner {
+  background: var(--ds-module) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-input) !important;
+  color: var(--ds-text) !important;
+  box-shadow: none !important;
+}
+
+input::placeholder,
+textarea::placeholder,
+.feedback-page-apple input::placeholder,
+.feedback-page-apple textarea::placeholder {
+  color: var(--ds-subtle) !important;
+}
+
+input:focus,
+select:focus,
+textarea:focus,
+.coordinate-inputs input:focus,
+.layer-source-select:focus,
+.login-field input:focus,
+.login-field select:focus,
+.feedback-page-apple .el-input__wrapper.is-focus,
+.feedback-page-apple .el-select__wrapper.is-focused,
+.feedback-page-apple .el-textarea__inner:focus {
+  border-color: var(--ds-border-strong) !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.feedback-page-apple .el-input__inner,
+.feedback-page-apple .el-textarea__inner,
+.feedback-page-apple .el-select__selected-item,
+.feedback-page-apple .el-select__placeholder,
+.feedback-page-apple .el-form-item__label {
+  color: var(--ds-muted) !important;
+}
+
+/* Tables */
+.landuse-table,
+.el-table,
+.el-table__inner-wrapper {
+  overflow: hidden !important;
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border-soft) !important;
+  border-radius: var(--ds-radius-module) !important;
+  color: #b5c9dc !important;
+}
+
+.table-row,
+.el-table tr,
+.el-table td.el-table__cell {
+  background: var(--ds-card) !important;
+  border-color: var(--ds-border-soft) !important;
+  color: #b5c9dc !important;
+}
+
+.table-head,
+.el-table th.el-table__cell {
+  background: var(--ds-module) !important;
+  color: var(--ds-muted) !important;
+  font-weight: 700 !important;
+}
+
+.table-row:hover,
+.el-table__body tr:hover > td.el-table__cell {
+  background: var(--ds-hover) !important;
+}
+
+/* Map surfaces */
+#overlay-map-container,
+.map-container,
+.compare-map-shell,
+.ecological-indices-layer {
+  background: var(--ds-page) !important;
+  color: var(--ds-muted) !important;
+}
+
+#map-container,
+#map {
+  background: #ffffff !important;
+}
+
+#overlay-map {
+  background: var(--ds-page) !important;
+}
+
+.left-toolbar,
+.map-toolbar,
+.feature-toolbar,
+.map-layer-panel,
+.layer-manager,
+.indices-legend,
+.popup-content,
+.ol-control {
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border-strong) !important;
+  border-radius: var(--ds-radius-module) !important;
+  box-shadow: var(--ds-shadow) !important;
+  color: var(--ds-muted) !important;
+}
+
+.ol-scale-line {
+  left: 18px !important;
+  bottom: 18px !important;
+  padding: 6px 10px 7px !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+  border: 1px solid rgba(111, 132, 152, 0.38) !important;
+  border-radius: 4px !important;
+  box-shadow: 0 6px 16px rgba(28, 45, 64, 0.16) !important;
+}
+
+.ol-scale-line-inner {
+  margin: 0 !important;
+  border: 2px solid #1f3854 !important;
+  border-top: none !important;
+  color: #1f3854 !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
+  text-align: center !important;
+  text-shadow: none !important;
+}
+
+.tool-btn,
+.feature-toolbar button,
+.mini-btn,
+.ol-control button {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: var(--ds-radius-button) !important;
+  color: var(--ds-muted) !important;
+  box-shadow: none !important;
+}
+
+.tool-btn:hover,
+.tool-btn.active,
+.feature-toolbar button:hover,
+.mini-btn:hover:not(:disabled),
+.ol-control button:hover {
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-primary) !important;
+  color: var(--ds-text) !important;
+}
+
+.map-layer-panel h3,
+.control-section .section-title,
+.legend-header h4,
+.layer-manager h3,
+.layer-section h4 {
+  color: var(--ds-text) !important;
+}
+
+.layer-empty,
+.layer-name,
+.layer-type,
+.legend-content,
+.detail-label {
+  color: var(--ds-subtle) !important;
+}
+
+#app .map-layer-panel {
+  width: 312px !important;
+  max-height: min(640px, calc(100vh - 76px)) !important;
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border-strong) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35) !important;
+}
+
+#app .map-layer-panel .panel-head {
+  min-height: 46px !important;
+  padding: 8px 12px 8px 14px !important;
+  background: var(--ds-card) !important;
+  border-bottom: 1px solid var(--ds-border) !important;
+}
+
+#app .map-layer-panel .panel-heading {
+  color: var(--ds-text) !important;
+  font-size: 15px !important;
+  font-weight: 650 !important;
+}
+
+#app .map-layer-panel .panel-head-icon,
+#app .map-layer-panel .section-title-icon {
+  color: var(--ds-accent) !important;
+}
+
+#app .map-layer-panel .panel-body {
+  padding: 12px !important;
+  background: var(--ds-card) !important;
+}
+
+#app .map-layer-panel .section-title {
+  min-height: 34px !important;
+  padding: 6px 2px !important;
+  background: transparent !important;
+  border: none !important;
+  color: var(--ds-muted) !important;
+}
+
+#app .map-layer-panel .section-title:hover {
+  background: transparent !important;
+  color: var(--ds-text) !important;
+}
+
+#app .map-layer-panel .basemap-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+}
+
+#app .map-layer-panel .basemap-option {
+  min-height: 36px !important;
+  padding: 7px 9px !important;
+  background: var(--ds-sidebar) !important;
+  border: 1px solid var(--ds-border-soft) !important;
+  border-radius: 6px !important;
+  color: var(--ds-muted) !important;
+}
+
+#app .map-layer-panel .basemap-option:hover {
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-border-strong) !important;
+  color: var(--ds-text) !important;
+}
+
+#app .map-layer-panel .basemap-option:has(input:checked) {
+  background: var(--ds-primary) !important;
+  border-color: var(--ds-primary) !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+#app .map-layer-panel .managed-layer {
+  min-height: 42px !important;
+  padding: 8px !important;
+  background: var(--ds-sidebar) !important;
+  border: 1px solid var(--ds-border-soft) !important;
+  border-radius: 6px !important;
+  color: var(--ds-muted) !important;
+}
+
+#app .map-layer-panel .managed-layer:hover {
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-border-strong) !important;
+}
+
+#app .map-layer-panel .managed-layer-text strong {
+  color: var(--ds-text) !important;
+}
+
+#app .map-layer-panel .managed-layer-text small {
+  color: var(--ds-subtle) !important;
+}
+
+/* Dialogs and feedback */
+.login-mask,
+.el-overlay {
+  background: rgba(8, 23, 43, 0.82) !important;
+}
+
+.login-mask {
+  z-index: 9000 !important;
+  padding: 24px !important;
+}
+
+.login-dialog,
+.service-dialog,
+.el-dialog,
+.el-message-box,
+.feedback-page-apple .el-drawer,
+.feedback-page-apple .el-drawer__body {
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-dialog) !important;
+  color: var(--ds-muted) !important;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.36) !important;
+}
+
+.map-view .user-management-dialog {
+  width: min(920px, calc(100vw - 48px)) !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  gap: 16px !important;
+  margin-left: 56px !important;
+  background: #0f223d !important;
+  border-color: var(--ds-border-strong) !important;
+}
+
+.map-view .user-management-dialog .login-title,
+.map-view .user-management-dialog .user-admin-toolbar {
+  margin-bottom: 0 !important;
+}
+
+.map-view .user-management-dialog .empty-log,
+.map-view .user-management-dialog .user-list,
+.map-view .user-management-dialog .login-actions {
+  grid-column: 1 / -1 !important;
+}
+
+.map-view .user-management-dialog .user-list {
+  display: grid !important;
+  gap: 12px !important;
+  max-height: 55vh !important;
+  overflow-y: auto !important;
+}
+
+.map-view .user-management-dialog .user-card {
+  background: #132a48 !important;
+  border: 1px solid var(--ds-border-soft) !important;
+  border-radius: var(--ds-radius-module) !important;
+  padding: 14px 16px !important;
+  color: var(--ds-muted) !important;
+  box-shadow: none !important;
+}
+
+.map-view .user-management-dialog .user-card-name {
+  color: var(--ds-text) !important;
+}
+
+.map-view .user-management-dialog .user-card-meta,
+.map-view .user-management-dialog .user-card-grid {
+  color: var(--ds-muted) !important;
+}
+
+.map-view .user-management-dialog .user-card-grid div {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.map-view .user-management-dialog .user-card-actions {
+  display: flex !important;
+  gap: 8px !important;
+  flex: 0 0 auto !important;
+}
+
+.map-view .user-management-dialog .user-card-actions .layer-action-btn {
+  width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 0 !important;
+  border-color: var(--ds-border-strong) !important;
+  background: var(--ds-module) !important;
+}
+
+.feedback-page-apple {
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow: auto !important;
+  padding: 24px !important;
+  background: var(--ds-workspace) !important;
+}
+
+.feedback-layout-apple {
+  min-height: 0 !important;
+  width: min(1120px, 100%) !important;
+  grid-template-columns: minmax(0, 1fr) 340px !important;
+}
+
+.form-panel-apple,
+.feedback-side-apple {
+  padding: 24px !important;
+}
+
+.heading-kicker-apple {
+  color: var(--ds-accent) !important;
+}
+
+.side-summary-apple,
+.drawer-header-apple,
+.drawer-toolbar-apple {
+  border-color: var(--ds-border) !important;
+}
+
+.el-tag,
+.feedback-page-apple .el-tag,
+.result-panel-apple .el-tag {
+  background: rgba(54, 191, 234, 0.1) !important;
+  border-color: rgba(54, 191, 234, 0.28) !important;
+  color: var(--ds-accent) !important;
+}
+
+.status-excellent,
+.status-good {
+  background: rgba(47, 194, 107, 0.14) !important;
+  color: #8ff0b8 !important;
+}
+
+.status-moderate {
+  background: rgba(245, 158, 11, 0.14) !important;
+  color: #ffd08a !important;
+}
+
+.status-poor,
+.status-bad {
+  background: rgba(239, 68, 68, 0.14) !important;
+  color: #ffaaa3 !important;
+}
+
+/* Switches and progress */
+.toggle-switch .slider,
+.slider {
+  background: var(--ds-sidebar) !important;
+  border: 1px solid #47708f !important;
+}
+
+.toggle-switch .slider::before,
+.slider::before {
+  background: #f4f8fc !important;
+}
+
+input:checked + .slider {
+  background: var(--ds-primary) !important;
+}
+
+.progress-bar {
+  background: #0b223c !important;
+}
+
+.progress-fill {
+  background: var(--ds-primary) !important;
+}
+
+.progress-fill::after {
+  display: none !important;
+}
+
+.progress-text,
+.status-detail {
+  color: var(--ds-subtle) !important;
+}
+
+.success-message {
+  background: rgba(47, 194, 107, 0.12) !important;
+  border-color: rgba(47, 194, 107, 0.28) !important;
+  color: #9ff1bf !important;
+}
+
+.error-message,
+.form-error-banner {
+  background: rgba(239, 68, 68, 0.12) !important;
+  border-color: rgba(239, 68, 68, 0.28) !important;
+  color: #ffaaa3 !important;
+}
+
+/* Keep scientific imagery inspectable. */
+.landuse-visualization,
+.result-image,
+.preview-image {
+  background: #ffffff !important;
+}
+
+.chart,
+.chart-container canvas {
+  background: #0b223c !important;
+}
+
+/* High-specificity pass for route-scoped legacy styles that load after globals. */
+#app .app-workspace .map-view,
+#app .app-workspace .remote-sensing-analysis,
+#app .app-workspace .ecological-analysis,
+#app .app-workspace .overlay-analysis,
+#app .app-workspace .climate-monitoring,
+#app .app-workspace .feedback-page-apple {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  background: var(--ds-workspace) !important;
+}
+
+#app .app-workspace .map-view .sidebar,
+#app .app-workspace .remote-sensing-analysis .control-panel,
+#app .app-workspace .ecological-analysis .left-panel,
+#app .app-workspace .overlay-analysis .left-panel,
+#app .app-workspace .climate-monitoring .left-panel {
+  background: var(--ds-sidebar) !important;
+  border-right-color: var(--ds-border) !important;
+}
+
+#app .app-workspace .map-view .main-content,
+#app .app-workspace .remote-sensing-analysis .result-area,
+#app .app-workspace .ecological-analysis .right-panel,
+#app .app-workspace .climate-monitoring .right-panel {
+  height: 100% !important;
+  max-height: none !important;
+  background: var(--ds-workspace) !important;
+}
+
+#app .app-workspace .map-view .sidebar-header,
+#app .app-workspace .remote-sensing-analysis .panel-header,
+#app .app-workspace .ecological-analysis .panel-header,
+#app .app-workspace .overlay-analysis .panel-header,
+#app .app-workspace .climate-monitoring .panel-header,
+#app .app-workspace .data-upload-panel .panel-header {
+  background: var(--ds-header) !important;
+  border-bottom-color: var(--ds-border) !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .map-view .user-section,
+#app .app-workspace .remote-sensing-analysis .section,
+#app .app-workspace .ecological-analysis .section,
+#app .app-workspace .overlay-analysis .section,
+#app .app-workspace .climate-monitoring .section {
+  background: var(--ds-card) !important;
+  border-color: var(--ds-border) !important;
+  border-radius: var(--ds-radius-card) !important;
+}
+
+#app .app-workspace .map-view .section {
+  margin: 0 16px 20px !important;
+  padding: 0 0 18px !important;
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid #18385d !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .compare-card {
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-card) !important;
+  box-shadow: var(--ds-shadow) !important;
+}
+
+#app .app-workspace .compare-head h3 {
+  color: var(--ds-text) !important;
+}
+
+#app .app-workspace .compare-head p,
+#app .app-workspace .opacity-control,
+#app .app-workspace .imagery-toggle,
+#app .app-workspace .compare-empty {
+  color: var(--ds-subtle) !important;
+}
+
+#app .app-workspace .compare-map {
+  background: var(--ds-page) !important;
+  border-color: var(--ds-border) !important;
+  border-radius: var(--ds-radius-module) !important;
+}
+
+#app .app-workspace .opacity-control,
+#app .app-workspace .imagery-toggle {
+  background: var(--ds-module) !important;
+  border-color: var(--ds-border) !important;
+  border-radius: var(--ds-radius-button) !important;
+}
+
+#app .app-workspace .imagery-toggle.active {
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-border-strong) !important;
+  color: var(--ds-text) !important;
+}
+
+#app .app-workspace .compare-empty {
+  background: var(--ds-module) !important;
+  border-color: var(--ds-border-soft) !important;
+}
+
+/* Pure solid dark-blue enforcement for existing business pages. */
+#app .app-workspace .remote-sensing-analysis,
+#app .app-workspace .ecological-analysis,
+#app .app-workspace .overlay-analysis,
+#app .app-workspace .climate-monitoring,
+#app .app-workspace .feedback-page-apple {
+  background: var(--ds-page) !important;
+  color: var(--ds-text) !important;
+}
+
+#app .app-workspace .panel-header,
+#app .app-workspace .results-header,
+#app .app-workspace .result-header,
+#app .app-workspace .summary-header,
+#app .app-workspace .drawer-header-apple,
+#app .app-workspace .drawer-toolbar-apple {
+  background: var(--ds-card) !important;
+  border-color: var(--ds-border) !important;
+  color: var(--ds-text) !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .control-panel,
+#app .app-workspace .left-panel,
+#app .app-workspace .analysis-sidebar {
+  background: var(--ds-sidebar) !important;
+  border-color: var(--ds-border) !important;
+  color: var(--ds-muted) !important;
+  box-shadow: 2px 0 18px rgba(0, 0, 0, 0.22) !important;
+}
+
+#app .app-workspace .section,
+#app .app-workspace .history-card,
+#app .app-workspace .history-item,
+#app .app-workspace .history-empty,
+#app .app-workspace .supported-hint,
+#app .app-workspace .upload-card,
+#app .app-workspace .result-card,
+#app .app-workspace .result-panel,
+#app .app-workspace .result-content,
+#app .app-workspace .visualization-card,
+#app .app-workspace .stats-overview,
+#app .app-workspace .charts-section,
+#app .app-workspace .chart-container,
+#app .app-workspace .chart-card,
+#app .app-workspace .metric-card,
+#app .app-workspace .metric-display-panel,
+#app .app-workspace .analysis-results,
+#app .app-workspace .analysis-status,
+#app .app-workspace .analysis-progress,
+#app .app-workspace .analysis-meta-card,
+#app .app-workspace .landuse-table-card,
+#app .app-workspace .data-requirements,
+#app .app-workspace .feedback-card-apple,
+#app .app-workspace .feedback-side-apple,
+#app .app-workspace .drawer-shell-apple,
+#app .app-workspace .record-item-apple,
+#app .app-workspace .record-count-apple,
+#app .app-workspace .side-note-apple {
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-card) !important;
+  color: var(--ds-muted) !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .upload-zone,
+#app .app-workspace .file-card,
+#app .app-workspace .file-status,
+#app .app-workspace .result-notice,
+#app .app-workspace .data-item,
+#app .app-workspace .index-card,
+#app .app-workspace .stat-item,
+#app .app-workspace .value-item,
+#app .app-workspace .metric-option,
+#app .app-workspace .metric-display-btn,
+#app .app-workspace .history-toolbar,
+#app .app-workspace .history-collapsed-tip,
+#app .app-workspace .analysis-layer-box,
+#app .app-workspace .analysis-layer-item,
+#app .app-workspace .capability-card,
+#app .app-workspace .side-summary-apple {
+  background: var(--ds-hover) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-module) !important;
+  color: var(--ds-muted) !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .section-title,
+#app .app-workspace .section-header,
+#app .app-workspace .group-title,
+#app .app-workspace .card-title,
+#app .app-workspace .chart-title,
+#app .app-workspace .results-title,
+#app .app-workspace .results-header-title,
+#app .app-workspace .history-card__title,
+#app .app-workspace .history-item__title,
+#app .app-workspace .history-item-title,
+#app .app-workspace .title-apple,
+#app .app-workspace .side-title-apple,
+#app .app-workspace .records-title-apple,
+#app .app-workspace .record-title-text-apple,
+#app .app-workspace h1,
+#app .app-workspace h2,
+#app .app-workspace h3,
+#app .app-workspace h4 {
+  color: var(--ds-text) !important;
+  letter-spacing: 0 !important;
+}
+
+#app .app-workspace p,
+#app .app-workspace label,
+#app .app-workspace small,
+#app .app-workspace .subtitle,
+#app .app-workspace .panel-subtitle,
+#app .app-workspace .upload-hint,
+#app .app-workspace .upload-types,
+#app .app-workspace .history-card__description,
+#app .app-workspace .history-card__count,
+#app .app-workspace .history-item__meta,
+#app .app-workspace .history-item-subtitle,
+#app .app-workspace .history-item-time,
+#app .app-workspace .chart-source,
+#app .app-workspace .subtitle-apple,
+#app .app-workspace .side-copy-apple,
+#app .app-workspace .drawer-subtitle-apple,
+#app .app-workspace .record-content-apple,
+#app .app-workspace .record-meta-apple,
+#app .app-workspace .privacy-apple {
+  color: var(--ds-subtle) !important;
+}
+
+#app .app-workspace .index-btn,
+#app .app-workspace .metric-option,
+#app .app-workspace .metric-display-btn,
+#app .app-workspace .type-tab,
+#app .app-workspace .history-text-btn,
+#app .app-workspace .history-toggle-btn,
+#app .app-workspace .chart-icon-btn,
+#app .app-workspace .layer-action-btn,
+#app .app-workspace .mini-text-btn {
+  min-height: 36px !important;
+  height: auto !important;
+  padding: 8px 12px !important;
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-button) !important;
+  color: var(--ds-muted) !important;
+  box-shadow: none !important;
+  transform: none !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  line-height: 1.35 !important;
+}
+
+#app .app-workspace .index-btn:hover:not(:disabled),
+#app .app-workspace .metric-option:hover:not(:disabled),
+#app .app-workspace .metric-display-btn:hover:not(:disabled),
+#app .app-workspace .type-tab:hover:not(:disabled),
+#app .app-workspace .history-text-btn:hover,
+#app .app-workspace .history-toggle-btn:hover,
+#app .app-workspace .chart-icon-btn:hover:not(:disabled),
+#app .app-workspace .layer-action-btn:hover:not(:disabled),
+#app .app-workspace .mini-text-btn:hover {
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-primary) !important;
+  color: var(--ds-text) !important;
+}
+
+#app .app-workspace .index-btn.active,
+#app .app-workspace .metric-option.active,
+#app .app-workspace .metric-display-btn.active,
+#app .app-workspace .type-tab.active {
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-primary) !important;
+  color: var(--ds-text) !important;
+  box-shadow: inset 3px 0 0 var(--ds-primary) !important;
+}
+
+#app .app-workspace .upload-btn,
+#app .app-workspace .analysis-btn,
+#app .app-workspace .start-analysis-btn,
+#app .app-workspace .result-download-btn,
+#app .app-workspace .image-download-btn,
+#app .app-workspace .export-btn,
+#app .app-workspace .sync-btn,
+#app .app-workspace .el-button--primary {
+  background: var(--ds-primary) !important;
+  border-color: var(--ds-primary) !important;
+  color: #ffffff !important;
+  border-radius: var(--ds-radius-button) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+#app .app-workspace .upload-btn:hover:not(:disabled),
+#app .app-workspace .analysis-btn:hover:not(:disabled),
+#app .app-workspace .start-analysis-btn:hover:not(:disabled),
+#app .app-workspace .result-download-btn:hover:not(:disabled),
+#app .app-workspace .image-download-btn:hover:not(:disabled),
+#app .app-workspace .export-btn:hover:not(:disabled),
+#app .app-workspace .sync-btn:hover:not(:disabled),
+#app .app-workspace .el-button--primary:hover {
+  background: var(--ds-primary-hover) !important;
+  border-color: var(--ds-primary-hover) !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace input[type="checkbox"] {
+  accent-color: var(--ds-primary);
+}
+
+#app .app-workspace input,
+#app .app-workspace select,
+#app .app-workspace textarea,
+#app .app-workspace .el-input__wrapper,
+#app .app-workspace .el-select__wrapper,
+#app .app-workspace .el-textarea__inner {
+  background: var(--ds-card) !important;
+  border-color: var(--ds-border) !important;
+  color: var(--ds-text) !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace input:focus,
+#app .app-workspace select:focus,
+#app .app-workspace textarea:focus,
+#app .app-workspace .el-input__wrapper.is-focus,
+#app .app-workspace .el-select__wrapper.is-focused,
+#app .app-workspace .el-textarea__inner:focus {
+  border-color: var(--ds-primary) !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .el-table,
+#app .app-workspace .el-table__inner-wrapper,
+#app .app-workspace .landuse-table {
+  background: var(--ds-card) !important;
+  border-color: var(--ds-border) !important;
+  color: #c4d4eb !important;
+}
+
+#app .app-workspace .el-table th.el-table__cell,
+#app .app-workspace .table-head {
+  background: var(--ds-hover) !important;
+  color: var(--ds-muted) !important;
+}
+
+#app .app-workspace .el-table tr,
+#app .app-workspace .el-table td.el-table__cell,
+#app .app-workspace .table-row {
+  background: var(--ds-card) !important;
+  border-color: var(--ds-border) !important;
+  color: #c4d4eb !important;
+}
+
+#app .app-workspace .el-table__body tr:hover > td.el-table__cell,
+#app .app-workspace .table-row:hover {
+  background: var(--ds-hover) !important;
+}
+
+/* Remote sensing page: align with the main GIS sidebar and fix cramped text. */
+#app .app-workspace .remote-sensing-analysis {
+  display: flex !important;
+  background: var(--ds-page) !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .control-panel {
+  width: var(--ds-sidebar-width) !important;
+  flex: 0 0 var(--ds-sidebar-width) !important;
+  min-height: 0 !important;
+  background: var(--ds-sidebar) !important;
+  border-right: 1px solid var(--ds-border) !important;
+  box-shadow: 2px 0 18px rgba(0, 0, 0, 0.22) !important;
+  overflow: hidden !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .analysis-sidebar {
+  width: 100% !important;
+  flex: 1 1 auto !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  padding-bottom: 16px !important;
+  background: var(--ds-sidebar) !important;
+  border-right: 0 !important;
+  box-shadow: none !important;
+  color: var(--ds-muted) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .panel-header {
+  min-height: 110px !important;
+  padding: 22px 18px 18px !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: start !important;
+  gap: 10px 12px !important;
+  background: var(--ds-header) !important;
+  border-bottom: 1px solid #18385d !important;
+  flex: 0 0 auto !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .panel-header h1 {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  margin: 2px 0 0 !important;
+  padding-right: 0 !important;
+  color: var(--ds-text) !important;
+  font-size: 22px !important;
+  line-height: 1.22 !important;
+  font-weight: 700 !important;
+  white-space: nowrap !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .panel-subtitle {
+  grid-column: 1 / -1 !important;
+  margin: 0 !important;
+  padding-right: 0 !important;
+  color: #91a9c4 !important;
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+  white-space: normal !important;
+  word-break: normal !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .back-home-link {
+  position: static !important;
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  min-width: 72px !important;
+  min-height: 32px !important;
+  padding: 0 10px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-button) !important;
+  color: var(--ds-muted) !important;
+  white-space: nowrap !important;
+  writing-mode: horizontal-tb !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .back-home-link span {
+  white-space: nowrap !important;
+  writing-mode: horizontal-tb !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .section {
+  margin: 14px 16px 0 !important;
+  padding: 14px !important;
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-card) !important;
+  flex: 0 0 auto !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .upload-zone,
+#app .app-workspace .remote-sensing-analysis .history-card,
+#app .app-workspace .remote-sensing-analysis .history-item,
+#app .app-workspace .remote-sensing-analysis .supported-hint,
+#app .app-workspace .remote-sensing-analysis .file-status {
+  background: var(--ds-module) !important;
+  border-color: var(--ds-border-soft) !important;
+  color: var(--ds-muted) !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .upload-zone {
+  padding: 16px 14px !important;
+  border-style: dashed !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .upload-icon {
+  margin-bottom: 4px !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .upload-icon svg {
+  width: 34px !important;
+  height: 34px !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .upload-text,
+#app .app-workspace .remote-sensing-analysis .history-card__title,
+#app .app-workspace .remote-sensing-analysis .history-item__title {
+  color: var(--ds-text) !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .upload-hint,
+#app .app-workspace .remote-sensing-analysis .upload-types,
+#app .app-workspace .remote-sensing-analysis .history-card__description,
+#app .app-workspace .remote-sensing-analysis .history-item__meta {
+  color: var(--ds-subtle) !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  line-height: 1.45 !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .index-btn .btn-text {
+  text-align: left !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .result-area {
+  padding: 24px !important;
+  background: var(--ds-page) !important;
+  overflow: auto !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .result-panel-apple {
+  min-height: 100% !important;
+  background: transparent !important;
+  display: flex !important;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .placeholder-apple {
+  width: min(820px, 100%) !important;
+  min-height: 260px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: var(--ds-card) !important;
+  border: 1px dashed var(--ds-border-soft) !important;
+  border-radius: var(--ds-radius-card) !important;
+  color: var(--ds-muted) !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .result-content-apple {
+  width: 100% !important;
+  max-width: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 16px !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .compare-card {
+  margin-top: 0 !important;
+  padding: 18px !important;
+  background: #132a48 !important;
+  border: 1px solid #203b60 !important;
+  border-radius: var(--ds-radius-card) !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .compare-head {
+  align-items: center !important;
+  gap: 16px !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .compare-head h3 {
+  color: #ffffff !important;
   font-size: 18px !important;
+  font-weight: 700 !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .compare-head p {
+  color: #8299bc !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .opacity-control,
+#app .app-workspace .remote-sensing-analysis .imagery-toggle {
+  background: #0d2745 !important;
+  border: 1px solid #203b60 !important;
+  color: #c4d4eb !important;
+  border-radius: var(--ds-radius-button) !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .imagery-toggle.active {
+  background: #183358 !important;
+  border-color: #1677ff !important;
+  color: #ffffff !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .compare-map {
+  height: 420px !important;
+  margin-top: 16px !important;
+  background: #f7fbfd !important;
+  border: 1px solid #203b60 !important;
+  border-radius: var(--ds-radius-module) !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .visualization-section {
+  position: relative !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+  padding: 14px !important;
+  background: #132a48 !important;
+  border: 1px solid #203b60 !important;
+  border-radius: var(--ds-radius-card) !important;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22) !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .visualization-header {
+  min-height: 42px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .visualization-title-block {
+  min-width: 0 !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .visualization-title-block h3 {
+  margin: 0 !important;
+  color: #ffffff !important;
+  font-size: 18px !important;
+  line-height: 1.25 !important;
+  font-weight: 700 !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .visualization-title-block span {
+  display: block !important;
+  margin-top: 5px !important;
+  color: #8299bc !important;
+  font-size: 12px !important;
+  line-height: 1.3 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .result-image-actions {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  flex-wrap: wrap !important;
+  flex-shrink: 0 !important;
+  max-width: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  gap: 8px !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .map-edge-actions {
+  width: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+  gap: 8px !important;
+  padding: 8px !important;
+  background: rgba(19, 42, 72, 0.96) !important;
+  border: 1px solid #203b60 !important;
+  border-radius: var(--ds-radius-module) !important;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25) !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .result-image-actions .image-download-btn {
+  min-width: 116px !important;
+  height: 34px !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .map-edge-actions .image-download-btn {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 32px !important;
+  padding: 0 8px !important;
+  font-size: 12px !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .result-image-actions .image-secondary-btn {
+  background: var(--ds-module) !important;
+  border-color: var(--ds-border-strong) !important;
+  color: var(--ds-muted) !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .result-image-actions .image-secondary-btn:hover {
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-primary-hover) !important;
+  color: #ffffff !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .visualization-map-body {
+  position: relative !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 118px !important;
+  gap: 12px !important;
+  min-height: 340px !important;
+  overflow: hidden !important;
+  background: #0b223c !important;
+  border: 1px solid #203b60 !important;
+  border-radius: var(--ds-radius-module) !important;
+  padding: 10px !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .visualization-image {
+  width: 100% !important;
+  height: clamp(320px, 38vh, 430px) !important;
+  max-height: none !important;
+  object-fit: contain !important;
+  background: #ffffff !important;
+  border-radius: 0 !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .visualization-image-frame {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  background: #ffffff !important;
+  border: 1px solid #d6e2ec !important;
+  border-radius: var(--ds-radius-button) !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .map-side-controls {
+  min-width: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .map-legend-panel {
+  width: 100% !important;
+  padding: 10px !important;
+  background: #132a48 !important;
+  border: 1px solid #203b60 !important;
+  border-radius: var(--ds-radius-module) !important;
+  color: #c4d4eb !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .legend-title {
   margin-bottom: 8px !important;
+  color: #ffffff !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
 }
 
-.climate-monitoring .placeholder-icon {
-  width: 64px !important;
-  height: 64px !important;
-  max-width: 64px !important;
-  max-height: 64px !important;
-  color: #c3ccd6 !important;
-  stroke-width: 1.5 !important;
+#app .app-workspace .remote-sensing-analysis .legend-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+  min-height: 22px !important;
+  font-size: 12px !important;
+  line-height: 1.2 !important;
 }
 
-.climate-monitoring .charts-grid {
+#app .app-workspace .remote-sensing-analysis .legend-swatch {
+  width: 14px !important;
+  height: 8px !important;
+  border-radius: 2px !important;
+  flex: 0 0 auto !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .legend-name {
+  white-space: nowrap !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .statistics-section {
+  gap: 0 !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .stats-cards {
+  display: grid !important;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  gap: 14px !important;
+  align-items: stretch !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .stat-card {
   min-width: 0 !important;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)) !important;
+  min-height: 208px !important;
+  padding: 16px !important;
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border-strong) !important;
+  border-radius: var(--ds-radius-card) !important;
+  color: var(--ds-muted) !important;
+  box-shadow: none !important;
 }
 
-.climate-monitoring .chart-container {
+#app .app-workspace .remote-sensing-analysis .stat-card-header {
+  gap: 10px !important;
+  min-height: 28px !important;
+  margin-bottom: 12px !important;
+  padding-bottom: 10px !important;
+  border-bottom: 1px solid var(--ds-border) !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .stat-card-title {
   min-width: 0 !important;
+  color: #ffffff !important;
+  font-size: 18px !important;
+  line-height: 1.35 !important;
+  font-weight: 750 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .stat-card-header .el-tag {
+  flex: 0 0 auto !important;
+  height: 24px !important;
+  padding: 0 9px !important;
+  border-radius: var(--ds-radius-button) !important;
+  border-color: #20649a !important;
+  background: #123f67 !important;
+  color: #28aaff !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .stat-card-body {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .stat-item {
+  min-width: 0 !important;
+  min-height: 70px !important;
+  padding: 11px 12px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  background: #12385c !important;
+  border: 1px solid #245678 !important;
+  border-radius: 7px !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .stat-label {
+  color: #c4d4eb !important;
+  font-size: 12px !important;
+  line-height: 1.2 !important;
+  white-space: nowrap !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .stat-value {
+  color: #ffffff !important;
+  display: block !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  font-size: 21px !important;
+  line-height: 1.15 !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+  white-space: nowrap !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .charts-section {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 16px !important;
+  margin-top: 0 !important;
+  align-items: stretch !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .chart-container {
+  min-width: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: 380px !important;
+  align-self: stretch !important;
+  padding: 20px !important;
+  background: #132a48 !important;
+  border: 1px solid #203b60 !important;
+  border-radius: var(--ds-radius-card) !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .chart-title {
+  color: #ffffff !important;
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  min-height: 26px !important;
+  margin: 0 0 16px !important;
+  text-align: center !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .chart-canvas,
+#app .app-workspace .remote-sensing-analysis .chart-container canvas {
+  background: transparent !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .chart-canvas {
+  flex: 1 1 auto !important;
+  height: 320px !important;
+  background: #eef6ff !important;
+  border: 1px solid #d3e3f1 !important;
+  border-radius: var(--ds-radius-module) !important;
+  overflow: hidden !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .interpretation-content {
+  flex: 1 1 auto !important;
+  height: 320px !important;
+  padding: 16px !important;
+  background: #eaf4ff !important;
+  border: 1px solid #d3e3f1 !important;
+  border-radius: var(--ds-radius-module) !important;
+  overflow: hidden !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .interpretation-text {
+  height: 100% !important;
+  max-height: none !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .index-interpretation {
+  margin-bottom: 12px !important;
+  padding: 16px !important;
+  background: #f5faff !important;
+  border: 1px solid #d3e3f1 !important;
+  border-left: 4px solid var(--ds-primary) !important;
+  border-radius: var(--ds-radius-module) !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .index-name,
+#app .app-workspace .remote-sensing-analysis .item-label {
+  color: #17314d !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .index-name {
+  margin-bottom: 12px !important;
+  padding-bottom: 10px !important;
+  font-size: 18px !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .interpretation-items {
+  gap: 10px !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .interpretation-item {
+  gap: 12px !important;
+  font-size: 14px !important;
+  line-height: 1.6 !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .item-label {
+  min-width: 88px !important;
+}
+
+#app .app-workspace .remote-sensing-analysis .item-content {
+  color: #5c7288 !important;
+}
+
+@media (max-width: 1680px) {
+  #app .app-workspace .remote-sensing-analysis .stats-cards {
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+    gap: 16px !important;
+  }
+
+  #app .app-workspace .remote-sensing-analysis .stat-card {
+    min-height: 196px !important;
+    padding: 14px !important;
+  }
+
+  #app .app-workspace .remote-sensing-analysis .stat-card-title {
+    font-size: 16px !important;
+  }
+
+  #app .app-workspace .remote-sensing-analysis .stat-card-header .el-tag {
+    height: 26px !important;
+    padding: 0 10px !important;
+    font-size: 14px !important;
+  }
+
+  #app .app-workspace .remote-sensing-analysis .stat-label {
+    font-size: 12px !important;
+  }
+
+  #app .app-workspace .remote-sensing-analysis .stat-item {
+    min-height: 62px !important;
+    padding: 9px 10px !important;
+  }
+
+  #app .app-workspace .remote-sensing-analysis .stat-value {
+    font-size: 18px !important;
+  }
+}
+
+@media (max-width: 1280px) {
+  #app .app-workspace .remote-sensing-analysis .stats-cards {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)) !important;
+  }
+
+  #app .app-workspace .remote-sensing-analysis .charts-section {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 1180px) {
+  :root {
+    --ds-sidebar-width: 360px;
+  }
+
+  .map-view .main-content,
+  .remote-sensing-analysis .result-area,
+  .ecological-analysis .right-panel,
+  .climate-monitoring .right-panel {
+    padding: 18px !important;
+  }
+
+  .feedback-layout-apple {
+    grid-template-columns: 1fr !important;
+  }
+
+  .feedback-side-apple {
+    position: static !important;
+  }
 }
 
 @media (max-width: 900px) {
+  .map-view,
   .remote-sensing-analysis,
   .ecological-analysis .ecological-container,
   .overlay-analysis .main-container,
@@ -488,20 +2704,1433 @@
     flex-direction: column !important;
   }
 
+  .map-view .sidebar,
   .remote-sensing-analysis .control-panel,
   .ecological-analysis .left-panel,
   .overlay-analysis .left-panel,
-  .climate-monitoring .left-panel {
+  .climate-monitoring .left-panel,
+  .analysis-sidebar {
     width: 100% !important;
+    flex: 0 0 42vh !important;
     height: 42vh !important;
     border-right: none !important;
-    border-bottom: 1px solid var(--biz-border) !important;
+    border-bottom: 1px solid var(--ds-border) !important;
   }
 
+  .map-view .main-content,
   .remote-sensing-analysis .result-area,
   .ecological-analysis .right-panel,
   .overlay-analysis .map-area,
   .climate-monitoring .right-panel {
+    flex: 1 1 58vh !important;
     height: 58vh !important;
   }
+
+  .charts-grid,
+  .charts-section,
+  .values-grid,
+  .stats-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  #app .app-workspace .remote-sensing-analysis .visualization-header {
+    align-items: flex-start !important;
+    flex-direction: column !important;
+  }
+
+  #app .app-workspace .remote-sensing-analysis .visualization-map-body {
+    grid-template-columns: 1fr !important;
+  }
+
+  #app .app-workspace .remote-sensing-analysis .map-side-controls {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+  }
+
+  #app .app-workspace .remote-sensing-analysis .map-legend-panel {
+    width: auto !important;
+    margin: 0 !important;
+  }
+
+  #app .app-workspace .remote-sensing-analysis .result-image-actions {
+    justify-content: flex-start !important;
+  }
+
+  #app .app-workspace .remote-sensing-analysis .map-edge-actions {
+    position: static !important;
+    width: auto !important;
+    margin: 0 10px 10px !important;
+    flex-direction: row !important;
+    align-self: auto !important;
+  }
+}
+
+/*
+ * Shared business-page layout pass.
+ * These rules intentionally target the existing page classes only. They keep
+ * the four business screens visually related without changing their content
+ * or interaction structure.
+ */
+#app .app-workspace .ecological-analysis,
+#app .app-workspace .overlay-analysis,
+#app .app-workspace .climate-monitoring {
+  overflow: hidden !important;
+  background: var(--ds-page) !important;
+}
+
+#app .app-workspace .ecological-analysis .ecological-container,
+#app .app-workspace .overlay-analysis .main-container,
+#app .app-workspace .climate-monitoring .main-container {
+  min-width: 0 !important;
+  min-height: 0 !important;
+  background: var(--ds-page) !important;
+}
+
+#app .app-workspace .ecological-analysis .left-panel,
+#app .app-workspace .overlay-analysis .left-panel,
+#app .app-workspace .climate-monitoring .left-panel {
+  width: 360px !important;
+  flex: 0 0 360px !important;
+  min-width: 360px !important;
+  max-width: 360px !important;
+  background: var(--ds-sidebar) !important;
+  border-right: 1px solid var(--ds-border) !important;
+  box-shadow: 2px 0 18px rgba(0, 0, 0, 0.22) !important;
+}
+
+#app .app-workspace .ecological-analysis .panel-header,
+#app .app-workspace .overlay-analysis .panel-header,
+#app .app-workspace .climate-monitoring .panel-header {
+  min-height: 110px !important;
+  flex: 0 0 auto !important;
+  padding: 22px 18px 18px !important;
+  background: var(--ds-header) !important;
+  border-bottom: 1px solid #18385d !important;
+  color: var(--ds-text) !important;
+}
+
+#app .app-workspace .ecological-analysis .panel-header h1,
+#app .app-workspace .overlay-analysis .panel-header h1,
+#app .app-workspace .climate-monitoring .panel-header h1 {
+  max-width: none !important;
+  margin: 2px 0 0 !important;
+  color: var(--ds-text) !important;
+  font-size: 20px !important;
+  line-height: 1.3 !important;
+  font-weight: 700 !important;
+  white-space: nowrap !important;
+  overflow: visible !important;
+  overflow-wrap: normal !important;
+}
+
+#app .app-workspace .ecological-analysis .panel-header p,
+#app .app-workspace .overlay-analysis .panel-header p,
+#app .app-workspace .climate-monitoring .panel-header p {
+  max-width: calc(100% - 8px) !important;
+  margin: 8px 0 0 !important;
+  padding-right: 0 !important;
+  color: var(--ds-subtle) !important;
+  font-size: 12px !important;
+  line-height: 1.55 !important;
+  overflow-wrap: anywhere !important;
+}
+
+#app .app-workspace .ecological-analysis .back-home-link,
+#app .app-workspace .overlay-analysis .back-home-link,
+#app .app-workspace .climate-monitoring .back-home-link {
+  top: 16px !important;
+  right: 16px !important;
+  margin: 0 !important;
+  white-space: nowrap !important;
+}
+
+#app .app-workspace .ecological-analysis .section,
+#app .app-workspace .overlay-analysis .section,
+#app .app-workspace .climate-monitoring .section {
+  flex: 0 0 auto !important;
+  margin: 14px 16px 0 !important;
+  padding: 14px !important;
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-card) !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .ecological-analysis .section-header,
+#app .app-workspace .overlay-analysis .section-header,
+#app .app-workspace .climate-monitoring .section-header {
+  min-height: 26px !important;
+  margin: 0 0 12px !important;
+  padding: 0 2px !important;
+  color: var(--ds-text) !important;
+  font-size: 15px !important;
+  line-height: 1.35 !important;
+}
+
+#app .app-workspace .ecological-analysis .section-icon,
+#app .app-workspace .overlay-analysis .section-icon,
+#app .app-workspace .climate-monitoring .section-icon {
+  width: 16px !important;
+  height: 16px !important;
+  color: var(--ds-accent) !important;
+  flex: 0 0 auto !important;
+}
+
+#app .app-workspace .ecological-analysis .left-panel > .section:first-of-type,
+#app .app-workspace .overlay-analysis .left-panel > .section:first-of-type,
+#app .app-workspace .climate-monitoring .left-panel > .section:first-of-type {
+  margin-top: 16px !important;
+}
+
+#app .app-workspace .ecological-analysis .upload-zone,
+#app .app-workspace .climate-monitoring .upload-zone,
+#app .app-workspace .overlay-analysis .layer-control,
+#app .app-workspace .overlay-analysis .usage-info,
+#app .app-workspace .climate-monitoring .capability-card,
+#app .app-workspace .ecological-analysis .history-card,
+#app .app-workspace .overlay-analysis .history-card,
+#app .app-workspace .climate-monitoring .history-card,
+#app .app-workspace .climate-monitoring .history-toolbar {
+  background: var(--ds-module) !important;
+  border: 1px solid var(--ds-border-soft) !important;
+  border-radius: var(--ds-radius-module) !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .ecological-analysis .upload-zone:hover,
+#app .app-workspace .climate-monitoring .upload-zone:hover,
+#app .app-workspace .overlay-analysis .layer-item:hover,
+#app .app-workspace .ecological-analysis .history-item:hover,
+#app .app-workspace .overlay-analysis .history-item:hover,
+#app .app-workspace .climate-monitoring .history-item:hover {
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-border-strong) !important;
+}
+
+#app .app-workspace .ecological-analysis .upload-zone,
+#app .app-workspace .climate-monitoring .upload-zone {
+  min-height: 126px !important;
+  padding: 16px 14px !important;
+}
+
+#app .app-workspace .ecological-analysis .upload-text,
+#app .app-workspace .climate-monitoring .upload-text,
+#app .app-workspace .climate-monitoring .capability-title,
+#app .app-workspace .ecological-analysis .history-card__title,
+#app .app-workspace .overlay-analysis .history-card__title,
+#app .app-workspace .climate-monitoring .history-card__title,
+#app .app-workspace .climate-monitoring .stat-label,
+#app .app-workspace .climate-monitoring .history-item-title {
+  color: var(--ds-text) !important;
+}
+
+#app .app-workspace .ecological-analysis .file-status,
+#app .app-workspace .climate-monitoring .file-status,
+#app .app-workspace .climate-monitoring .capability-mode,
+#app .app-workspace .climate-monitoring .capability-reason,
+#app .app-workspace .ecological-analysis .history-card__description,
+#app .app-workspace .overlay-analysis .history-card__description,
+#app .app-workspace .climate-monitoring .history-card__description,
+#app .app-workspace .climate-monitoring .history-card__count,
+#app .app-workspace .climate-monitoring .history-collapsed-tip,
+#app .app-workspace .climate-monitoring .history-item-subtitle,
+#app .app-workspace .climate-monitoring .history-item-time {
+  color: var(--ds-subtle) !important;
+}
+
+#app .app-workspace .ecological-analysis .right-panel,
+#app .app-workspace .climate-monitoring .right-panel {
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding: 20px !important;
+  overflow: auto !important;
+  background: var(--ds-page) !important;
+}
+
+#app .app-workspace .climate-monitoring .right-panel {
+  padding-left: 40px !important;
+}
+
+#app .app-workspace .ecological-analysis .results-area,
+#app .app-workspace .climate-monitoring .analysis-results {
+  width: 100% !important;
+  max-width: 1440px !important;
+  margin: 0 auto !important;
+}
+
+#app .app-workspace .ecological-analysis .results-header-bar,
+#app .app-workspace .climate-monitoring .results-header-bar {
+  min-height: 54px !important;
+  margin: 0 0 16px !important;
+  padding: 10px 14px !important;
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-card) !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .ecological-analysis .results-title,
+#app .app-workspace .climate-monitoring .results-header-title {
+  min-width: 0 !important;
+  color: var(--ds-text) !important;
+  font-size: 18px !important;
+  line-height: 1.35 !important;
+  white-space: normal !important;
+}
+
+#app .app-workspace .ecological-analysis .visualization-card,
+#app .app-workspace .ecological-analysis .index-values,
+#app .app-workspace .ecological-analysis .analysis-meta-card,
+#app .app-workspace .ecological-analysis .landuse-table-card,
+#app .app-workspace .ecological-analysis .charts-section,
+#app .app-workspace .climate-monitoring .metric-display-panel,
+#app .app-workspace .climate-monitoring .stats-overview,
+#app .app-workspace .climate-monitoring .charts-section {
+  margin: 0 0 16px !important;
+  padding: 16px !important;
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-card) !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .ecological-analysis .visualization-card__header,
+#app .app-workspace .ecological-analysis .results-header-bar,
+#app .app-workspace .climate-monitoring .results-header-bar {
+  gap: 12px !important;
+}
+
+#app .app-workspace .ecological-analysis .visualization-card__header .values-title,
+#app .app-workspace .ecological-analysis .values-title,
+#app .app-workspace .ecological-analysis .chart-title,
+#app .app-workspace .climate-monitoring .metric-display-title,
+#app .app-workspace .climate-monitoring .stats-overview h3,
+#app .app-workspace .climate-monitoring .charts-section h3 {
+  color: var(--ds-text) !important;
+  font-size: 16px !important;
+  line-height: 1.4 !important;
+  font-weight: 700 !important;
+}
+
+#app .app-workspace .ecological-analysis .landuse-visualization {
+  height: auto !important;
+  max-height: 460px !important;
+  background: #ffffff !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+#app .app-workspace .ecological-analysis .landuse-result-layout {
+  height: 460px !important;
+  display: grid !important;
+  grid-template-columns: 158px minmax(0, 1.42fr) minmax(306px, 0.86fr) !important;
+  gap: 12px !important;
+  align-items: center !important;
+  padding: 16px !important;
+  background: #ffffff !important;
+  border-radius: var(--ds-radius-module) !important;
+  overflow: hidden !important;
+}
+
+#app .app-workspace .ecological-analysis .landuse-result-map .landuse-visualization {
+  width: 100% !important;
+  max-width: 100% !important;
+  max-height: calc(100% - 28px) !important;
+  object-fit: contain !important;
+}
+
+#app .app-workspace .ecological-analysis .landuse-result-legend {
+  background: #ffffff !important;
+  border: none !important;
+  border-radius: var(--ds-radius-module) !important;
+}
+
+#app .app-workspace .ecological-analysis .landuse-result-subtitle,
+#app .app-workspace .ecological-analysis .landuse-result-pie__percent,
+#app .app-workspace .ecological-analysis .landuse-result-pie__outer-label {
+  color: #111827 !important;
+}
+
+#app .app-workspace .ecological-analysis .landuse-result-pie {
+  width: min(330px, 100%) !important;
+  height: auto !important;
+  aspect-ratio: 1 !important;
+  display: block !important;
+  overflow: visible !important;
+}
+
+#app .app-workspace .ecological-analysis .landuse-result-pie__slice {
+  stroke: #ffffff !important;
+  stroke-width: 0.8 !important;
+  vector-effect: non-scaling-stroke !important;
+}
+
+#app .app-workspace .ecological-analysis .landuse-result-pie__percent {
+  fill: #111827 !important;
+  font-size: 8.5px !important;
+  font-weight: 600 !important;
+  stroke: none !important;
+  pointer-events: none !important;
+}
+
+#app .app-workspace .ecological-analysis .landuse-result-pie__outer-label {
+  fill: #111827 !important;
+  font-size: 8.5px !important;
+  font-weight: 600 !important;
+  font-variant-numeric: tabular-nums !important;
+  pointer-events: none !important;
+}
+
+#app .app-workspace .ecological-analysis .landuse-result-legend__item {
+  color: #4b5563 !important;
+}
+
+#app .app-workspace .ecological-analysis .values-grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)) !important;
+  gap: 12px !important;
+  max-width: none !important;
+}
+
+#app .app-workspace .ecological-analysis .value-item {
+  min-width: 0 !important;
+  min-height: 128px !important;
+  padding: 14px !important;
+  background: var(--ds-module) !important;
+  border: 1px solid var(--ds-border-soft) !important;
+  border-radius: var(--ds-radius-module) !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .ecological-analysis .value-name,
+#app .app-workspace .ecological-analysis .value-unit {
+  min-width: 0 !important;
+  color: var(--ds-muted) !important;
+  overflow-wrap: anywhere !important;
+}
+
+#app .app-workspace .ecological-analysis .value-number {
+  color: var(--ds-text) !important;
+  font-size: 25px !important;
+  line-height: 1.15 !important;
+}
+
+#app .app-workspace .ecological-analysis .analysis-meta-card,
+#app .app-workspace .ecological-analysis .landuse-table-card {
+  color: var(--ds-muted) !important;
+}
+
+#app .app-workspace .ecological-analysis .landuse-table {
+  background: var(--ds-module) !important;
+  border-color: var(--ds-border-soft) !important;
+}
+
+#app .app-workspace .ecological-analysis .charts-section {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+}
+
+#app .app-workspace .ecological-analysis .chart-container,
+#app .app-workspace .climate-monitoring .chart-container {
+  min-width: 0 !important;
+  min-height: 306px !important;
+  padding: 14px !important;
+  background: var(--ds-module) !important;
+  border: 1px solid var(--ds-border-soft) !important;
+  border-radius: var(--ds-radius-module) !important;
+  box-shadow: none !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+#app .app-workspace .ecological-analysis .chart {
+  height: 260px !important;
+  min-height: 0 !important;
+}
+
+/* Climate result page: compact 2-column data cards and chart grid. */
+#app .app-workspace .climate-monitoring .metric-display-panel,
+#app .app-workspace .climate-monitoring .stats-overview,
+#app .app-workspace .climate-monitoring .charts-section {
+  overflow: hidden !important;
+}
+
+#app .app-workspace .climate-monitoring .metric-display-actions {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+}
+
+#app .app-workspace .climate-monitoring .history-section {
+  padding-top: 0 !important;
+}
+
+#app .app-workspace .climate-monitoring .history-card {
+  padding: 12px !important;
+  overflow: hidden !important;
+}
+
+#app .app-workspace .climate-monitoring .history-card__title-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  min-width: 0 !important;
+}
+
+#app .app-workspace .climate-monitoring .history-card__icon {
+  width: 16px !important;
+  height: 16px !important;
+  flex: 0 0 16px !important;
+  color: var(--ds-accent) !important;
+}
+
+#app .app-workspace .climate-monitoring .history-card__summary-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+  margin-top: 10px !important;
+}
+
+#app .app-workspace .climate-monitoring .history-card__actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex: 0 0 auto !important;
+}
+
+#app .app-workspace .climate-monitoring .history-card__description {
+  margin-top: 8px !important;
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+}
+
+#app .app-workspace .climate-monitoring .history-list {
+  max-height: 220px !important;
+  gap: 8px !important;
+  margin-top: 10px !important;
+}
+
+#app .app-workspace .climate-monitoring .history-item {
+  min-width: 0 !important;
+  min-height: 76px !important;
+  padding: 10px !important;
+  gap: 8px !important;
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border-soft) !important;
+  border-radius: var(--ds-radius-module) !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .climate-monitoring .history-item-main {
+  min-width: 0 !important;
+}
+
+#app .app-workspace .climate-monitoring .history-item-title {
+  font-size: 13px !important;
+  line-height: 1.45 !important;
+}
+
+#app .app-workspace .climate-monitoring .history-delete-btn {
+  flex: 0 0 auto !important;
+  min-width: 44px !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  padding: 0 8px !important;
+  border-radius: var(--ds-radius-button) !important;
+  font-size: 12px !important;
+  line-height: 1 !important;
+}
+
+#app .app-workspace .climate-monitoring .success-message,
+#app .app-workspace .climate-monitoring .error-message {
+  margin: 12px 16px 16px !important;
+  padding: 10px 12px !important;
+  border-radius: var(--ds-radius-module) !important;
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+  gap: 10px !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .climate-monitoring .success-icon,
+#app .app-workspace .climate-monitoring .error-icon {
+  width: 18px !important;
+  height: 18px !important;
+  font-size: 18px !important;
+  margin-top: 2px !important;
+}
+
+#app .app-workspace .climate-monitoring .success-title,
+#app .app-workspace .climate-monitoring .error-title {
+  margin-bottom: 4px !important;
+  font-size: 13px !important;
+  line-height: 1.35 !important;
+}
+
+#app .app-workspace .climate-monitoring .success-details,
+#app .app-workspace .climate-monitoring .error-details {
+  margin-bottom: 8px !important;
+  overflow-wrap: anywhere !important;
+}
+
+#app .app-workspace .climate-monitoring .success-actions,
+#app .app-workspace .climate-monitoring .error-actions {
+  gap: 8px !important;
+}
+
+#app .app-workspace .climate-monitoring .dismiss-btn,
+#app .app-workspace .climate-monitoring .retry-btn {
+  height: 30px !important;
+  min-height: 30px !important;
+  padding: 0 12px !important;
+  border-radius: var(--ds-radius-button) !important;
+  font-size: 12px !important;
+  line-height: 1 !important;
+}
+
+#app .app-workspace .climate-monitoring .metric-display-btn {
+  min-width: 0 !important;
+  min-height: 36px !important;
+  padding: 7px 10px !important;
+  white-space: normal !important;
+}
+
+#app .app-workspace .climate-monitoring .stats-overview h3,
+#app .app-workspace .climate-monitoring .charts-section h3 {
+  margin: 0 0 12px !important;
+}
+
+#app .app-workspace .climate-monitoring .stats-grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)) !important;
+  gap: 12px !important;
+}
+
+#app .app-workspace .climate-monitoring .stat-item {
+  min-width: 0 !important;
+  padding: 14px !important;
+  background: var(--ds-module) !important;
+  border: 1px solid var(--ds-border-soft) !important;
+  border-radius: var(--ds-radius-module) !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .climate-monitoring .stat-values {
+  gap: 8px !important;
+}
+
+#app .app-workspace .climate-monitoring .stat-value {
+  min-width: 0 !important;
+  padding: 7px 0 !important;
+  border-bottom-color: var(--ds-border) !important;
+}
+
+#app .app-workspace .climate-monitoring .stat-value .label,
+#app .app-workspace .climate-monitoring .stat-value .value {
+  min-width: 0 !important;
+  overflow-wrap: anywhere !important;
+}
+
+#app .app-workspace .climate-monitoring .stat-value .value {
+  color: var(--ds-text) !important;
+  font-size: 14px !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+#app .app-workspace .climate-monitoring .charts-section {
+  display: block !important;
+}
+
+#app .app-workspace .climate-monitoring .charts-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+}
+
+#app .app-workspace .climate-monitoring .chart-source {
+  min-height: 18px !important;
+  line-height: 18px !important;
+  margin-bottom: 10px !important;
+  color: var(--ds-subtle) !important;
+}
+
+#app .app-workspace .climate-monitoring .chart-source.empty {
+  visibility: hidden !important;
+}
+
+#app .app-workspace .climate-monitoring .chart-container canvas {
+  width: min(100%, 820px) !important;
+  height: auto !important;
+  aspect-ratio: 720 / 260 !important;
+  max-width: 100% !important;
+  display: block;
+  margin-top: auto !important;
+  align-self: center !important;
+  background: #f7fbff !important;
+  border: 1px solid #d3e3f1 !important;
+  border-radius: var(--ds-radius-module) !important;
+}
+
+#app .app-workspace .climate-monitoring .chart-container .chart-canvas--wind {
+  width: min(100%, 820px) !important;
+  aspect-ratio: 720 / 260 !important;
+  align-self: center !important;
+}
+
+#app .app-workspace .climate-monitoring .chart-empty {
+  width: min(100%, 820px) !important;
+  min-height: 220px !important;
+  height: auto !important;
+  aspect-ratio: 720 / 260 !important;
+  max-width: 100% !important;
+  margin-top: auto !important;
+  align-self: center !important;
+  background: var(--ds-card) !important;
+  border: 1px dashed var(--ds-border-strong) !important;
+  border-radius: var(--ds-radius-module) !important;
+}
+
+#app .app-workspace .climate-monitoring .chart-empty {
+  color: #5c7288 !important;
+}
+
+/* Overlay page: the map remains the main work surface; controls stay compact. */
+#app .app-workspace .overlay-analysis .map-area {
+  min-width: 0 !important;
+  min-height: 0 !important;
+  background: var(--ds-page) !important;
+  border-left: 1px solid var(--ds-border) !important;
+}
+
+#app .app-workspace .overlay-analysis #overlay-map-container,
+#app .app-workspace .overlay-analysis #overlay-map {
+  background: var(--ds-page) !important;
+}
+
+#app .app-workspace .overlay-analysis .layer-control {
+  padding: 0 12px !important;
+}
+
+#app .app-workspace .overlay-analysis .layer-item {
+  min-width: 0 !important;
+  min-height: 42px !important;
+  padding: 10px 0 !important;
+  border-bottom-color: var(--ds-border) !important;
+}
+
+#app .app-workspace .overlay-analysis .layer-item-main,
+#app .app-workspace .overlay-analysis .layer-info {
+  min-width: 0 !important;
+}
+
+#app .app-workspace .overlay-analysis .layer-info {
+  color: var(--ds-muted) !important;
+  line-height: 1.4 !important;
+  overflow-wrap: anywhere !important;
+}
+
+#app .app-workspace .overlay-analysis .mini-opacity-control,
+#app .app-workspace .overlay-analysis .layer-source-select {
+  max-width: 100% !important;
+  background: var(--ds-module) !important;
+  border-color: var(--ds-border) !important;
+  color: var(--ds-muted) !important;
+}
+
+#app .app-workspace .overlay-analysis .usage-info {
+  color: var(--ds-muted) !important;
+  line-height: 1.6 !important;
+}
+
+#app .app-workspace .overlay-analysis .zoom-controls,
+#app .app-workspace .overlay-analysis .coordinate-display {
+  background: var(--ds-card) !important;
+  border-color: var(--ds-border-strong) !important;
+  box-shadow: var(--ds-shadow) !important;
+}
+
+#app .app-workspace .overlay-analysis .zoom-btn {
+  background: transparent !important;
+  color: var(--ds-text) !important;
+}
+
+#app .app-workspace .overlay-analysis .zoom-btn:hover {
+  background: var(--ds-hover) !important;
+}
+
+#app .app-workspace .overlay-analysis .ol-scale-line,
+#app .app-workspace .overlay-analysis .ol-scale-line-inner,
+#app .app-workspace .ecological-analysis .ol-scale-line,
+#app .app-workspace .ecological-analysis .ol-scale-line-inner {
+  background: var(--ds-card) !important;
+  border-color: var(--ds-border-strong) !important;
+  color: var(--ds-muted) !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+#app .app-workspace .overlay-analysis .overlay-analysis-popup {
+  width: min(560px, calc(100% - 32px)) !important;
+  min-width: 0 !important;
+  max-width: 560px !important;
+  max-height: min(78vh, 720px) !important;
+  background: var(--ds-card) !important;
+  border-color: var(--ds-border-strong) !important;
+  border-radius: var(--ds-radius-dialog) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35) !important;
+}
+
+#app .app-workspace .overlay-analysis .overlay-analysis-popup .info-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+}
+
+#app .app-workspace .overlay-analysis .overlay-analysis-popup .info-item,
+#app .app-workspace .overlay-analysis .overlay-analysis-popup .project-item,
+#app .app-workspace .overlay-analysis .overlay-analysis-popup .attribute-panel,
+#app .app-workspace .overlay-analysis .overlay-analysis-popup .risk-analysis,
+#app .app-workspace .overlay-analysis .overlay-analysis-popup .decision-recommendation {
+  background: var(--ds-module) !important;
+  border-color: var(--ds-border-soft) !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .overlay-analysis .overlay-analysis-popup .project-status.completed,
+#app .app-workspace .overlay-analysis .overlay-analysis-popup .project-status.ongoing,
+#app .app-workspace .overlay-analysis .overlay-analysis-popup .project-status.planned,
+#app .app-workspace .overlay-analysis .overlay-analysis-popup .risk-item.critical,
+#app .app-workspace .overlay-analysis .overlay-analysis-popup .risk-item.high,
+#app .app-workspace .overlay-analysis .overlay-analysis-popup .risk-item.medium,
+#app .app-workspace .overlay-analysis .overlay-analysis-popup .risk-item.low {
+  border: 1px solid var(--ds-border-soft) !important;
+  background: var(--ds-hover) !important;
+  color: var(--ds-muted) !important;
+}
+
+#app .app-workspace .overlay-analysis .overlay-analysis-popup .section-icon {
+  width: 24px !important;
+  height: 24px !important;
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-border-soft) !important;
+}
+
+@media (max-width: 640px) {
+  #app .app-workspace .overlay-analysis .overlay-analysis-popup .info-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Keep the existing "最近结果" actions identical across business pages. */
+#app .app-workspace .ecological-analysis .history-action-btn,
+#app .app-workspace .overlay-analysis .history-action-btn,
+#app .app-workspace .climate-monitoring .history-action-btn,
+#app .app-workspace .ecological-analysis .history-action-btn.primary,
+#app .app-workspace .overlay-analysis .history-action-btn.primary,
+#app .app-workspace .climate-monitoring .history-action-btn.primary,
+#app .app-workspace .remote-sensing-analysis .history-toggle-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 64px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 0 13px !important;
+  border: 1px solid var(--ds-border-strong) !important;
+  border-radius: var(--ds-radius-button) !important;
+  background: #102d4d !important;
+  color: var(--ds-muted) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+#app .app-workspace .ecological-analysis .history-action-btn:hover,
+#app .app-workspace .overlay-analysis .history-action-btn:hover,
+#app .app-workspace .climate-monitoring .history-action-btn:hover,
+#app .app-workspace .ecological-analysis .history-action-btn.primary:hover,
+#app .app-workspace .overlay-analysis .history-action-btn.primary:hover,
+#app .app-workspace .climate-monitoring .history-action-btn.primary:hover,
+#app .app-workspace .remote-sensing-analysis .history-toggle-btn:hover {
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-primary) !important;
+  color: var(--ds-text) !important;
+}
+
+#app .app-workspace .ecological-analysis .history-card__actions .history-action-btn.primary,
+#app .app-workspace .overlay-analysis .history-card__actions .history-action-btn.primary,
+#app .app-workspace .climate-monitoring .history-card__actions .history-action-btn.primary {
+  background: #102d4d !important;
+  border-color: var(--ds-border-strong) !important;
+  color: var(--ds-muted) !important;
+  box-shadow: none !important;
+}
+
+/* The existing data-type tabs use the same compact segmented-button language. */
+#app .app-workspace .data-upload-panel .type-tab {
+  min-width: 0 !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  padding: 0 10px !important;
+  border: 1px solid var(--ds-border-strong) !important;
+  border-radius: var(--ds-radius-button) !important;
+  background: var(--ds-module) !important;
+  color: var(--ds-muted) !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 1.25 !important;
+  white-space: nowrap !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .data-upload-panel .type-tab:hover {
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-primary) !important;
+  color: var(--ds-text) !important;
+}
+
+#app .app-workspace .data-upload-panel .type-tab.active {
+  background: #123b67 !important;
+  border-color: var(--ds-primary) !important;
+  color: var(--ds-text) !important;
+  box-shadow: inset 3px 0 0 var(--ds-primary) !important;
+}
+
+/* Feedback page: same working-surface density, with no dashboard additions. */
+#app .app-workspace .feedback-page-apple {
+  min-height: 100vh !important;
+  height: 100vh !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+  padding: 16px 20px !important;
+  background: var(--ds-page) !important;
+  box-sizing: border-box !important;
+}
+
+#app .app-workspace .feedback-topbar-apple {
+  min-height: 44px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 16px !important;
+  padding: 0 16px !important;
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-card) !important;
+  box-sizing: border-box !important;
+}
+
+#app .app-workspace .feedback-topbar-title-apple {
+  margin: 0 !important;
+  color: var(--ds-text) !important;
+  font-size: 19px !important;
+  line-height: 1.25 !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+}
+
+#app .app-workspace .feedback-layout-apple {
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 3fr) minmax(320px, 1fr) !important;
+  gap: 12px !important;
+  align-items: stretch !important;
+}
+
+#app .app-workspace .feedback-card-apple,
+#app .app-workspace .feedback-side-apple {
+  min-width: 0 !important;
+  background: var(--ds-card) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-card) !important;
+  box-shadow: none !important;
+  box-sizing: border-box !important;
+}
+
+#app .app-workspace .feedback-card-apple {
+  display: flex !important;
+  flex-direction: column !important;
+  padding: 24px 28px 18px !important;
+  overflow: auto !important;
+}
+
+#app .app-workspace .feedback-side-apple {
+  display: flex !important;
+  flex-direction: column !important;
+  position: static !important;
+  top: auto !important;
+  padding: 58px 22px 24px !important;
+}
+
+#app .app-workspace .feedback-page-apple .feedback-back-link {
+  margin: 0 !important;
+  background: var(--ds-module) !important;
+}
+
+#app .app-workspace .feedback-page-apple .heading-kicker-apple {
+  color: var(--ds-text) !important;
+  font-size: 18px !important;
+  line-height: 1.35 !important;
+  font-weight: 700 !important;
+}
+
+#app .app-workspace .feedback-page-apple .title-apple {
+  margin: 0 0 6px !important;
+  color: var(--ds-text) !important;
+  font-size: 26px !important;
+  line-height: 1.2 !important;
+  font-weight: 700 !important;
+}
+
+#app .app-workspace .feedback-page-apple .subtitle-apple {
+  color: var(--ds-muted) !important;
+  font-size: 13px !important;
+  line-height: 1.45 !important;
+}
+
+#app .app-workspace .feedback-page-apple .page-heading-apple {
+  margin-bottom: 16px !important;
+}
+
+#app .app-workspace .feedback-page-apple .form-apple {
+  display: flex !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  flex-direction: column !important;
+}
+
+#app .app-workspace .feedback-page-apple .form-apple .el-form-item {
+  margin-bottom: 18px !important;
+}
+
+#app .app-workspace .feedback-page-apple .form-apple .el-form-item__error {
+  position: static !important;
+  padding-top: 4px !important;
+  line-height: 1.3 !important;
+}
+
+#app .app-workspace .feedback-page-apple .form-apple .el-form-item__label {
+  margin-bottom: 2px !important;
+  color: #d6e4f5 !important;
+  line-height: 1.35 !important;
+  font-weight: 700 !important;
+}
+
+#app .app-workspace .feedback-page-apple .form-apple .el-select,
+#app .app-workspace .feedback-page-apple .form-apple .el-input {
+  width: 100% !important;
+}
+
+#app .app-workspace .feedback-page-apple .form-apple .el-input__wrapper,
+#app .app-workspace .feedback-page-apple .form-apple .el-select__wrapper,
+#app .app-workspace .feedback-page-apple .form-apple .el-textarea__inner {
+  min-height: 44px !important;
+  background: #0f2746 !important;
+  border: 1px solid #315d86 !important;
+  box-shadow: none !important;
+  color: var(--ds-text) !important;
+  border-radius: var(--ds-radius-button) !important;
+}
+
+#app .app-workspace .feedback-page-apple .form-apple .el-textarea__inner {
+  min-height: 300px !important;
+}
+
+#app .app-workspace .feedback-page-apple .form-apple .el-input__count {
+  right: 10px !important;
+  bottom: 4px !important;
+  color: var(--ds-disabled) !important;
+  background: transparent !important;
+}
+
+#app .app-workspace .feedback-page-apple .actions-apple {
+  justify-content: flex-start !important;
+  margin-top: 2px !important;
+}
+
+#app .app-workspace .feedback-page-apple .actions-apple .el-button,
+#app .app-workspace .feedback-page-apple .side-actions-apple .el-button {
+  height: 46px !important;
+  border-radius: var(--ds-radius-button) !important;
+  font-weight: 600 !important;
+}
+
+#app .app-workspace .feedback-page-apple .actions-apple .el-button {
+  min-width: 128px !important;
+  padding: 0 26px !important;
+  font-size: 15px !important;
+}
+
+#app .app-workspace .feedback-page-apple .actions-apple .el-button--primary {
+  background: var(--ds-primary) !important;
+  border-color: var(--ds-primary) !important;
+  color: var(--ds-text) !important;
+}
+
+#app .app-workspace .feedback-page-apple .actions-apple .el-button:not(.el-button--primary) {
+  background: #0f2746 !important;
+  border-color: #3c6f9d !important;
+  color: var(--ds-muted) !important;
+}
+
+#app .app-workspace .feedback-page-apple .privacy-apple {
+  margin-top: auto !important;
+  padding-top: 14px !important;
+  color: var(--ds-disabled) !important;
+  font-size: 11px !important;
+  line-height: 1.55 !important;
+}
+
+#app .app-workspace .feedback-page-apple .side-summary-apple {
+  display: flex !important;
+  width: 100% !important;
+  min-height: 56px !important;
+  gap: 0 !important;
+  padding: 0 14px !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: var(--ds-module) !important;
+  border: 1px solid var(--ds-border) !important;
+  border-radius: var(--ds-radius-module) !important;
+  box-sizing: border-box !important;
+  text-align: center !important;
+  border-bottom-color: var(--ds-border) !important;
+}
+
+#app .app-workspace .feedback-page-apple .side-summary-apple > div {
+  min-width: 0 !important;
+  width: 100% !important;
+}
+
+#app .app-workspace .feedback-page-apple .side-title-apple,
+#app .app-workspace .feedback-page-apple .records-title-apple {
+  min-width: 0 !important;
+  margin: 0 !important;
+  font-size: 17px !important;
+  line-height: 1.25 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+#app .app-workspace .feedback-page-apple .record-count-apple {
+  display: none !important;
+}
+
+#app .app-workspace .feedback-page-apple .side-note-apple {
+  background: var(--ds-module) !important;
+  border-color: var(--ds-border-soft) !important;
+}
+
+#app .app-workspace .feedback-page-apple .side-actions-apple {
+  display: grid !important;
+  gap: 18px !important;
+  margin-top: 34px !important;
+}
+
+#app .app-workspace .feedback-page-apple .side-actions-apple .el-button {
+  width: 100% !important;
+  margin-left: 0 !important;
+  justify-content: center !important;
+}
+
+#app .app-workspace .feedback-page-apple .records-open-button {
+  height: 50px !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+}
+
+#app .app-workspace .feedback-page-apple .side-actions-apple .el-button:not(.el-button--primary) {
+  height: 40px !important;
+  background: #0f2746 !important;
+  border-color: #315d86 !important;
+  color: var(--ds-muted) !important;
+}
+
+#app .app-workspace .feedback-page-apple .side-note-apple {
+  margin-top: auto !important;
+  color: var(--ds-muted) !important;
+  line-height: 1.55 !important;
+}
+
+@media (max-width: 1280px) {
+  #app .app-workspace .ecological-analysis .charts-section,
+  #app .app-workspace .climate-monitoring .charts-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  #app .app-workspace .climate-monitoring .metric-display-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 900px) {
+  #app .app-workspace .ecological-analysis .left-panel,
+  #app .app-workspace .overlay-analysis .left-panel,
+  #app .app-workspace .climate-monitoring .left-panel {
+    width: 100% !important;
+    flex: 0 0 42vh !important;
+    height: 42vh !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--ds-border) !important;
+  }
+
+  #app .app-workspace .ecological-analysis .right-panel,
+  #app .app-workspace .overlay-analysis .map-area,
+  #app .app-workspace .climate-monitoring .right-panel {
+    flex: 1 1 58vh !important;
+    height: 58vh !important;
+  }
+
+  #app .app-workspace .feedback-layout-apple {
+    grid-template-columns: 1fr !important;
+  }
+
+  #app .app-workspace .feedback-side-apple {
+    position: static !important;
+  }
+}
+
+@media (max-width: 640px) {
+  #app .app-workspace .ecological-analysis .panel-header,
+  #app .app-workspace .overlay-analysis .panel-header,
+  #app .app-workspace .climate-monitoring .panel-header {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+  }
+
+  #app .app-workspace .ecological-analysis .right-panel,
+  #app .app-workspace .climate-monitoring .right-panel,
+  #app .app-workspace .feedback-page-apple {
+    height: auto !important;
+    min-height: 100vh !important;
+    overflow: auto !important;
+    padding: 14px !important;
+  }
+
+  #app .app-workspace .climate-monitoring .metric-display-actions {
+    grid-template-columns: 1fr !important;
+  }
+
+  #app .app-workspace .feedback-card-apple,
+  #app .app-workspace .feedback-side-apple {
+    padding: 18px 16px !important;
+  }
+}
+
+/* Overlay sidebar density: keep layer labels and controls in separate tracks. */
+#app .app-workspace .overlay-analysis .layer-control {
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  padding: 0 12px !important;
+}
+
+#app .app-workspace .overlay-analysis .layer-item {
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  padding: 10px 14px !important;
+}
+
+#app .app-workspace .overlay-analysis .layer-item:not(.layer-item--stacked) {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  column-gap: 12px !important;
+}
+
+#app .app-workspace .overlay-analysis .layer-item-main {
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+}
+
+#app .app-workspace .overlay-analysis .layer-item--stacked {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 8px !important;
+}
+
+#app .app-workspace .overlay-analysis .layer-info {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+
+#app .app-workspace .overlay-analysis .layer-controls {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+}
+
+#app .app-workspace .overlay-analysis .layer-item-extra {
+  width: 100% !important;
+  min-width: 0 !important;
+  display: flex !important;
+  justify-content: stretch !important;
+}
+
+#app .app-workspace .overlay-analysis .layer-item--stacked .layer-item-extra {
+  padding-inline: 0 !important;
+}
+
+#app .app-workspace .overlay-analysis .mini-opacity-control {
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+  white-space: nowrap !important;
+}
+
+#app .app-workspace .overlay-analysis .mini-opacity-control input {
+  flex: 1 1 auto !important;
+  width: auto !important;
+  min-width: 70px !important;
+}
+
+#app .app-workspace .overlay-analysis .mini-opacity-control strong {
+  flex: 0 0 38px !important;
+}
+
+#app .app-workspace .overlay-analysis .layer-source-select {
+  width: min(100%, 210px) !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+/* The source selector gets its own full-width row when the sidebar is tight. */
+#app .app-workspace .overlay-analysis .layer-item--stacked:has(.layer-source-select) .layer-item-main {
+  flex-wrap: wrap !important;
+}
+
+#app .app-workspace .overlay-analysis .layer-item--stacked:has(.layer-source-select) .layer-info {
+  flex: 1 1 140px !important;
+}
+
+#app .app-workspace .overlay-analysis .layer-item--stacked:has(.layer-source-select) .layer-controls {
+  flex: 1 1 170px !important;
+  justify-content: flex-end !important;
+}
+
+/* Embedded upload manager: reclaim nested padding without changing its content. */
+#app .app-workspace .overlay-analysis .section:has(.data-upload-panel) {
+  padding: 12px !important;
+}
+
+#app .app-workspace .overlay-analysis .section:has(.data-upload-panel) .section-content,
+#app .app-workspace .overlay-analysis .data-upload-panel.embedded,
+#app .app-workspace .overlay-analysis .data-upload-panel.embedded .panel-content {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  box-sizing: border-box !important;
+}
+
+#app .app-workspace .overlay-analysis .data-upload-panel.embedded .panel-content {
+  padding: 12px !important;
+  overflow: visible !important;
+}
+
+#app .app-workspace .overlay-analysis .data-upload-panel.embedded .data-type-selector {
+  width: 100% !important;
+  min-width: 0 !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 6px !important;
+}
+
+#app .app-workspace .overlay-analysis .data-upload-panel.embedded .type-tab {
+  min-width: 0 !important;
+  padding-left: 5px !important;
+  padding-right: 5px !important;
+}
+
+#app .app-workspace .overlay-analysis .data-upload-panel.embedded .type-label {
+  min-width: 0 !important;
+  overflow-wrap: anywhere !important;
+}
+
+#app .app-workspace .overlay-analysis .data-upload-panel.embedded .auto-sync-card,
+#app .app-workspace .overlay-analysis .data-upload-panel.embedded .manual-ecology-upload,
+#app .app-workspace .overlay-analysis .data-upload-panel.embedded .published-row,
+#app .app-workspace .overlay-analysis .data-upload-panel.embedded .upload-zone,
+#app .app-workspace .overlay-analysis .data-upload-panel.embedded .data-requirements {
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+#app .app-workspace .overlay-analysis .data-upload-panel.embedded .auto-sync-hint,
+#app .app-workspace .overlay-analysis .data-upload-panel.embedded .upload-types,
+#app .app-workspace .overlay-analysis .data-upload-panel.embedded .published-meta,
+#app .app-workspace .overlay-analysis .data-upload-panel.embedded .data-requirements li {
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+
+#app .app-workspace .overlay-analysis .data-upload-panel.embedded .rsei-action-row {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+#app .app-workspace .overlay-analysis .data-upload-panel.embedded .rsei-action-btn {
+  min-width: 0 !important;
+  white-space: normal !important;
+}
+
+/* Final history action normalization: clear/collapse must look identical. */
+#app .app-workspace .ecological-analysis .history-card__actions .history-action-btn,
+#app .app-workspace .overlay-analysis .history-card__actions .history-action-btn,
+#app .app-workspace .climate-monitoring .history-card__actions .history-action-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 74px !important;
+  min-width: 74px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  padding: 0 !important;
+  border: 1px solid var(--ds-border-strong) !important;
+  border-radius: var(--ds-radius-button) !important;
+  background: #102d4d !important;
+  color: var(--ds-muted) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+#app .app-workspace .ecological-analysis .history-card__actions .history-action-btn.primary,
+#app .app-workspace .overlay-analysis .history-card__actions .history-action-btn.primary,
+#app .app-workspace .climate-monitoring .history-card__actions .history-action-btn.primary {
+  background: #102d4d !important;
+  border-color: var(--ds-border-strong) !important;
+  color: var(--ds-muted) !important;
+  box-shadow: none !important;
+}
+
+#app .app-workspace .ecological-analysis .history-card__actions .history-action-btn:hover,
+#app .app-workspace .overlay-analysis .history-card__actions .history-action-btn:hover,
+#app .app-workspace .climate-monitoring .history-card__actions .history-action-btn:hover {
+  background: var(--ds-hover) !important;
+  border-color: var(--ds-primary) !important;
+  color: var(--ds-text) !important;
 }

@@ -139,7 +139,7 @@
                   :loading="index.loading"
                   @click="calculateIndex(index.key)"
                   class="index-btn"
-                  :disabled="fileList.length === 0"
+                  :disabled="fileList.length === 0 || index.loading || globalLoading"
                 >
                   {{ index.name }}
                   <el-tag v-if="index.calculated" size="small" type="success">已计算</el-tag>
@@ -158,7 +158,7 @@
                   :loading="index.loading"
                   @click="calculateIndex(index.key)"
                   class="index-btn"
-                  :disabled="fileList.length === 0"
+                  :disabled="fileList.length === 0 || index.loading || globalLoading"
                 >
                   {{ index.name }}
                   <el-tag v-if="index.calculated" size="small" type="success">已计算</el-tag>
@@ -174,16 +174,114 @@
         <div class="results-area">
           <!-- 有结果时显示 -->
           <div v-if="hasResults" class="results-content">
+            <div class="results-header-bar">
+              <h2 class="results-title">生态环境指数计算结果</h2>
+              <div class="result-download-actions">
+                <el-button 
+                  type="primary" 
+                  @click="downloadResults"
+                  class="result-download-btn"
+                >
+                  <el-icon><Download /></el-icon>
+                  下载计算结果
+                </el-button>
+              </div>
+            </div>
+
             <div v-if="landuseVisualizationUrl" class="visualization-card">
-              <div class="values-title">土地利用分布与面积比例</div>
-              <img :src="landuseVisualizationUrl" alt="土地利用分布图" class="landuse-visualization" />
+              <div class="visualization-card__header">
+                <div class="values-title">土地利用分布与面积比例</div>
+                <div class="result-image-actions">
+                  <el-button
+                    type="primary"
+                    @click="addCurrentResultToMainMap"
+                    class="result-download-btn image-download-btn"
+                  >
+                    添加到主地图界面
+                  </el-button>
+                  <el-button
+                    v-if="landuseVisualizationUrl"
+                    type="primary"
+                    @click="downloadLandusePng"
+                    class="result-download-btn image-download-btn"
+                  >
+                    <el-icon><Download /></el-icon>
+                    下载结果图片
+                  </el-button>
+                  <el-button
+                    v-if="landuseRasterUrl"
+                    type="primary"
+                    @click="downloadLanduseTif"
+                    class="result-download-btn image-download-btn"
+                  >
+                    <el-icon><Download /></el-icon>
+                    下载结果tif
+                  </el-button>
+                </div>
+              </div>
+              <div class="landuse-result-layout">
+                <div class="landuse-result-legend" aria-label="土地利用分类图例">
+                  <div
+                    v-for="item in landuseLegendItems"
+                    :key="item.id"
+                    class="landuse-result-legend__item"
+                  >
+                    <span class="landuse-result-legend__swatch" :style="{ backgroundColor: item.color }"></span>
+                    <span class="landuse-result-legend__name">{{ item.name }}</span>
+                    <span class="landuse-result-legend__ratio">{{ item.ratioText }}</span>
+                  </div>
+                </div>
+                <div class="landuse-result-map">
+                  <div class="landuse-result-subtitle">土地利用分布图</div>
+                  <img
+                    :src="landusePreviewMapUrl"
+                    alt="土地利用分布图"
+                    class="landuse-visualization"
+                    @error="handleLanduseImageError"
+                  />
+                </div>
+                <div class="landuse-result-pie-wrap">
+                  <div class="landuse-result-subtitle">土地利用面积比例</div>
+                  <svg class="landuse-result-pie" viewBox="-42 -32 284 264" role="img" aria-label="土地利用面积比例">
+                    <path
+                      v-for="segment in landusePieSegments"
+                      :key="segment.id"
+                      class="landuse-result-pie__slice"
+                      :d="segment.path"
+                      :fill="segment.color"
+                    />
+                    <text
+                      v-for="label in landusePieInnerLabels"
+                      :key="label.id"
+                      class="landuse-result-pie__percent"
+                      :x="label.x"
+                      :y="label.y"
+                      text-anchor="middle"
+                      dominant-baseline="middle"
+                    >
+                      {{ label.text }}
+                    </text>
+                    <text
+                      v-for="label in landusePieOuterLabels"
+                      :key="label.id"
+                      class="landuse-result-pie__outer-label"
+                      :x="label.x"
+                      :y="label.y"
+                      :text-anchor="label.anchor"
+                    >
+                      <tspan :x="label.x" dy="-0.35em">{{ label.name }}</tspan>
+                      <tspan :x="label.x" dy="1.2em">({{ label.text }})</tspan>
+                    </text>
+                  </svg>
+                </div>
+              </div>
             </div>
 
             <ResultCompareMap
-              v-if="compareOverlay"
               title="上方土地利用图叠加对比"
               description="这里对比的就是上方那张土地利用分布图，打开遥感影像底图后可直接叠加查看。"
               :compare-overlay="compareOverlay"
+              empty-text="当前土地利用结果暂未生成叠加图，请重新分析后再查看。"
             />
 
             <!-- 指数值展示 -->
@@ -201,7 +299,6 @@
                     {{ getStatusText(key, value) }}
                   </div>
                   <div class="value-unit">{{ getIndexUnit(key) }}</div>
-                  <div class="value-scale">{{ getScaleHint(key) }}</div>
                 </div>
               </div>
             </div>
@@ -254,17 +351,6 @@
               </div>
             </div>
             
-            <!-- 下载按钮 -->
-            <div class="download-section">
-              <el-button 
-                type="success" 
-                @click="downloadResults"
-                class="download-btn"
-              >
-                <el-icon><Download /></el-icon>
-                下载计算结果
-              </el-button>
-            </div>
           </div>
           
           <!-- 无结果时显示占位符 -->
@@ -283,13 +369,18 @@
 
 <script>
 import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Download, Files, FolderOpened, Histogram, Search } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { API_ENDPOINTS, buildApiUrl } from '../config/api.js'
+import { authService } from '../services/api.js'
 import http from '../utils/http.js'
 import ResultCompareMap from '../components/Map/ResultCompareMap.vue'
 import { clearResultHistory, formatHistoryTime, loadResultHistory, removeResultHistory, saveResultHistory } from '../utils/resultHistory.js'
+import { getCurrentUserContext, setCurrentUserContext } from '../utils/userContext.js'
+import { saveMainMapAnalysisLayer } from '../utils/mainMapAnalysisLayers.js'
+import { saveBlobAsFile, saveUrlAsFile } from '../utils/fileSave.js'
 
 export default {
   name: 'EcologicalIndex',
@@ -297,6 +388,7 @@ export default {
     ResultCompareMap
   },
   setup() {
+    const router = useRouter()
     const HISTORY_KEY = 'ecological_index'
     const getRequestErrorMessage = (error, fallback = '服务器错误') => {
       const data = error?.response?.data
@@ -312,6 +404,7 @@ export default {
     const uploadLoading = ref(false)
     const restoredFileName = ref('')
     const landuseVisualizationUrl = ref('')
+    const landuseRasterUrl = ref('')
     const landuseStatistics = ref(null)
     const analysisMeta = ref(null)
     const compareOverlay = ref(null)
@@ -344,6 +437,16 @@ export default {
     // 图表引用
     const radarChart = ref(null)
     const barChart = ref(null)
+    const landuseColorMap = {
+      1: '#ffff00',
+      2: '#228b22',
+      3: '#90ee90',
+      4: '#0000ff',
+      5: '#ff0000',
+      6: '#808080',
+      7: '#00ffff',
+      8: '#32cd32'
+    }
     // 移除 uploadRef，因为我们使用自定义的文件上传逻辑
     
     // 计算属性
@@ -360,10 +463,182 @@ export default {
     const landuseClasses = computed(() => {
       const classes = landuseStatistics.value?.classes || {}
       return Object.entries(classes)
-        .map(([id, item]) => ({ id, ...item }))
+        .map(([id, item]) => ({ id, ...item, name: normalizeLanduseName(item.name) }))
         .filter(item => item.pixels > 0)
         .sort((a, b) => b.area_km2 - a.area_km2)
     })
+
+    const normalizeLanduseName = (name) => {
+      return String(name || '')
+        .replace(/濕/g, '湿')
+        .replace(/園/g, '园')
+        .replace(/建設/g, '建设')
+        .replace(/未利用地未利用地/g, '未利用地')
+        .replace(/湿地未利用地/g, '湿地')
+        .trim()
+    }
+
+    const landuseLegendItems = computed(() => (
+      landuseClasses.value.map(item => ({
+        ...item,
+        color: item.color || landuseColorMap[Number(item.id)] || '#999999',
+        ratioText: `${Number(item.ratio_percent || 0).toFixed(1)}%`
+      }))
+    ))
+
+    const landusePreviewMapUrl = computed(() => (
+      normalizeMediaUrl(compareOverlay.value?.overlay_image_url) || landuseVisualizationUrl.value
+    ))
+
+    const polarToCartesian = (center, radius, angle) => ({
+      x: center + Math.cos(angle) * radius,
+      y: center + Math.sin(angle) * radius
+    })
+
+    const describePieSlice = (start, end, radius = 78, center = 100) => {
+      if (end - start >= 0.9999) {
+        return [
+          `M ${center} ${center - radius}`,
+          `A ${radius} ${radius} 0 1 1 ${center} ${center + radius}`,
+          `A ${radius} ${radius} 0 1 1 ${center} ${center - radius}`,
+          'Z'
+        ].join(' ')
+      }
+      const startAngle = start * Math.PI * 2 - Math.PI / 2
+      const endAngle = end * Math.PI * 2 - Math.PI / 2
+      const startPoint = polarToCartesian(center, radius, startAngle)
+      const endPoint = polarToCartesian(center, radius, endAngle)
+      const largeArc = end - start > 0.5 ? 1 : 0
+      return [
+        `M ${center} ${center}`,
+        `L ${startPoint.x.toFixed(2)} ${startPoint.y.toFixed(2)}`,
+        `A ${radius} ${radius} 0 ${largeArc} 1 ${endPoint.x.toFixed(2)} ${endPoint.y.toFixed(2)}`,
+        'Z'
+      ].join(' ')
+    }
+
+    const landusePieSegments = computed(() => {
+      const items = landuseLegendItems.value
+      const total = items.reduce((sum, item) => sum + Number(item.ratio_percent || 0), 0)
+      if (!items.length || total <= 0) {
+        return []
+      }
+      let cursor = 0
+      return items.map(item => {
+        const value = Math.max(0, Number(item.ratio_percent || 0))
+        const start = cursor
+        const end = cursor + value / total
+        cursor = end
+        return {
+          id: item.id,
+          color: item.color || '#999999',
+          start,
+          end,
+          path: describePieSlice(start, end)
+        }
+      }).filter(segment => segment.end > segment.start)
+    })
+
+    const landusePieInnerLabels = computed(() => {
+      const itemById = new Map(landuseLegendItems.value.map(item => [item.id, item]))
+      return landusePieSegments.value.flatMap(segment => {
+        const item = itemById.get(segment.id)
+        const percent = Number(item?.ratio_percent || 0)
+        if (percent < 3) return []
+
+        const angle = ((segment.start + segment.end) / 2) * Math.PI * 2 - Math.PI / 2
+        const point = polarToCartesian(100, 46, angle)
+        return [{
+          id: `inner-${segment.id}`,
+          text: `${percent.toFixed(1)}%`,
+          x: point.x.toFixed(1),
+          y: point.y.toFixed(1)
+        }]
+      })
+    })
+
+    const landusePieOuterLabels = computed(() => {
+      const itemById = new Map(landuseLegendItems.value.map(item => [item.id, item]))
+      const labels = landusePieSegments.value.flatMap(segment => {
+        const item = itemById.get(segment.id)
+        const percent = Number(item?.ratio_percent || 0)
+        if (!item || percent <= 0) return []
+
+        const angle = ((segment.start + segment.end) / 2) * Math.PI * 2 - Math.PI / 2
+        const point = polarToCartesian(100, 106, angle)
+        const cos = Math.cos(angle)
+        return [{
+          id: `outer-${segment.id}`,
+          name: item.name,
+          text: `${percent.toFixed(1)}%`,
+          x: point.x,
+          y: point.y,
+          anchor: cos > 0.18 ? 'start' : cos < -0.18 ? 'end' : 'middle',
+          side: cos > 0.18 ? 'right' : cos < -0.18 ? 'left' : 'center'
+        }]
+      })
+
+      const spreadSide = (sideLabels, minY, maxY, gap) => {
+        const sorted = [...sideLabels].sort((a, b) => a.y - b.y)
+        sorted.forEach(label => {
+          label.y = Math.max(minY, Math.min(maxY, label.y))
+        })
+        for (let index = 1; index < sorted.length; index += 1) {
+          if (sorted[index].y - sorted[index - 1].y < gap) {
+            sorted[index].y = sorted[index - 1].y + gap
+          }
+        }
+        for (let index = sorted.length - 2; index >= 0; index -= 1) {
+          if (sorted[index + 1].y > maxY) {
+            sorted[index + 1].y = maxY
+          }
+          if (sorted[index + 1].y - sorted[index].y < gap) {
+            sorted[index].y = sorted[index + 1].y - gap
+          }
+        }
+        sorted.forEach(label => {
+          label.y = Math.max(minY, Math.min(maxY, label.y))
+        })
+      }
+
+      spreadSide(labels.filter(label => label.side === 'left'), -8, 210, 20)
+      spreadSide(labels.filter(label => label.side === 'right'), -8, 210, 20)
+      spreadSide(labels.filter(label => label.side === 'center'), -18, 218, 20)
+
+      return labels.map(label => ({
+        ...label,
+        x: label.x.toFixed(1),
+        y: label.y.toFixed(1)
+      }))
+    })
+
+    const normalizeMediaUrl = (url) => {
+      const value = String(url || '').trim()
+      if (!value) return ''
+      if (/^(https?:|data:|blob:)/i.test(value)) return value
+      if (value.startsWith('/')) return value
+      if (value.startsWith('media/')) return `/${value}`
+      if (value.includes('/')) return `/media/${value.replace(/^\/+/, '')}`
+      return ''
+    }
+
+    const normalizeCompareOverlay = (overlay) => {
+      if (!overlay) return null
+      const nextOverlay = {
+        ...overlay,
+        overlay_image_url: normalizeMediaUrl(overlay.overlay_image_url),
+        visualization_file_url: normalizeMediaUrl(overlay.visualization_file_url),
+        result_file_url: normalizeMediaUrl(overlay.result_file_url)
+      }
+      return nextOverlay.overlay_image_url || nextOverlay.result_file_url || nextOverlay.visualization_file_url
+        ? nextOverlay
+        : null
+    }
+
+    const handleLanduseImageError = () => {
+      landuseVisualizationUrl.value = ''
+      ElMessage.warning('历史结果图文件已不存在，请重新分析生成')
+    }
     
     // 方法
     const triggerFileUpload = () => {
@@ -456,6 +731,7 @@ export default {
         delete indexResults[key]
       })
       landuseVisualizationUrl.value = ''
+      landuseRasterUrl.value = ''
       landuseStatistics.value = null
       analysisMeta.value = null
       compareOverlay.value = null
@@ -492,6 +768,7 @@ export default {
       fileName: fileList.value[0]?.name || restoredFileName.value || '生态环境指数结果',
       indexResults: { ...indexResults },
       landuseVisualizationUrl: landuseVisualizationUrl.value,
+      landuseRasterUrl: landuseRasterUrl.value,
       landuseStatistics: landuseStatistics.value,
       analysisMeta: analysisMeta.value,
       compareOverlay: compareOverlay.value
@@ -525,10 +802,11 @@ export default {
         delete indexResults[key]
       })
       Object.assign(indexResults, payload.indexResults || {})
-      landuseVisualizationUrl.value = payload.landuseVisualizationUrl || ''
+      landuseVisualizationUrl.value = normalizeMediaUrl(payload.landuseVisualizationUrl)
+      landuseRasterUrl.value = normalizeMediaUrl(payload.landuseRasterUrl || payload.compareOverlay?.result_file_url)
       landuseStatistics.value = payload.landuseStatistics || null
       analysisMeta.value = payload.analysisMeta || null
-      compareOverlay.value = payload.compareOverlay || null
+      compareOverlay.value = normalizeCompareOverlay(payload.compareOverlay)
       syncCalculatedStates()
 
       nextTick(() => {
@@ -581,9 +859,10 @@ export default {
           // 合并所有指数结果
           Object.assign(indexResults, analysisResponse.summary)
           const visualization = analysisResponse.visualization
-          landuseVisualizationUrl.value = visualization?.visualization_file_url || ''
+          landuseVisualizationUrl.value = normalizeMediaUrl(visualization?.visualization_file_url)
+          landuseRasterUrl.value = normalizeMediaUrl(visualization?.result_file_url || visualization?.compare_overlay?.result_file_url)
           landuseStatistics.value = visualization?.landuse_statistics || null
-          compareOverlay.value = visualization?.compare_overlay || null
+          compareOverlay.value = normalizeCompareOverlay(visualization?.compare_overlay)
           analysisMeta.value = analysisResponse.meta || null
           
           // 更新指数状态
@@ -631,6 +910,9 @@ export default {
     const calculateIndex = async (indexKey) => {
       const index = [...structureIndices, ...stressIndices].find(i => i.key === indexKey)
       if (!index) return
+
+      // Prevent repeated clicks from sending concurrent uploads for one index.
+      if (index.loading || globalLoading.value) return
       
       if (fileList.value.length === 0) {
         ElMessage.warning('请先选择文件')
@@ -665,9 +947,10 @@ export default {
         if (response.summary && response.summary[index.apiKey] !== undefined) {
           indexResults[index.apiKey] = response.summary[index.apiKey]
           if (response.visualization) {
-            landuseVisualizationUrl.value = response.visualization.visualization_file_url || landuseVisualizationUrl.value
+            landuseVisualizationUrl.value = normalizeMediaUrl(response.visualization.visualization_file_url) || landuseVisualizationUrl.value
+            landuseRasterUrl.value = normalizeMediaUrl(response.visualization.result_file_url || response.visualization.compare_overlay?.result_file_url) || landuseRasterUrl.value
             landuseStatistics.value = response.visualization.landuse_statistics || landuseStatistics.value
-            compareOverlay.value = response.visualization.compare_overlay || compareOverlay.value
+            compareOverlay.value = normalizeCompareOverlay(response.visualization.compare_overlay) || compareOverlay.value
           }
           if (response.meta) {
             analysisMeta.value = response.meta
@@ -865,20 +1148,6 @@ export default {
       return unitMap[key] || '无单位'
     }
 
-    const getScaleHint = (key) => {
-      const hintMap = {
-        'fragmentation_index': '理论范围 0-1，越低越完整',
-        'cohesion_index': '百分制，越高越连通',
-        'shannon_diversity': '通常 0-3，越高越多样',
-        'fragility_index': '理论范围 0-1，越低越稳定',
-        'soil_erosion_index': '理论范围 0-1，越低越安全',
-        'unused_land_proportion': '面积占比，单位 %',
-        'cultivated_construction_proportion': '面积占比，单位 %',
-        'land_degradation_index': '理论范围 0-1，越低越安全'
-      }
-      return hintMap[key] || '请结合指标定义解读'
-    }
-
     const formatIndexValue = (key, value) => {
       if (value === null || value === undefined || Number.isNaN(Number(value))) {
         return '--'
@@ -899,7 +1168,7 @@ export default {
       return labelMap[precision] || precision || '未知'
     }
     
-    const downloadResults = () => {
+    const downloadResults = async () => {
       try {
         // 准备下载数据
         const downloadData = {
@@ -917,23 +1186,60 @@ export default {
           type: 'application/json'
         })
         
-        // 创建下载链接
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `ecological_indices_${new Date().getTime()}.json`
-        document.body.appendChild(a)
-        a.click()
-        
-        // 清理
-        document.body.removeChild(a)
-        URL.revokeObjectURL(url)
-        
+        await saveBlobAsFile(blob, buildDownloadName('json'), 'application/json')
         ElMessage.success('计算结果已下载')
       } catch (error) {
+        if (error?.name === 'AbortError') return
         console.error('下载失败:', error)
         ElMessage.error('下载失败')
       }
+    }
+
+    const buildDownloadName = (extension) => {
+      const baseName = fileList.value[0]?.name || restoredFileName.value || 'ecological_indices'
+      const safeName = String(baseName)
+        .replace(/\.[^.]+$/, '')
+        .replace(/[\\/:*?"<>|\s]+/g, '_')
+        .replace(/^_+|_+$/g, '') || 'ecological_indices'
+      return `${safeName}_${new Date().getTime()}.${extension}`
+    }
+
+    const downloadLandusePng = async () => {
+      try {
+        await saveUrlAsFile(landuseVisualizationUrl.value, buildDownloadName('png'), 'image/png')
+        ElMessage.success('结果图片已下载')
+      } catch (error) {
+        if (error?.name === 'AbortError') return
+        console.error('下载结果图片失败:', error)
+        ElMessage.error('下载结果图片失败，请确认结果图片仍然可访问')
+      }
+    }
+
+    const downloadLanduseTif = async () => {
+      try {
+        await saveUrlAsFile(landuseRasterUrl.value, buildDownloadName('tif'), 'image/tiff')
+        ElMessage.success('结果tif已下载')
+      } catch (error) {
+        if (error?.name === 'AbortError') return
+        console.error('下载结果tif失败:', error)
+        ElMessage.error('下载结果tif失败，请确认结果文件仍然可访问')
+      }
+    }
+
+    const addCurrentResultToMainMap = () => {
+      const result = saveMainMapAnalysisLayer({
+        id: `ecological-${currentFileLabel.value}-${compareOverlay.value?.overlay_image_url}`,
+        title: `${fileList.value[0]?.name || restoredFileName.value || '生态环境指数'} - 土地利用结果图`,
+        subtitle: '生态环境指数计算结果',
+        feature: '生态环境',
+        compareOverlay: compareOverlay.value
+      })
+      if (!result.success) {
+        ElMessage.warning(result.message)
+        return
+      }
+      ElMessage.success('已添加到主地图界面，可在图层控制中开关、排序或删除')
+      router.push('/')
     }
     
     const updateCharts = () => {
@@ -941,24 +1247,52 @@ export default {
       
       // 更新雷达图
       if (radarChart.value) {
-        const radar = echarts.init(radarChart.value)
+        const radar = echarts.getInstanceByDom(radarChart.value) || echarts.init(radarChart.value)
         const radarKeys = Object.keys(indexResults).filter(key => getIndexUnit(key) !== '%')
         const radarValues = radarKeys.map(key => Number(indexResults[key]) || 0)
         const maxValue = radarValues.length ? Math.max(...radarValues) : 1
         const chartMax = Math.max(1, Math.ceil(maxValue * 1.2 * 1000) / 1000)
         
         const radarOption = {
-          title: { 
-            text: '生态环境指数雷达图（非百分比项）',
-            textStyle: { fontSize: 16, fontWeight: 'bold' }
+          textStyle: {
+            color: '#c4d4eb',
+            fontFamily: 'HarmonyOS Sans SC, PingFang SC, Microsoft YaHei, sans-serif'
+          },
+          title: {
+            show: false
           },
           radar: {
             indicator: radarKeys.map(key => ({
               name: getIndexName(key),
-              max: chartMax
+              max: chartMax,
+              nameTextStyle: {
+                color: '#c4d4eb',
+                fontSize: 12
+              }
             })),
-            radius: '60%',
-            center: ['50%', '55%']
+            radius: '58%',
+            center: ['50%', '54%'],
+            axisName: {
+              color: '#c4d4eb',
+              fontSize: 12
+            },
+            axisLine: {
+              lineStyle: { color: '#7190ad', width: 1 }
+            },
+            splitLine: {
+              lineStyle: { color: '#7190ad', width: 1 }
+            },
+            splitArea: {
+              areaStyle: {
+                color: ['rgba(86, 122, 153, 0.10)', 'rgba(86, 122, 153, 0.04)']
+              }
+            }
+          },
+          tooltip: {
+            trigger: 'item',
+            backgroundColor: '#132a48',
+            borderColor: '#285a82',
+            textStyle: { color: '#ffffff' }
           },
           series: [{
             type: 'radar',
@@ -979,24 +1313,37 @@ export default {
             }]
           }]
         }
-        radar.setOption(radarOption)
+        radar.setOption(radarOption, true)
       }
       
       // 更新柱状图
       if (barChart.value) {
-        const bar = echarts.init(barChart.value)
+        const bar = echarts.getInstanceByDom(barChart.value) || echarts.init(barChart.value)
         const orderedKeys = Object.keys(indexResults)
         
         // 为不同类型的指数设置不同的颜色
         const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16', '#f97316']
         
         const barOption = {
-          title: { 
-            text: '生态环境指数对比',
-            textStyle: { fontSize: 16, fontWeight: 'bold' }
+          textStyle: {
+            color: '#c4d4eb',
+            fontFamily: 'HarmonyOS Sans SC, PingFang SC, Microsoft YaHei, sans-serif'
+          },
+          title: {
+            show: false
+          },
+          grid: {
+            left: 56,
+            right: 24,
+            top: 26,
+            bottom: 46,
+            containLabel: true
           },
           tooltip: {
             trigger: 'axis',
+            backgroundColor: '#132a48',
+            borderColor: '#285a82',
+            textStyle: { color: '#ffffff' },
             formatter: function(params) {
               const data = params[0]
               const key = orderedKeys[data.dataIndex]
@@ -1007,13 +1354,27 @@ export default {
             type: 'category',
             data: orderedKeys.map(key => getIndexName(key)),
             axisLabel: { 
-              rotate: 45,
-              fontSize: 12
+              interval: 0,
+              rotate: 38,
+              fontSize: 11,
+              color: '#c4d4eb',
+              margin: 12
+            },
+            axisLine: {
+              lineStyle: { color: '#7190ad' }
+            },
+            axisTick: {
+              lineStyle: { color: '#7190ad' }
             }
           },
           yAxis: { 
             type: 'value',
-            name: '混合量纲，请结合卡片单位查看'
+            name: '',
+            nameTextStyle: { color: '#8299bc', fontSize: 11 },
+            axisLabel: { color: '#c4d4eb', fontSize: 11 },
+            axisLine: { lineStyle: { color: '#7190ad' } },
+            axisTick: { lineStyle: { color: '#7190ad' } },
+            splitLine: { lineStyle: { color: 'rgba(113, 144, 173, 0.42)' } }
           },
           series: [{
             type: 'bar',
@@ -1026,14 +1387,22 @@ export default {
             barWidth: '60%'
           }]
         }
-        bar.setOption(barOption)
+        bar.setOption(barOption, true)
       }
     }
     
 
     
     // 生命周期
-    onMounted(() => {
+    onMounted(async () => {
+      if (getCurrentUserContext()) {
+        try {
+          const user = await authService.getProfile({ silentError: true })
+          setCurrentUserContext(user)
+        } catch {
+          setCurrentUserContext(null)
+        }
+      }
       historyItems.value = loadResultHistory(HISTORY_KEY)
       // 初始化图表
       nextTick(() => {
@@ -1056,6 +1425,11 @@ export default {
       compareOverlay,
       landuseVisualizationUrl,
       landuseClasses,
+      landuseLegendItems,
+      landusePreviewMapUrl,
+      landusePieSegments,
+      landusePieInnerLabels,
+      landusePieOuterLabels,
       analysisMeta,
       radarChart,
       barChart,
@@ -1073,10 +1447,14 @@ export default {
       getStatusClass,
       getStatusText,
       getIndexUnit,
-      getScaleHint,
       formatIndexValue,
       getPrecisionLabel,
-      downloadResults
+      downloadResults,
+      addCurrentResultToMainMap,
+      downloadLandusePng,
+      downloadLanduseTif,
+      handleLanduseImageError,
+      landuseRasterUrl
     }
   }
 }
@@ -1130,11 +1508,12 @@ export default {
 }
 
 .panel-header {
-  background: linear-gradient(135deg, #1f78d1 0%, #4a9ae6 100%);
+  background: #132a48;
   color: white;
-  padding: 22px 18px;
+  padding: 18px 18px 16px;
   text-align: left;
-  box-shadow: 0 2px 10px rgba(31, 120, 209, 0.18);
+  box-shadow: none;
+  border-bottom: 1px solid rgba(153, 177, 202, 0.14);
 }
 
 .back-home-link {
@@ -1166,18 +1545,21 @@ export default {
   margin: 0;
   font-size: 17px;
   font-weight: 700;
+  line-height: 1.22;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .panel-header p {
   margin: 10px 0 0 0;
   font-size: 12px;
-  opacity: 0.92;
+  color: rgba(255, 255, 255, 0.82);
   line-height: 1.6;
 }
 
 /* 功能区块 */
 .section {
-  padding: 18px 16px;
+  padding: 14px 16px;
   border-bottom: 1px solid #edf2f7;
 }
 
@@ -1189,14 +1571,15 @@ export default {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 14px;
-  font-weight: 600;
-  color: #2f455c;
+  margin-bottom: 12px;
+  font-weight: 700;
+  color: #223244;
   font-size: 15px;
 }
 
 .section-icon {
   font-size: 16px;
+  color: #2f97b9;
 }
 
 .section-content {
@@ -1220,18 +1603,18 @@ export default {
 }
 
 .left-panel::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: #eef3f8;
   border-radius: 3px;
 }
 
 .left-panel::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #b8c8d6;
   border-radius: 3px;
   transition: background 0.2s ease;
 }
 
 .left-panel::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #8aa4b8;
 }
 
 /* 文件上传区域 */
@@ -1244,9 +1627,9 @@ export default {
 .upload-zone {
   width: 100%;
   background: #f8fbfd;
-  border: 1px dashed #cfddea;
-  border-radius: 10px;
-  padding: 24px 16px;
+  border: 1px dashed #cbd8e4;
+  border-radius: 8px;
+  padding: 18px 14px;
   text-align: center;
   cursor: pointer;
   transition: all 0.2s;
@@ -1257,13 +1640,13 @@ export default {
 }
 
 .upload-zone:hover {
-  border-color: #4a9ae6;
-  background: #f2f8fd;
+  border-color: #8fb3cc;
+  background: #eef6fb;
 }
 
 .upload-icon {
   font-size: 24px;
-  color: #1890ff;
+  color: #2f97b9;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1278,56 +1661,57 @@ export default {
 .upload-text {
   font-size: 14px;
   font-weight: 600;
-  color: #2f455c;
+  color: #223244;
 }
 
 .upload-hint {
   font-size: 12px;
-  color: #667789;
+  color: #66798a;
 }
 
 .upload-types {
   font-size: 11px;
-  color: #8a98a8;
+  color: #8093a3;
 }
 
 .re-upload-btn {
   width: 100%;
   height: 34px;
   background: #f7fafc;
-  border: 1px solid #dbe6f0;
+  border: 1px solid #d9e3ed;
   color: #5f7184;
   font-weight: 600;
-  border-radius: 8px;
+  border-radius: 7px;
   transition: all 0.2s ease;
 }
 
 .re-upload-btn:hover {
-  background: #eef5fb;
-  border-color: #bfd5e8;
-  color: #315f8c;
+  background: #eef6fb;
+  border-color: #8fb3cc;
+  color: #1f6f8f;
   transform: translateY(-1px);
 }
 
 .upload-btn {
   width: 100%;
   height: 48px;
-  background: #3b82f6 !important;
-  border: none !important;
+  background: #1677e8 !important;
+  border: 1px solid #1677e8 !important;
   color: white !important;
   font-weight: 600 !important;
-  border-radius: 8px !important;
+  border-radius: 7px !important;
   transition: all 0.2s ease !important;
   position: relative !important;
   z-index: 100 !important;
   cursor: pointer !important;
   font-size: 16px !important;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3) !important;
+  box-shadow: none !important;
 }
 
 .upload-btn:hover {
-  background: #2563eb;
-  transform: translateY(-1px);
+  background: #2b8cff !important;
+  border-color: #2b8cff !important;
+  transform: none;
 }
 
 .test-btn {
@@ -1697,6 +2081,51 @@ export default {
   background: #94a3b8;
 }
 
+.results-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+  margin-bottom: 24px;
+  border-bottom: 2px solid #e9eff5;
+}
+
+.results-title {
+  margin: 0;
+  color: #222222;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.result-download-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.result-download-btn {
+  --el-button-bg-color: #1677e8;
+  --el-button-border-color: #1677e8;
+  --el-button-hover-bg-color: #2b8cff;
+  --el-button-hover-border-color: #2b8cff;
+  --el-button-active-bg-color: #1265c8;
+  --el-button-active-border-color: #1265c8;
+  min-width: 128px;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.result-download-btn + .result-download-btn {
+  margin-left: 0;
+}
+
 .placeholder {
   height: 100%;
   display: flex;
@@ -1730,13 +2159,157 @@ export default {
   box-shadow: 0 10px 24px rgba(30, 50, 70, 0.06);
 }
 
+.visualization-card {
+  position: relative;
+}
+
+.visualization-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.visualization-card__header .values-title {
+  margin-bottom: 0;
+}
+
+.result-image-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.image-download-btn {
+  min-width: 132px;
+}
+
 .landuse-visualization {
   display: block;
   width: 100%;
-  max-height: 520px;
+  height: auto;
+  max-height: 100%;
   object-fit: contain;
   border-radius: 6px;
   background: #fff;
+}
+
+.landuse-result-layout {
+  height: 460px;
+  display: grid;
+  grid-template-columns: 158px minmax(0, 1.42fr) minmax(306px, 0.86fr);
+  gap: 12px;
+  align-items: center;
+  padding: 16px;
+  border-radius: 6px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.landuse-result-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-self: center;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.landuse-result-legend__item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  color: #1f2937;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.landuse-result-legend__swatch {
+  width: 14px;
+  height: 10px;
+  border: 1px solid rgba(17, 24, 39, 0.18);
+}
+
+.landuse-result-legend__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.landuse-result-legend__ratio {
+  color: #4b5563;
+  font-variant-numeric: tabular-nums;
+}
+
+.landuse-result-map,
+.landuse-result-pie-wrap {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.landuse-result-map {
+  height: 100%;
+}
+
+.landuse-result-map .landuse-visualization {
+  max-width: 100%;
+  max-height: calc(100% - 28px);
+  object-fit: contain;
+}
+
+.landuse-result-subtitle {
+  margin-bottom: 8px;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.landuse-result-pie {
+  width: min(330px, 100%);
+  height: auto;
+  aspect-ratio: 1;
+  display: block;
+  overflow: visible;
+}
+
+.landuse-result-pie__slice {
+  stroke: #ffffff;
+  stroke-width: 0.8;
+  vector-effect: non-scaling-stroke;
+}
+
+.landuse-result-pie__percent {
+  fill: #111827;
+  font-size: 8.5px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  stroke: none;
+  pointer-events: none;
+}
+
+.landuse-result-pie__outer-label {
+  fill: #111827;
+  font-size: 8.5px;
+  font-weight: 600;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 
 .landuse-table {
@@ -1829,15 +2402,8 @@ export default {
   font-weight: 500;
 }
 
-.value-scale {
-  margin-top: 6px;
-  font-size: 11px;
-  line-height: 1.4;
-  color: #8fa1b3;
-}
-
 .analysis-meta-card {
-  background: linear-gradient(180deg, #f7fbff 0%, #ffffff 100%);
+  background: #132a48;
   border: 1px solid #d7e7f6;
   border-radius: 12px;
   padding: 20px 22px;
@@ -1944,33 +2510,6 @@ export default {
   width: 100%;
 }
 
-/* 下载区域 */
-.download-section {
-  text-align: center;
-  padding-top: 20px;
-  border-top: 1px solid #dbe6f0;
-}
-
-/* 移除不再需要的loading-container样式 */
-
-.download-btn {
-  height: 42px;
-  padding: 0 24px;
-  background: #1f78d1;
-  border: none;
-  color: white;
-  font-weight: 600;
-  border-radius: 8px;
-  transition: all 0.2s ease;
-  box-shadow: 0 4px 10px rgba(31, 120, 209, 0.18);
-}
-
-.download-btn:hover {
-  background: #3389dd;
-  transform: translateY(-1px);
-  box-shadow: 0 8px 18px rgba(31, 120, 209, 0.2);
-}
-
 /* 响应式设计 */
 @media (max-width: 1000px) {
   .ecological-analysis {
@@ -1988,6 +2527,24 @@ export default {
     order: 1;
     height: 50vh;
     min-height: 50vh;
+  }
+
+  .results-header-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .result-download-actions {
+    justify-content: flex-start;
+  }
+
+  .visualization-card__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .result-image-actions {
+    justify-content: flex-start;
   }
   
   .values-grid {

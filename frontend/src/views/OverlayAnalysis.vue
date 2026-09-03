@@ -152,7 +152,7 @@
                     <div class="history-item-subtitle">{{ item.subtitle }}</div>
                     <div class="history-item-time">{{ formatHistoryTime(item.timestamp) }}</div>
                   </button>
-                  <button type="button" class="history-delete-btn" @click="deleteHistoryItem(item)">删除</button>
+                  <button type="button" class="history-delete-btn" @click.stop="deleteHistoryItem(item)">删除</button>
                 </div>
               </div>
               <div v-else-if="historyExpanded" class="history-empty">
@@ -207,11 +207,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, onMounted, nextTick, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import { ArrowLeft, FolderOpened, InfoFilled, MapLocation, Upload } from '@element-plus/icons-vue'
 import OverlayMapContainer from '../components/Map/OverlayMapContainer.vue'
 import DataUploadPanel from '../components/Map/DataUploadPanel.vue'
+import { authService } from '../services/api.js'
 import { clearResultHistory, formatHistoryTime, loadResultHistory, removeResultHistory, saveResultHistory } from '../utils/resultHistory.js'
+import { getCurrentUserContext, setCurrentUserContext } from '../utils/userContext.js'
 
 const mapContainerRef = ref(null)
 const historyItems = ref([])
@@ -223,8 +226,8 @@ const activeEcologyLayerKey = ref('ecology_synced')
 const layerVisibility = reactive({
   referenceImagery: false,
   ecology: false,
-  economy: true,
-  engineering: true
+  economy: false,
+  engineering: false
 })
 
 const layerOpacity = reactive({
@@ -234,7 +237,30 @@ const layerOpacity = reactive({
   engineering: 80
 })
 
+const hasActiveOverlayLayer = (visibility = layerVisibility) => Boolean(
+  visibility.referenceImagery ||
+  visibility.ecology ||
+  visibility.economy ||
+  visibility.engineering
+)
+
+const loadOverlayHistoryItems = () => {
+  const items = loadResultHistory(HISTORY_KEY)
+  const validItems = items.filter((item) => hasActiveOverlayLayer(item?.payload?.layerVisibility || {}))
+  if (validItems.length !== items.length) {
+    items
+      .filter((item) => !hasActiveOverlayLayer(item?.payload?.layerVisibility || {}))
+      .forEach((item) => removeResultHistory(HISTORY_KEY, item.id, { ignoreOwner: true }))
+  }
+  return validItems
+}
+
 const persistCurrentView = () => {
+  if (!hasActiveOverlayLayer()) {
+    historyItems.value = loadOverlayHistoryItems()
+    return
+  }
+
   historyItems.value = saveResultHistory(HISTORY_KEY, {
     id: 'latest_overlay_view',
     title: '上次叠加视图',
@@ -248,9 +274,15 @@ const persistCurrentView = () => {
   }, { maxItems: 1 })
 }
 
-const restoreHistoryItem = (item) => {
+const restoreHistoryItem = async (item) => {
   const visibility = item?.payload?.layerVisibility
   if (!visibility) {
+    ElMessage.warning('该叠加视图记录不完整，无法恢复')
+    return
+  }
+  if (!hasActiveOverlayLayer(visibility)) {
+    historyItems.value = removeResultHistory(HISTORY_KEY, item.id, { ignoreOwner: true })
+    ElMessage.warning('该叠加视图未包含已开启图层，已移除无效记录')
     return
   }
   const opacity = item?.payload?.layerOpacity || {}
@@ -270,13 +302,20 @@ const restoreHistoryItem = (item) => {
   })
   activeEcologyLayerKey.value = item?.payload?.activeEcologyLayerKey || 'ecology_synced'
 
-  if (mapContainerRef.value) {
+  await nextTick()
+
+  if (mapContainerRef.value?.applyOverlayViewState) {
+    await mapContainerRef.value.applyOverlayViewState()
+  } else if (mapContainerRef.value?.refreshMap) {
     mapContainerRef.value.refreshMap()
   }
+
+  ElMessage.success('已恢复上次叠加视图')
 }
 
 const deleteHistoryItem = (item) => {
-  historyItems.value = removeResultHistory(HISTORY_KEY, item.id)
+  historyItems.value = removeResultHistory(HISTORY_KEY, item.id, { ignoreOwner: true })
+  ElMessage.success('历史记录已删除')
 }
 
 const clearHistoryItems = () => {
@@ -288,8 +327,9 @@ const clearHistoryItems = () => {
     return
   }
 
-  clearResultHistory(HISTORY_KEY)
+  clearResultHistory(HISTORY_KEY, { ignoreOwner: true })
   historyItems.value = []
+  ElMessage.success('历史记录已清空')
 }
 
 const buildHistorySubtitle = () => {
@@ -303,17 +343,23 @@ const buildHistorySubtitle = () => {
   return labels.length > 0 ? labels.join('、') : '当前未开启任何业务图层'
 }
 
-const handleEcologySourceChange = () => {
-  if (mapContainerRef.value) {
+const handleEcologySourceChange = async () => {
+  await nextTick()
+  if (mapContainerRef.value?.applyOverlayViewState) {
+    await mapContainerRef.value.applyOverlayViewState()
+  } else if (mapContainerRef.value?.refreshMap) {
     mapContainerRef.value.refreshMap()
   }
   persistCurrentView()
 }
 
 // 处理图层切换
-const handleLayerToggle = (layerType) => {
-  if (mapContainerRef.value) {
-    mapContainerRef.value.toggleLayer(layerType)
+const handleLayerToggle = async (layerType) => {
+  await nextTick()
+  if (mapContainerRef.value?.applyOverlayViewState) {
+    await mapContainerRef.value.applyOverlayViewState()
+  } else if (mapContainerRef.value?.toggleLayer) {
+    await mapContainerRef.value.toggleLayer(layerType)
   }
   persistCurrentView()
 }
@@ -334,13 +380,21 @@ const handleRefreshMap = (payload = {}) => {
     layerVisibility[payload.type] = true
   }
   if (mapContainerRef.value) {
-    mapContainerRef.value.refreshMap()
+    mapContainerRef.value.refreshMap(payload)
   }
   persistCurrentView()
 }
 
-onMounted(() => {
-  historyItems.value = loadResultHistory(HISTORY_KEY)
+onMounted(async () => {
+  if (getCurrentUserContext()) {
+    try {
+      const user = await authService.getProfile({ silentError: true })
+      setCurrentUserContext(user)
+    } catch {
+      setCurrentUserContext(null)
+    }
+  }
+  historyItems.value = loadOverlayHistoryItems()
 })
 
 watch(layerOpacity, () => {
@@ -396,7 +450,7 @@ watch(layerOpacity, () => {
 }
 
 .panel-header {
-  background: linear-gradient(135deg, #1f78d1 0%, #4a9ae6 100%);
+  background: #1677ff;
   color: white;
   padding: 22px 18px;
   text-align: left;
@@ -526,17 +580,17 @@ watch(layerOpacity, () => {
   min-width: 170px;
   min-height: 34px;
   padding: 0 10px;
-  border: 1px solid #d5e1ed;
+  border: 1px solid #203b60;
   border-radius: 8px;
-  background: #fff;
-  color: #44515f;
+  background: #132a48;
+  color: #c4d4eb;
   font-size: 12px;
   outline: none;
 }
 
 .layer-source-select:focus {
-  border-color: #1f78d1;
-  box-shadow: 0 0 0 3px rgba(31, 120, 209, 0.12);
+  border-color: #1677ff;
+  box-shadow: none;
 }
 
 .layer-info {
@@ -544,7 +598,7 @@ watch(layerOpacity, () => {
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: #44515f;
+  color: #c4d4eb;
   flex: 1;
   min-width: 0;
 }

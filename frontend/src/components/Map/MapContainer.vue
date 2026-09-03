@@ -96,16 +96,29 @@
               >
                 <label class="checkbox-label">
                   <input type="checkbox" v-model="item.layer.visible" @change="setManagedLayerVisible(item.layer)" />
-                  <span>{{ item.layer.name }}</span>
+                  <span class="managed-layer-text">
+                    <strong>{{ item.layer.name }}</strong>
+                    <small v-if="item.layer.subtitle">{{ item.layer.subtitle }}</small>
+                  </span>
                 </label>
                 <div class="layer-actions">
-                  <button class="mini-btn" @click="moveLayer(index, -1)" :disabled="index === 0" title="上移">
+                  <button type="button" class="mini-btn" @mousedown.stop @dragstart.stop.prevent @click.stop="moveLayer(index, -1)" :disabled="index === 0" title="上移">
                     <ArrowUp />
                   </button>
-                  <button class="mini-btn" @click="moveLayer(index, 1)" :disabled="index === layerControlItems.length - 1" title="下移">
+                  <button type="button" class="mini-btn" @mousedown.stop @dragstart.stop.prevent @click.stop="moveLayer(index, 1)" :disabled="index === layerControlItems.length - 1" title="下移">
                     <ArrowDown />
                   </button>
-                  <button v-if="item.layer.temporary" class="mini-btn danger" @click="removeManagedLayer(item.layer)" title="移除">
+                  <button
+                    v-if="item.layer.temporary"
+                    type="button"
+                    draggable="false"
+                    class="mini-btn danger"
+                    @pointerdown.stop.prevent
+                    @mousedown.stop.prevent
+                    @dragstart.stop.prevent
+                    @click.stop.prevent="removeManagedLayer(item.layer)"
+                    title="移除"
+                  >
                     <Close />
                   </button>
                 </div>
@@ -120,6 +133,15 @@
       <Compass class="north-icon" :style="{ transform: `rotate(${rotation}rad)` }" />
       <small>N</small>
     </button>
+
+    <div class="scale-ratio" aria-label="地图比例尺">
+      <div class="scale-ratio-text">1：{{ scaleRatio }}</div>
+      <div class="scale-ratio-bar" aria-hidden="true">
+        <span class="scale-ratio-tick start"></span>
+        <span class="scale-ratio-tick middle"></span>
+        <span class="scale-ratio-tick end"></span>
+      </div>
+    </div>
 
     <div class="coordinate-display">
       <div>经度: {{ coordinates.lng }}</div>
@@ -187,13 +209,15 @@ import {
 import 'ol/ol.css'
 import Map from 'ol/Map'
 import View from 'ol/View'
-import { defaults as defaultControls, ScaleLine } from 'ol/control'
+import { defaults as defaultControls } from 'ol/control'
 import { defaults as defaultInteractions, Draw, Modify, Select, Snap } from 'ol/interaction'
 import { createBox } from 'ol/interaction/Draw'
 import { click } from 'ol/events/condition'
 import { fromLonLat, toLonLat, transformExtent } from 'ol/proj'
 import VectorLayer from 'ol/layer/Vector'
+import ImageLayer from 'ol/layer/Image'
 import VectorSource from 'ol/source/Vector'
+import ImageStatic from 'ol/source/ImageStatic'
 import GeoJSON from 'ol/format/GeoJSON'
 import KML from 'ol/format/KML'
 import { bbox as bboxStrategy } from 'ol/loadingstrategy'
@@ -202,7 +226,6 @@ import { Circle as CircleGeom, LineString, Point, Polygon } from 'ol/geom'
 import { fromCircle } from 'ol/geom/Polygon'
 import { getArea as getGeodesicArea, getLength as getGeodesicLength } from 'ol/sphere'
 import Feature from 'ol/Feature'
-import shp from 'shpjs'
 import { MapUtils } from '../../utils/mapUtils'
 import {
   fetchPreferredHighResImageryRecord,
@@ -212,6 +235,8 @@ import {
 } from '../../utils/highResImagery.js'
 import { API_CONFIG } from '../../config/api.js'
 import { spatialService } from '../../services/api.js'
+import { removeMainMapAnalysisLayer } from '../../utils/mainMapAnalysisLayers.js'
+import { prepareFileSave } from '../../utils/fileSave.js'
 
 const REAL_LAYER_DEFINITIONS = [
   {
@@ -237,13 +262,13 @@ const REAL_LAYER_DEFINITIONS = [
   }
 ]
 
-const parseShapefileZip = (arrayBuffer) => shp(arrayBuffer)
 const geoserverProxyUrl = `${API_CONFIG.BASE_URL}/${API_CONFIG.VERSION}/environment/geoserver/ows/`
 
 const mapEl = ref(null)
 const currentMapType = ref('tdt_vec')
 const activeTool = ref('select')
 const rotation = ref(0)
+const scaleRatio = ref('-')
 const baseMapLoading = ref(true)
 const coordinates = reactive({ lng: '-', lat: '-' })
 const viewState = reactive({ zoom: 8, rotation: 0 })
@@ -363,9 +388,7 @@ function initMap() {
       center: fromLonLat(defaultCenter),
       zoom: defaultZoom
     }),
-    controls: defaultControls({ zoom: false, rotate: false, attribution: false }).extend([
-      new ScaleLine({ units: 'metric', bar: true, text: true, minWidth: 120 })
-    ]),
+    controls: defaultControls({ zoom: false, rotate: false, attribution: false }),
     interactions: defaultInteractions({ altShiftDragRotate: true, pinchRotate: true })
   })
   requestAnimationFrame(() => {
@@ -581,6 +604,7 @@ function bindMapEvents() {
 
   const view = map.getView()
   view.on('change:resolution', updateViewState)
+  view.on('change:center', updateViewState)
   view.on('change:rotation', updateViewState)
   updateViewState()
 }
@@ -632,9 +656,13 @@ async function loadRealBusinessLayers() {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`)
       }
-      const geojson = definition.url.toLowerCase().endsWith('.zip')
-        ? await parseShapefileZip(await response.arrayBuffer())
-        : await response.json()
+      let geojson
+      if (definition.url.toLowerCase().endsWith('.zip')) {
+        const blob = await response.blob()
+        geojson = await parseShapefileZipOnServer(new File([blob], `${definition.id}.zip`, { type: 'application/zip' }))
+      } else {
+        geojson = await response.json()
+      }
       const source = createVectorSourceFromGeoJson(geojson)
       if (source.getFeatures().length === 0) {
         throw new Error('未解析到有效要素')
@@ -659,6 +687,15 @@ async function loadRealBusinessLayers() {
     }
   }
   syncLayerZIndexes()
+}
+
+async function parseShapefileZipOnServer(file) {
+  const response = await spatialService.parseLocalVectorLayer(file)
+  const geojson = response?.geojson || response
+  if (!geojson || geojson.type !== 'FeatureCollection') {
+    throw new Error(response?.error || 'Shapefile ZIP 解析结果无效')
+  }
+  return geojson
 }
 
 function createVectorSourceFromGeoJson(geojson) {
@@ -715,10 +752,15 @@ function parseWfsEndpoint(wfsUrl) {
 
 function addBusinessServiceLayer(serviceLayer, visible = false) {
   if (!serviceLayer?.id) return false
-  const existing = managedLayers.find(item => item.id === serviceLayer.id)
+  const serviceLayerId = String(serviceLayer.id)
+  const existing = managedLayers.find(item => String(item.id) === serviceLayerId)
   if (existing) {
     existing.visible = visible
     existing.serviceLayer = serviceLayer
+    tagBusinessServiceLayer(existing.layer, serviceLayer)
+    if (serviceLayer.layer_type === 'vector' && typeof existing.layer.setStyle === 'function') {
+      existing.layer.setStyle(getBusinessServiceStyle(serviceLayer))
+    }
     existing.layer.setVisible(visible)
     if (visible) fitServiceLayer(existing)
     return true
@@ -736,7 +778,9 @@ function addBusinessServiceLayer(serviceLayer, visible = false) {
     layer = MapUtils.loadWFS(wfsUrl, typeName, {
       visible,
       strategy: bboxStrategy,
-      style: getBusinessStyle('eco')
+      style: getBusinessServiceStyle(serviceLayer),
+      dataProjection: 'EPSG:3857',
+      featureProjection: 'EPSG:3857'
     })
   } else if (serviceLayer.wms_url) {
     const { baseUrl, layers } = parseWmsEndpoint(serviceLayer.wms_url)
@@ -748,9 +792,10 @@ function addBusinessServiceLayer(serviceLayer, visible = false) {
   }
 
   if (!layer) return false
+  tagBusinessServiceLayer(layer, serviceLayer)
   map.addLayer(layer)
   managedLayers.push({
-    id: serviceLayer.id,
+    id: serviceLayerId,
     name: serviceLayer.name,
     group: '业务图层',
     visible,
@@ -787,6 +832,142 @@ function fitServiceLayer(item) {
   fitLayer(item.layer)
 }
 
+function resolveOverlayExtent(compareOverlay) {
+  const bounds3857 = compareOverlay?.bounds_3857
+  if (Array.isArray(bounds3857) && bounds3857.length === 4) {
+    const extent = bounds3857.map(Number)
+    if (extent.every(value => Number.isFinite(value))) return extent
+  }
+
+  const rawBounds = compareOverlay?.bounds
+  const rawCrs = compareOverlay?.crs || 'EPSG:4326'
+  if (!Array.isArray(rawBounds) || rawBounds.length !== 4) return null
+
+  const extent = rawBounds.map(Number)
+  if (extent.some(value => !Number.isFinite(value))) return null
+
+  try {
+    return rawCrs === 'EPSG:3857' ? extent : transformExtent(extent, rawCrs, 'EPSG:3857')
+  } catch (error) {
+    console.warn('分析结果图层范围转换失败，按 EPSG:4326 处理:', error)
+    return transformExtent(extent, 'EPSG:4326', 'EPSG:3857')
+  }
+}
+
+function addResultOverlayLayer(compareOverlay, options = {}) {
+  if (!map || !compareOverlay?.overlay_image_url) {
+    ElMessage.warning('当前结果缺少可叠加的 PNG 图层')
+    return false
+  }
+
+  const extent = resolveOverlayExtent(compareOverlay)
+  if (!extent) {
+    ElMessage.warning('当前结果缺少空间范围，无法叠加到主地图')
+    return false
+  }
+
+  const id = String(options.id || `result-overlay-${Date.now()}`)
+  removeAnalysisLayerFromMap({ id, overlayUrl: compareOverlay.overlay_image_url, removePersisted: false })
+
+  const layer = new ImageLayer({
+    source: new ImageStatic({
+      url: compareOverlay.overlay_image_url,
+      imageExtent: extent,
+      projection: 'EPSG:3857'
+    }),
+    visible: true,
+    opacity: Number(options.opacity || 0.68)
+  })
+  layer.set('analysisResultLayer', true)
+  layer.set('analysisResultLayerId', id)
+  layer.set('analysisOverlayUrl', compareOverlay.overlay_image_url)
+  layer.analysisResultLayer = true
+  layer.analysisResultLayerId = id
+  layer.analysisOverlayUrl = compareOverlay.overlay_image_url
+
+  map.addLayer(layer)
+  managedLayers.push({
+    id,
+    name: options.name || '分析结果图层',
+    subtitle: options.subtitle || compareOverlay.source_filename || '',
+    group: '临时图层',
+    visible: true,
+    temporary: true,
+    analysisResultLayer: true,
+    layer,
+    compareOverlay
+  })
+  syncLayerZIndexes()
+  map.getView().fit(extent, { padding: [70, 70, 70, 70], duration: 350, maxZoom: 14 })
+  return true
+}
+
+function tagBusinessServiceLayer(layer, serviceLayer) {
+  if (!layer || !serviceLayer?.id) return
+  layer.set('businessServiceLayer', true)
+  layer.set('businessServiceLayerId', String(serviceLayer.id))
+  layer.set('businessServiceLayerName', serviceLayer.geoserver_layer_name || '')
+}
+
+function getOpenLayersLayerId(layer) {
+  return String(layer?.analysisResultLayerId || layer?.get?.('analysisResultLayerId') || layer?.id || '')
+}
+
+function getOpenLayersLayerOverlayUrl(layer) {
+  const taggedUrl = layer?.analysisOverlayUrl || layer?.get?.('analysisOverlayUrl')
+  if (taggedUrl) return taggedUrl
+  return layer?.getSource?.()?.getUrl?.() || ''
+}
+
+function isOpenLayersAnalysisLayer(layer) {
+  return Boolean(layer?.analysisResultLayer || layer?.get?.('analysisResultLayer'))
+}
+
+function removeAnalysisLayerFromMap({ id = '', overlayUrl = '', removePersisted = true } = {}) {
+  const layerId = String(id || '')
+  const imageUrl = String(overlayUrl || '')
+
+  const matchesManagedAnalysisLayer = (managedLayer) => {
+    if (!managedLayer?.analysisResultLayer) return false
+    const managedLayerId = String(managedLayer.id || getOpenLayersLayerId(managedLayer.layer) || '')
+    const managedLayerUrl = managedLayer.compareOverlay?.overlay_image_url || getOpenLayersLayerOverlayUrl(managedLayer.layer)
+    return (
+      (layerId && managedLayerId === layerId)
+      || (imageUrl && managedLayerUrl === imageUrl)
+      || (!layerId && !imageUrl)
+    )
+  }
+  const matchedManagedLayers = managedLayers.filter(matchesManagedAnalysisLayer)
+  const matchedLayerObjects = new Set(matchedManagedLayers.map(item => item.layer).filter(Boolean))
+
+  const matchesMapLayer = (layer) => {
+    const mapLayerId = getOpenLayersLayerId(layer)
+    const mapLayerUrl = getOpenLayersLayerOverlayUrl(layer)
+    return (
+      matchedLayerObjects.has(layer)
+      || (layerId && mapLayerId === layerId)
+      || (imageUrl && mapLayerUrl === imageUrl)
+      || (!layerId && !imageUrl && isOpenLayersAnalysisLayer(layer))
+    )
+  }
+
+  if (map) {
+    map.getLayers().getArray().slice().forEach((layer) => {
+      if (matchesMapLayer(layer)) {
+        map.removeLayer(layer)
+      }
+    })
+    map.renderSync()
+  }
+
+  const remainingItems = managedLayers.filter((managedLayer) => !matchesManagedAnalysisLayer(managedLayer))
+  managedLayers.splice(0, managedLayers.length, ...remainingItems)
+
+  if (removePersisted && (layerId || imageUrl)) {
+    removeMainMapAnalysisLayer(layerId, { overlayImageUrl: imageUrl })
+  }
+}
+
 function getBusinessStyle(type) {
   const styles = {
     water: new Style({ stroke: new Stroke({ color: '#1677ff', width: 4 }) }),
@@ -800,7 +981,12 @@ function getBusinessStyle(type) {
     }),
     eco: new Style({
       stroke: new Stroke({ color: '#1f8f4d', width: 2 }),
-      fill: new Fill({ color: 'rgba(64, 169, 91, 0.18)' })
+      fill: new Fill({ color: 'rgba(64, 169, 91, 0.18)' }),
+      image: new CircleStyle({
+        radius: 7,
+        fill: new Fill({ color: '#22c55e' }),
+        stroke: new Stroke({ color: '#ffffff', width: 2 })
+      })
     }),
     station: new Style({
       image: new CircleStyle({
@@ -811,6 +997,33 @@ function getBusinessStyle(type) {
     })
   }
   return styles[type] || styles.station
+}
+
+function colorWithOpacity(color, opacity) {
+  const match = String(color || '').match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i)
+  if (!match) return color || 'rgba(64, 169, 91, 0.18)'
+  const alpha = Math.min(1, Math.max(0, Number(opacity)))
+  return `rgba(${parseInt(match[1], 16)}, ${parseInt(match[2], 16)}, ${parseInt(match[3], 16)}, ${alpha})`
+}
+
+function getBusinessServiceStyle(serviceLayer) {
+  const config = serviceLayer?.style_config || {}
+  const fillColor = config.fill_color || '#1f8f4d'
+  const strokeColor = config.stroke_color || '#1f8f4d'
+  const parsedStrokeWidth = Number(config.stroke_width ?? 2)
+  const strokeWidth = Number.isFinite(parsedStrokeWidth) ? parsedStrokeWidth : 2
+  const parsedFillOpacity = Number(config.fill_opacity ?? 0.18)
+  const fillOpacity = Number.isFinite(parsedFillOpacity) ? parsedFillOpacity : 0.18
+
+  return new Style({
+    stroke: new Stroke({ color: strokeColor, width: strokeWidth }),
+    fill: new Fill({ color: colorWithOpacity(fillColor, fillOpacity) }),
+    image: new CircleStyle({
+      radius: 7,
+      fill: new Fill({ color: fillColor }),
+      stroke: new Stroke({ color: strokeColor, width: strokeWidth })
+    })
+  })
 }
 
 function getDrawingStyle(feature, selected = false) {
@@ -953,6 +1166,13 @@ function deleteSelectedFeatures() {
 
 function handleKeydown(event) {
   if (textEditor.visible) return
+  const target = event.target
+  if (
+    target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+    || target?.isContentEditable
+  ) return
   if (event.key !== 'Delete' && event.key !== 'Backspace') return
   if (!selectInteraction?.getFeatures().getLength()) return
   event.preventDefault()
@@ -1101,8 +1321,35 @@ function updateViewState() {
   rotation.value = view.getRotation()
   const zoom = Number(view.getZoom())
   const viewRotation = Number(view.getRotation())
+  scaleRatio.value = formatScaleRatio(view)
   viewState.zoom = Number.isFinite(zoom) ? zoom.toFixed(1) : '-'
   viewState.rotation = Number.isFinite(viewRotation) ? Math.round((viewRotation * 180) / Math.PI) : 0
+}
+
+function formatScaleRatio(view) {
+  const resolution = Number(view.getResolution())
+  if (!Number.isFinite(resolution) || resolution <= 0) return '-'
+  const center = view.getCenter()
+  const [, lat = 0] = center ? toLonLat(center) : []
+  const latitudeFactor = Math.cos((Number(lat) || 0) * Math.PI / 180)
+  const metersPerPixel = resolution * Math.max(latitudeFactor, 0.01)
+  const denominator = metersPerPixel * 96 / 0.0254
+  if (!Number.isFinite(denominator) || denominator <= 0) return '-'
+  let rounded
+  if (denominator >= 10000000) {
+    rounded = Math.round(denominator / 1000000) * 1000000
+  } else if (denominator >= 1000000) {
+    rounded = Math.round(denominator / 100000) * 100000
+  } else if (denominator >= 100000) {
+    rounded = Math.round(denominator / 10000) * 10000
+  } else if (denominator >= 10000) {
+    rounded = Math.round(denominator / 1000) * 1000
+  } else if (denominator >= 1000) {
+    rounded = Math.round(denominator / 100) * 100
+  } else {
+    rounded = Math.round(denominator)
+  }
+  return rounded.toLocaleString('zh-CN')
 }
 
 function locateCoordinate(input) {
@@ -1128,8 +1375,7 @@ async function loadLocalFile(file) {
   const lowerName = file.name.toLowerCase()
   if (lowerName.endsWith('.zip')) {
     try {
-      const arrayBuffer = await file.arrayBuffer()
-      const geojson = await parseShapefileZip(arrayBuffer)
+      const geojson = await parseShapefileZipOnServer(file)
       const source = createVectorSourceFromGeoJson(geojson)
       if (source.getFeatures().length === 0) {
         ElMessage.warning('Shapefile ZIP 中未解析到有效要素')
@@ -1146,7 +1392,8 @@ async function loadLocalFile(file) {
       return true
     } catch (error) {
       console.error(error)
-      ElMessage.error('Shapefile ZIP 加载失败，请确认包含 .shp/.shx/.dbf/.prj 文件')
+      const message = error?.response?.data?.error || error?.response?.data?.details || error?.message
+      ElMessage.error(message || 'Shapefile ZIP 加载失败，请确认包含 .shp/.shx/.dbf/.prj 文件')
       return false
     }
   }
@@ -1186,7 +1433,8 @@ async function loadLocalFile(file) {
 }
 
 function fitLayer(layer) {
-  const extent = layer.getSource()?.getExtent()
+  const source = layer.getSource?.()
+  const extent = source?.getExtent?.() || source?.getImageExtent?.()
   if (!extent || extent.some(value => !Number.isFinite(value))) return
   map.getView().fit(extent, { padding: [60, 60, 60, 60], duration: 350, maxZoom: 14 })
 }
@@ -1195,7 +1443,24 @@ async function exportMap(format = 'png') {
   selectionToolbar.visible = false
   commitTextEditor()
   await nextTick()
-  map.once('rendercomplete', () => {
+  const normalizedFormat = format === 'jpg' || format === 'jpeg' ? 'jpg' : 'png'
+  const mimeType = normalizedFormat === 'jpg' ? 'image/jpeg' : 'image/png'
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\..+$/, '')
+    .replace('T', '_')
+  let saveTarget
+  try {
+    saveTarget = await prepareFileSave(`藉河流域地图_${timestamp}.${normalizedFormat}`, mimeType)
+  } catch (error) {
+    if (error?.name === 'AbortError') return
+    console.error('准备导出地图失败:', error)
+    ElMessage.error('导出地图失败，请稍后重试')
+    return
+  }
+
+  map.once('rendercomplete', async () => {
     const mapCanvas = document.createElement('canvas')
     const size = map.getSize()
     mapCanvas.width = size[0]
@@ -1217,10 +1482,23 @@ async function exportMap(format = 'png') {
       mapContext.drawImage(canvas, 0, 0)
     })
     mapContext.setTransform(1, 0, 0, 1, 0, 0)
-    const link = document.createElement('a')
-    link.download = `watershed-map.${format}`
-    link.href = mapCanvas.toDataURL(`image/${format === 'jpg' ? 'jpeg' : 'png'}`)
-    link.click()
+    try {
+      const blob = await new Promise((resolve, reject) => {
+        mapCanvas.toBlob((result) => {
+          if (!result) {
+            reject(new Error('地图图片生成失败'))
+            return
+          }
+          resolve(result)
+        }, mimeType)
+      })
+      await saveTarget.write(blob)
+      ElMessage.success('地图图片已导出')
+    } catch (error) {
+      if (error?.name === 'AbortError') return
+      console.error('导出地图失败:', error)
+      ElMessage.error('导出地图失败，请稍后重试')
+    }
   })
   map.renderSync()
 }
@@ -1233,7 +1511,8 @@ function setManagedLayerVisible(item) {
 }
 
 function setLayerVisibleById(layerId, visible) {
-  const item = managedLayers.find(layer => layer.id === layerId)
+  const normalizedLayerId = String(layerId)
+  const item = managedLayers.find(layer => String(layer.id) === normalizedLayerId)
   if (!item) return false
   item.visible = visible
   item.layer.setVisible(visible)
@@ -1274,20 +1553,172 @@ function dropLayer(index) {
   syncLayerZIndexes()
 }
 
-function removeManagedLayer(item) {
-  map.removeLayer(item.layer)
-  const index = managedLayers.findIndex(layer => layer.id === item.id)
-  if (index > -1) managedLayers.splice(index, 1)
-  if (item.referenceImagery) {
+function removeManagedLayer(item, options = {}) {
+  const candidateLayer = item?.layer || item
+  const candidateId = String(
+    item?.id
+    || item?.layer?.id
+    || candidateLayer?.analysisResultLayerId
+    || candidateLayer?.get?.('analysisResultLayerId')
+    || ''
+  )
+  const candidateOverlayUrl = candidateLayer?.analysisOverlayUrl || candidateLayer?.get?.('analysisOverlayUrl') || item?.compareOverlay?.overlay_image_url || ''
+
+  if (item?.analysisResultLayer || candidateLayer?.analysisResultLayer || candidateLayer?.get?.('analysisResultLayer')) {
+    removeAnalysisLayerFromMap({
+      id: candidateId || item?.id || '',
+      overlayUrl: candidateOverlayUrl,
+      removePersisted: options.removePersisted !== false
+    })
+    return
+  }
+
+  const matchesManagedItem = (managedLayer) => {
+    if (!managedLayer) return false
+    const layerObject = managedLayer.layer
+    const layerId = String(managedLayer.id || layerObject?.analysisResultLayerId || layerObject?.get?.('analysisResultLayerId') || layerObject?.id || '')
+    const overlayUrl = layerObject?.analysisOverlayUrl || layerObject?.get?.('analysisOverlayUrl') || managedLayer.compareOverlay?.overlay_image_url || ''
+    return (
+      managedLayer === item
+      || layerObject === item
+      || layerObject === candidateLayer
+      || (candidateId && layerId === candidateId)
+      || (candidateOverlayUrl && overlayUrl === candidateOverlayUrl)
+    )
+  }
+
+  const matchedItems = managedLayers.filter(matchesManagedItem)
+  matchedItems.forEach((managedItem) => {
+    if (map && managedItem.layer) {
+      map.removeLayer(managedItem.layer)
+    }
+  })
+  if (map) {
+    map.renderSync()
+  }
+
+  const remainingItems = managedLayers.filter(layerItem => !matchesManagedItem(layerItem))
+  managedLayers.splice(0, managedLayers.length, ...remainingItems)
+
+  const persistedId = matchedItems.find(Boolean)?.id || candidateId
+  if (persistedId && options.removePersisted !== false) {
+    removeMainMapAnalysisLayer(persistedId)
+  }
+
+  const hasReferenceImagery = matchedItems.some(layerItem => layerItem.referenceImagery)
+  if (hasReferenceImagery) {
     loadedHighResImageryId.value = ''
   }
 }
 
+function removeAnalysisResultLayers(options = {}) {
+  if (options.removePersisted === false) {
+    removeAnalysisLayerFromMap({ removePersisted: false })
+    return
+  }
+  const layers = managedLayers.filter(item => item.analysisResultLayer)
+  layers.forEach(item => removeManagedLayer(item, options))
+}
+
 function removeLayerById(layerId) {
-  const item = managedLayers.find(layer => layer.id === layerId)
-  if (!item) return false
+  const normalizedLayerId = String(layerId)
+  const item = managedLayers.find(layer => String(layer.id) === normalizedLayerId)
+  if (!item) {
+    removeAnalysisLayerFromMap({ id: normalizedLayerId })
+    return false
+  }
   removeManagedLayer(item)
   return true
+}
+
+function removeBusinessServiceLayer(serviceLayer) {
+  const serviceLayerId = String(serviceLayer?.id || serviceLayer || '')
+  const geoserverLayerName = String(serviceLayer?.geoserver_layer_name || '')
+  const qualifiedLayerName = serviceLayer?.geoserver_workspace && geoserverLayerName
+    ? `${serviceLayer.geoserver_workspace}:${geoserverLayerName}`
+    : geoserverLayerName
+
+  const matchesMapLayer = (layer) => {
+    if (!layer || layer === drawLayer) return false
+    if (serviceLayerId && String(layer.get?.('businessServiceLayerId') || '') === serviceLayerId) return true
+    if (geoserverLayerName && String(layer.get?.('businessServiceLayerName') || '') === geoserverLayerName) return true
+
+    const source = layer.getSource?.()
+    const sourceLayers = String(source?.getParams?.()?.LAYERS || '')
+    if (qualifiedLayerName && sourceLayers.split(',').includes(qualifiedLayerName)) return true
+
+    if (!geoserverLayerName || typeof source?.getFeatures !== 'function') return false
+    return source.getFeatures().some((feature) => {
+      const featureId = String(feature.getId?.() || '')
+      return featureId === geoserverLayerName || featureId.startsWith(`${geoserverLayerName}.`)
+    })
+  }
+
+  const managedMatches = (item) => (
+    (serviceLayerId && String(item?.id || '') === serviceLayerId)
+    || (geoserverLayerName && String(item?.serviceLayer?.geoserver_layer_name || '') === geoserverLayerName)
+    || matchesMapLayer(item?.layer)
+  )
+
+  const layersToRemove = new Set(managedLayers.filter(managedMatches).map(item => item.layer).filter(Boolean))
+  map?.getLayers().getArray().slice().forEach((layer) => {
+    if (matchesMapLayer(layer)) layersToRemove.add(layer)
+  })
+  layersToRemove.forEach(layer => map?.removeLayer(layer))
+
+  const remainingItems = managedLayers.filter(item => !managedMatches(item))
+  managedLayers.splice(0, managedLayers.length, ...remainingItems)
+  map?.renderSync()
+  return layersToRemove.size > 0
+}
+
+function pruneBusinessServiceLayers(serviceLayers = []) {
+  const validIds = new Set(serviceLayers.map(layer => String(layer?.id || '')).filter(Boolean))
+  const validNames = new Set(serviceLayers.map(layer => String(layer?.geoserver_layer_name || '')).filter(Boolean))
+
+  const getGeneratedLayerName = (layer) => {
+    const taggedName = String(layer?.get?.('businessServiceLayerName') || '')
+    if (taggedName) return taggedName
+
+    const source = layer?.getSource?.()
+    const sourceLayers = String(source?.getParams?.()?.LAYERS || '').split(',').filter(Boolean)
+    const wmsLayerName = sourceLayers[0]?.split(':').pop() || ''
+    if (/_[0-9a-f]{8}$/i.test(wmsLayerName)) return wmsLayerName
+
+    if (typeof source?.getFeatures !== 'function') return ''
+    const featureId = String(source.getFeatures().find(feature => feature.getId?.())?.getId?.() || '')
+    const featureLayerName = featureId.includes('.') ? featureId.slice(0, featureId.lastIndexOf('.')) : ''
+    return /_[0-9a-f]{8}$/i.test(featureLayerName) ? featureLayerName : ''
+  }
+
+  const isOrphaned = (layer) => {
+    if (!layer || layer === drawLayer) return false
+    const taggedId = String(layer.get?.('businessServiceLayerId') || '')
+    if (taggedId) return !validIds.has(taggedId)
+    const generatedLayerName = getGeneratedLayerName(layer)
+    return Boolean(generatedLayerName && !validNames.has(generatedLayerName))
+  }
+
+  const layersToRemove = new Set()
+  managedLayers.forEach((item) => {
+    const itemId = String(item?.id || '')
+    if (item?.serviceLayer && itemId && !validIds.has(itemId)) layersToRemove.add(item.layer)
+    if (isOrphaned(item?.layer)) layersToRemove.add(item.layer)
+  })
+  map?.getLayers().getArray().slice().forEach((layer) => {
+    if (isOrphaned(layer)) layersToRemove.add(layer)
+  })
+  layersToRemove.forEach(layer => map?.removeLayer(layer))
+
+  const remainingItems = managedLayers.filter(item => !layersToRemove.has(item.layer))
+  managedLayers.splice(0, managedLayers.length, ...remainingItems)
+  map?.renderSync()
+  return layersToRemove.size
+}
+
+function refreshAnalysisResultLayersFromStore() {
+  removeAnalysisResultLayers({ removePersisted: false })
+  window.dispatchEvent(new CustomEvent('tianshui-main-map-analysis-layers-updated'))
 }
 
 function syncLayerZIndexes() {
@@ -1300,10 +1731,15 @@ function syncLayerZIndexes() {
 defineExpose({
   locateCoordinate,
   loadLocalFile,
+  addResultOverlayLayer,
   addBusinessServiceLayer,
   exportMap,
   resetView,
+  removeAnalysisResultLayers,
+  removeBusinessServiceLayer,
   removeLayerById,
+  pruneBusinessServiceLayers,
+  refreshAnalysisResultLayersFromStore,
   setLayerVisibleById
 })
 </script>
@@ -1313,7 +1749,12 @@ defineExpose({
   width: 100%;
   height: 100%;
   position: relative;
-  background: #e5edf5;
+  background: #ffffff;
+}
+
+#map-container,
+#map-container * {
+  box-sizing: border-box;
 }
 
 #map {
@@ -1323,17 +1764,18 @@ defineExpose({
 
 .left-toolbar {
   position: absolute;
-  left: 16px;
+  left: 14px;
   top: 50%;
   transform: translateY(-50%);
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid #dbe3ec;
+  width: 46px;
+  background: #102d4d;
+  border: 1px solid #285276;
   border-radius: 8px;
-  box-shadow: 0 10px 24px rgba(30, 50, 70, 0.14);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.22);
   padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   z-index: 1000;
 }
 
@@ -1341,21 +1783,22 @@ defineExpose({
 .mini-btn,
 .north-arrow {
   appearance: none;
-  border: 1px solid #d9d9d9;
-  background: white;
-  color: #26384a;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #dcebfa;
 }
 
 .tool-btn {
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 17px;
+  font-size: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
 }
 
 .tool-btn svg,
@@ -1367,15 +1810,16 @@ defineExpose({
 
 .tool-btn:hover,
 .tool-btn.active {
-  background: #5f7f9d;
+  background: #1677ff;
   color: white;
-  border-color: #5f7f9d;
+  border-color: #1677ff;
+  transform: none;
 }
 
 .right-dock {
   position: absolute;
-  top: 24px;
-  right: 22px;
+  top: 14px;
+  right: 14px;
   z-index: 1002;
   display: flex;
   flex-direction: column;
@@ -1389,23 +1833,24 @@ defineExpose({
 }
 
 .map-layer-panel {
-  width: 304px;
-  max-height: calc(100vh - 92px);
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid #dbe3ec;
-  border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(30, 50, 70, 0.15);
+  width: 312px;
+  max-height: min(640px, calc(100vh - 76px));
+  background: #102d4d;
+  border: 1px solid #285276;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   overflow: hidden;
 }
 
 .panel-head {
-  height: 48px;
-  padding: 0 12px 0 14px;
+  min-height: 46px;
+  padding: 8px 10px 8px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #eef2f7;
-  background: linear-gradient(180deg, #ffffff 0%, #f6f9fc 100%);
+  gap: 10px;
+  border-bottom: 1px solid rgba(153, 177, 202, 0.14);
+  background: #102d4d;
 }
 
 .panel-heading,
@@ -1416,38 +1861,50 @@ defineExpose({
 }
 
 .panel-heading {
-  color: #111827;
-  font-size: 14px;
+  min-width: 0;
+  color: #ffffff;
+  font-size: 13px;
   font-weight: 700;
+  line-height: 1.35;
+  word-break: break-word;
 }
 
 .panel-head-icon,
 .section-title-icon {
-  width: 16px;
-  height: 16px;
-  color: #4f78a0;
-}
-
-.panel-toggle,
-.section-title {
-  border: none;
-  background: transparent;
-  color: #4b5563;
+  width: 15px;
+  height: 15px;
+  color: #26b6e8;
 }
 
 .panel-toggle {
-  width: 28px;
-  height: 28px;
+  border: 1px solid #24527d;
+  background: #0d2745;
+  color: #ffffff;
+}
+
+.panel-toggle {
+  width: 26px;
+  height: 26px;
   border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
+  flex-shrink: 0;
 }
 
-.panel-toggle:hover,
+.panel-toggle:hover {
+  background: #183b61;
+}
+
+.section-title {
+  border: none;
+  background: transparent;
+  color: #c4d4eb;
+}
+
 .section-title:hover {
-  background: #eef4f9;
+  background: #183b61;
 }
 
 .panel-toggle svg,
@@ -1464,50 +1921,58 @@ defineExpose({
 
 .panel-body {
   padding: 12px;
-  max-height: calc(100vh - 140px);
+  max-height: min(584px, calc(100vh - 124px));
   overflow: auto;
 }
 
 .control-section + .control-section {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #e5edf4;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #1c4265;
 }
 
 .section-title {
   width: 100%;
-  height: 32px;
+  min-height: 32px;
   border-radius: 6px;
-  padding: 0 6px;
+  padding: 6px 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 13px;
+  gap: 10px;
+  font-size: 12px;
   font-weight: 700;
-  color: #26384a;
+  color: #c4d4eb;
   cursor: pointer;
 }
 
 .basemap-grid {
   margin-top: 8px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .basemap-option {
   position: relative;
-  min-height: 34px;
+  min-height: 32px;
   padding: 7px 8px;
-  border: 1px solid #dbe3ec;
+  border: 1px solid #1d4264;
   border-radius: 7px;
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #33465a;
+  color: #c4d4eb;
   font-size: 12px;
-  background: #fff;
+  line-height: 1.35;
+  background: #0b2340;
   cursor: pointer;
+  min-width: 0;
+}
+
+.basemap-option span {
+  min-width: 0;
+  word-break: break-word;
 }
 
 .basemap-option input {
@@ -1517,14 +1982,14 @@ defineExpose({
 }
 
 .basemap-option:hover {
-  border-color: #9bb6cf;
-  background: #f7fafc;
+  border-color: #285a82;
+  background: #183b61;
 }
 
 .basemap-option:has(input:checked) {
-  border-color: #5f7f9d;
-  background: #eef5fb;
-  color: #315f8c;
+  border-color: #1677ff;
+  background: #1677ff;
+  color: #ffffff;
 }
 
 .basemap-action-btn {
@@ -1544,53 +2009,78 @@ defineExpose({
 
 .checkbox-label {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 7px;
-  color: #33465a;
-  font-size: 13px;
+  color: #c4d4eb;
+  font-size: 12px;
   cursor: pointer;
   min-width: 0;
 }
 
-.checkbox-label span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.checkbox-label input {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.managed-layer-text {
+  min-width: 0;
+}
+
+.managed-layer-text strong,
+.managed-layer-text small {
+  display: block;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.managed-layer-text strong {
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.managed-layer-text small {
+  margin-top: 2px;
+  color: #8299bc;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .layer-order-list {
   margin-top: 8px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
 }
 
 .layer-empty {
-  padding: 14px 10px;
-  border: 1px dashed #cbd8e4;
+  padding: 12px 10px;
+  border: 1px dashed #1d4264;
   border-radius: 7px;
-  color: #789;
-  background: #f8fbfd;
+  color: #8299bc;
+  background: #0b2340;
   font-size: 12px;
   text-align: center;
 }
 
 .managed-layer {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
-  min-height: 38px;
-  padding: 6px 7px;
-  border: 1px solid #dbe3ec;
+  min-height: 36px;
+  padding: 8px;
+  border: 1px solid #1d4264;
   border-radius: 7px;
-  background: #fff;
+  background: #0b2340;
   cursor: grab;
 }
 
 .managed-layer:hover {
-  border-color: #b7c8d8;
-  background: #f8fbfd;
+  border-color: #285a82;
+  background: #183b61;
 }
 
 .managed-layer .checkbox-label {
@@ -1601,6 +2091,9 @@ defineExpose({
   display: flex;
   gap: 4px;
   flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+  padding-top: 1px;
 }
 
 .mini-btn {
@@ -1623,23 +2116,23 @@ defineExpose({
 .zoom-controls {
   align-self: flex-end;
   display: flex;
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid #dbe3ec;
-  border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(30, 50, 70, 0.15);
+  background: #102d4d;
+  border: 1px solid #285276;
+  border-radius: 8px;
+  box-shadow: 0 14px 28px rgba(30, 50, 70, 0.14);
   overflow: hidden;
 }
 
 .zoom-btn {
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   border: none;
   border-right: 1px solid #edf2f6;
   border-bottom: none;
-  background: white;
-  color: #26384a;
+  background: #102d4d;
+  color: #ffffff;
   cursor: pointer;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -1652,41 +2145,52 @@ defineExpose({
 }
 
 .zoom-btn:hover {
-  background: #eef4f9;
+  background: #183b61;
 }
 
 .north-arrow {
   position: absolute;
-  top: 18px;
-  left: 18px;
-  width: 44px;
+  top: 16px;
+  left: 16px;
+  width: 42px;
   height: 50px;
+  border: 1px solid #285276;
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.14);
+  background: #102d4d;
+  color: #dcebfa;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
   z-index: 1002;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 2px;
   padding: 0;
+  cursor: pointer;
+}
+
+.north-arrow:hover {
+  background: #183b61;
+  border-color: #285a82;
 }
 
 .north-icon {
-  width: 19px;
-  height: 19px;
-  color: #d4380d;
+  width: 21px;
+  height: 21px;
+  color: #26b6e8;
   line-height: 1;
 }
 
 .north-arrow small {
   font-size: 11px;
-  color: #1f2937;
+  line-height: 1;
+  color: #ffffff;
 }
 
 .coordinate-display {
   position: absolute;
-  bottom: 18px;
-  right: 18px;
+  bottom: 42px;
+  right: 16px;
   background: rgba(255, 255, 255, 0.94);
   padding: 8px 12px;
   border: 1px solid #e5e7eb;
@@ -1695,13 +2199,14 @@ defineExpose({
   color: #1f2937;
   line-height: 1.5;
   z-index: 1000;
+  box-shadow: 0 8px 18px rgba(30, 50, 70, 0.10);
 }
 
 .drawing-hint {
   position: absolute;
-  left: 78px;
-  top: 18px;
-  background: rgba(38, 56, 74, 0.88);
+  left: 70px;
+  top: 16px;
+  background: rgba(13, 27, 42, 0.88);
   color: #fff;
   padding: 7px 12px;
   border-radius: 6px;
@@ -1712,7 +2217,7 @@ defineExpose({
 .map-loading {
   position: absolute;
   left: 50%;
-  top: 18px;
+  top: 16px;
   transform: translateX(-50%);
   z-index: 1001;
   display: flex;
@@ -1732,7 +2237,7 @@ defineExpose({
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #1677ff;
+  background: #2f97b9;
   animation: pulse 0.9s ease-in-out infinite;
 }
 
@@ -1798,8 +2303,8 @@ defineExpose({
 
 .attribution {
   position: absolute;
-  bottom: 5px;
-  right: 8px;
+  bottom: 6px;
+  right: 16px;
   font-size: 11px;
   color: #666;
   background: rgba(255, 255, 255, 0.82);
@@ -1808,9 +2313,62 @@ defineExpose({
   z-index: 1000;
 }
 
-:deep(.ol-scale-bar) {
+.scale-ratio {
+  position: absolute;
   left: 18px;
   bottom: 18px;
+  width: 142px;
+  min-height: 44px;
+  padding: 7px 11px 9px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #285276;
+  border-radius: 6px;
+  background: #102d4d;
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.scale-ratio-text {
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  letter-spacing: 0;
+}
+
+.scale-ratio-bar {
+  position: relative;
+  height: 10px;
+  border-bottom: 2px solid #dcebfa;
+}
+
+.scale-ratio-tick {
+  position: absolute;
+  bottom: -2px;
+  width: 2px;
+  height: 10px;
+  background: #dcebfa;
+}
+
+.scale-ratio-tick.start {
+  left: 0;
+}
+
+.scale-ratio-tick.middle {
+  left: 50%;
+  transform: translateX(-50%);
+  height: 7px;
+}
+
+.scale-ratio-tick.end {
+  right: 0;
 }
 
 @media (max-width: 1100px) {
@@ -1820,11 +2378,147 @@ defineExpose({
   }
 
   .map-layer-panel {
-    width: 276px;
+    width: 292px;
   }
 
   .basemap-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* 深蓝 GIS 控件色，地图数据本身保持真实颜色。 */
+#map-container {
+  background: #ffffff;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.left-toolbar {
+  background: #102d4d;
+  border-color: #285276;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+}
+
+.tool-btn,
+.mini-btn,
+.north-arrow,
+.zoom-btn {
+  background: transparent;
+  border-color: transparent;
+  color: #dcebfa;
+}
+
+.north-arrow {
+  background: #102d4d;
+  border: 1px solid #285276;
+  color: #dcebfa;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.north-arrow:hover {
+  background: #183b61;
+  border-color: #285a82;
+  color: #ffffff;
+}
+
+.tool-btn:hover,
+.tool-btn.active,
+.zoom-btn:hover,
+.mini-btn:hover {
+  background: #183b61;
+  border-color: #1677ff;
+  color: #ffffff;
+  transform: none;
+}
+
+.right-dock .zoom-controls,
+.map-layer-panel,
+.coordinate-display,
+.map-loading,
+.feature-toolbar {
+  background: #102d4d;
+  border-color: #285276;
+  color: #c4d4eb;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.panel-head {
+  min-height: 46px;
+  background: #102d4d;
+  border-bottom-color: #1c4265;
+}
+
+.panel-heading {
+  color: #ffffff;
+}
+
+.panel-head-icon,
+.section-title-icon,
+.north-icon {
+  color: #26b6e8;
+}
+
+.panel-toggle {
+  background: #0d2745;
+  border-color: #24527d;
+  color: #ffffff;
+}
+
+.panel-toggle:hover,
+.section-title:hover {
+  background: #183b61;
+  color: #ffffff;
+}
+
+.panel-body,
+.section-title {
+  color: #c4d4eb;
+}
+
+.control-section + .control-section {
+  border-top-color: #1c4265;
+}
+
+.basemap-option,
+.managed-layer,
+.layer-empty {
+  background: #0b2340;
+  border-color: #1d4264;
+  color: #c4d4eb;
+}
+
+.basemap-option:hover,
+.managed-layer:hover {
+  background: #183b61;
+  border-color: #285a82;
+}
+
+.basemap-option:has(input:checked) {
+  background: #1677ff;
+  border-color: #1677ff;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.managed-layer-text strong,
+.north-arrow small {
+  color: #ffffff;
+}
+
+.managed-layer-text small,
+.layer-empty,
+.coordinate-display,
+.attribution {
+  color: #8299bc;
+}
+
+.drawing-hint {
+  background: #102d4d;
+  border: 1px solid #285276;
+  color: #ffffff;
+}
+
+.loading-dot {
+  background: #1677ff;
 }
 </style>

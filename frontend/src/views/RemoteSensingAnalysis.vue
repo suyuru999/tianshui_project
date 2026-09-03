@@ -82,12 +82,13 @@ import AnalysisResult from '../components/RemoteSensing/AnalysisResult.vue';
 import LoadingSpinner from '../components/Common/LoadingSpinner.vue';
 import ProgressBar from '../components/Common/ProgressBar.vue';
 import ErrorBoundary from '../components/Common/ErrorBoundary.vue';
-import { remoteSensingService } from '../services/api.js';
+import { authService, remoteSensingService } from '../services/api.js';
 import { useLoadingStore } from '../store/loading.js';
 import { useMessageStore } from '../store/message.js';
+import { buildOwnerSnapshot, canViewHistoryItem, getCurrentUserContext, setCurrentUserContext } from '../utils/userContext.js';
 
 const OVERLAY_RSEI_REFRESH_KEY = 'overlay_rsei_refresh_signal';
-const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const CACHE_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 const INDEX_OPTIONS = [
   { key: 'rsei', label: '遥感生态指数 (RSEI)' },
   { key: 'ndvi', label: '绿化指数 (NDVI)' },
@@ -155,18 +156,35 @@ const disabledIndices = computed(() => {
 });
 
 const cachedIndices = computed(() => {
+  const currentResultKeys = ensureResultDataIndices(resultData.value)
+    .map((item) => normalizeCacheIndexType(item?.index_type))
+    .filter((key) => allIndexKeys.includes(key));
   if (!currentImageId.value) {
-    return [];
+    return currentResultKeys;
   }
 
   const now = Date.now();
-  return allIndexKeys.filter((key) => {
-    const cached = analysisResultsCache.value.get(`${currentImageId.value}_${key}`);
-    return cached && now - cached.timestamp <= 24 * 60 * 60 * 1000;
+  const currentUser = getCurrentUserContext();
+  const cacheKeys = allIndexKeys.filter((key) => {
+    return Array.from(analysisResultsCache.value.values()).some((cached) => (
+      String(cached?.imageId || '') === String(currentImageId.value || '')
+      && normalizeCacheIndexType(cached?.indexType) === key
+      && canViewHistoryItem(cached, currentUser, {
+        adminCanViewAll: true,
+        adminCanViewOwnerless: true
+      })
+      && now - Number(cached.timestamp || 0) <= CACHE_MAX_AGE_MS
+    ));
   });
+  return [...new Set([...currentResultKeys, ...cacheKeys])];
 });
 const historyItems = computed(() => {
+  const currentUser = getCurrentUserContext();
   return Array.from(analysisResultsCache.value.values())
+    .filter((item) => canViewHistoryItem(item, currentUser, {
+      adminCanViewAll: true,
+      adminCanViewOwnerless: true
+    }))
     .filter((item) => item?.resultData)
     .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
 });
@@ -176,6 +194,14 @@ const globalLoading = computed(() => loadingStore.globalLoading);
 
 // 组件挂载时检查用户登录状态
 onMounted(async () => {
+  if (getCurrentUserContext()) {
+    try {
+      const user = await authService.getProfile({ silentError: true });
+      setCurrentUserContext(user);
+    } catch {
+      setCurrentUserContext(null);
+    }
+  }
   loadCacheFromStorage();
   await validateHistoryCacheInBackground();
 });
@@ -237,7 +263,8 @@ function saveAnalysisResult(resultData, imageId, indexType) {
   }
   
   const normalizedIndexType = normalizeCacheIndexType(indexType);
-  const key = `${imageId}_${normalizedIndexType}`;
+  const owner = buildOwnerSnapshot();
+  const key = buildCacheMapKey(imageId, normalizedIndexType, owner);
   
   // 检查是否已经有相同的缓存
   const existingCache = analysisResultsCache.value.get(key);
@@ -249,20 +276,22 @@ function saveAnalysisResult(resultData, imageId, indexType) {
     resultData: {
       ...resultData,
       indices: ensureResultDataIndices(resultData),
-      remote_sensing_image_id: resolveBackendImageId(resultData, imageId)
+      remote_sensing_image_id: resolveBackendImageId(resultData, imageId),
+      owner
     },
     imageId,
     indexType: normalizedIndexType,
     backendImageId: resolveBackendImageId(resultData, imageId),
     timestamp: Date.now(),
-    fileName: fileName.value
+    fileName: fileName.value,
+    owner
   };
   analysisResultsCache.value.set(key, cacheData);
   
   // 同时保存到localStorage作为持久化存储，使用单独的键以避免覆盖
   try {
     // 为每个指数类型使用单独的localStorage键
-    const storageKey = `analysis_result_${imageId}_${normalizedIndexType}`;
+    const storageKey = buildCacheStorageKey(imageId, normalizedIndexType, owner);
     
     // 直接保存当前指数的结果，不影响其他指数的缓存
     localStorage.setItem(storageKey, JSON.stringify(cacheData));
@@ -292,12 +321,26 @@ function normalizeCacheIndexType(indexType) {
   return String(indexType || '').toLowerCase();
 }
 
-function buildCacheMapKey(imageId, indexType) {
-  return `${imageId}_${normalizeCacheIndexType(indexType)}`;
+function getOwnerCacheNamespace(owner = buildOwnerSnapshot()) {
+  if (owner?.id !== undefined && owner?.id !== null && owner.id !== '') {
+    return `user_${owner.id}`;
+  }
+  if (owner?.username) {
+    return `user_${String(owner.username).replace(/[^\w-]/g, '_')}`;
+  }
+  return 'anonymous';
 }
 
-function buildCacheStorageKey(imageId, indexType) {
-  return `analysis_result_${imageId}_${normalizeCacheIndexType(indexType)}`;
+function getCacheItemOwner(cacheItem) {
+  return cacheItem?.owner || cacheItem?.resultData?.owner || null;
+}
+
+function buildCacheMapKey(imageId, indexType, owner = buildOwnerSnapshot()) {
+  return `${getOwnerCacheNamespace(owner)}_${imageId}_${normalizeCacheIndexType(indexType)}`;
+}
+
+function buildCacheStorageKey(imageId, indexType, owner = buildOwnerSnapshot()) {
+  return `analysis_result_${getOwnerCacheNamespace(owner)}_${imageId}_${normalizeCacheIndexType(indexType)}`;
 }
 
 function isUuidLike(value) {
@@ -337,6 +380,13 @@ function ensureResultDataIndices(resultData) {
   return [];
 }
 
+function resultContainsIndex(resultData, indexType) {
+  const normalizedIndex = normalizeCacheIndexType(indexType);
+  return ensureResultDataIndices(resultData).some((item) => (
+    normalizeCacheIndexType(item?.index_type) === normalizedIndex
+  ));
+}
+
 function buildNormalizedCacheItem(cacheItem, normalizedIndex = normalizeCacheIndexType(cacheItem?.indexType)) {
   if (!cacheItem?.resultData) {
     return cacheItem;
@@ -374,17 +424,54 @@ function removeStorageCacheKey(storageKey) {
   }
 }
 
+function removeOwnedStorageCaches(imageId, indexType) {
+  const currentUser = getCurrentUserContext();
+  const normalizedIndex = normalizeCacheIndexType(indexType);
+  try {
+    const cacheIndex = JSON.parse(localStorage.getItem('analysis_cache_index') || '[]');
+    if (!Array.isArray(cacheIndex)) {
+      return;
+    }
+
+    const nextCacheIndex = [];
+    cacheIndex.forEach((storageKey) => {
+      const cacheItem = JSON.parse(localStorage.getItem(storageKey) || 'null');
+      const sameResult = String(cacheItem?.imageId || '') === String(imageId || '')
+        && normalizeCacheIndexType(cacheItem?.indexType) === normalizedIndex;
+      if (sameResult && canViewHistoryItem(cacheItem, currentUser, {
+        adminCanViewAll: true,
+        adminCanViewOwnerless: true
+      })) {
+        localStorage.removeItem(storageKey);
+      } else {
+        nextCacheIndex.push(storageKey);
+      }
+    });
+    localStorage.setItem('analysis_cache_index', JSON.stringify(nextCacheIndex));
+  } catch (error) {
+    console.warn('移除当前账号缓存失败:', error);
+  }
+}
+
 function removeCachedEntry(imageId, indexType, options = {}) {
   if (!imageId || !indexType) {
     return;
   }
 
   const { notify = false, message = '历史记录已删除' } = options;
-  const cacheMapKey = buildCacheMapKey(imageId, indexType);
-  const storageKey = buildCacheStorageKey(imageId, indexType);
-
-  analysisResultsCache.value.delete(cacheMapKey);
-  removeStorageCacheKey(storageKey);
+  const currentUser = getCurrentUserContext();
+  const normalizedIndex = normalizeCacheIndexType(indexType);
+  Array.from(analysisResultsCache.value.entries()).forEach(([cacheMapKey, cacheItem]) => {
+    const sameResult = String(cacheItem?.imageId || '') === String(imageId || '')
+      && normalizeCacheIndexType(cacheItem?.indexType) === normalizedIndex;
+    if (sameResult && canViewHistoryItem(cacheItem, currentUser, {
+      adminCanViewAll: true,
+      adminCanViewOwnerless: true
+    })) {
+      analysisResultsCache.value.delete(cacheMapKey);
+    }
+  });
+  removeOwnedStorageCaches(imageId, indexType);
 
   if (notify) {
     messageStore.success(message);
@@ -419,8 +506,8 @@ async function validateCachedResult(cacheItem, options = {}) {
     (item) => normalizeCacheIndexType(item?.index_type) === normalizedIndex
   );
   if (localMatchedIndex) {
-    const cacheMapKey = buildCacheMapKey(cacheItem.imageId, normalizedIndex);
-    const storageKey = buildCacheStorageKey(cacheItem.imageId, normalizedIndex);
+    const cacheMapKey = buildCacheMapKey(cacheItem.imageId, normalizedIndex, getCacheItemOwner(normalizedCacheItem));
+    const storageKey = buildCacheStorageKey(cacheItem.imageId, normalizedIndex, getCacheItemOwner(normalizedCacheItem));
     analysisResultsCache.value.set(cacheMapKey, normalizedCacheItem);
     localStorage.setItem(storageKey, JSON.stringify(normalizedCacheItem));
     return normalizedCacheItem;
@@ -460,8 +547,8 @@ async function validateCachedResult(cacheItem, options = {}) {
       resultData: refreshedResultData
     };
 
-    const cacheMapKey = buildCacheMapKey(cacheItem.imageId, normalizedIndex);
-    const storageKey = buildCacheStorageKey(cacheItem.imageId, normalizedIndex);
+    const cacheMapKey = buildCacheMapKey(cacheItem.imageId, normalizedIndex, getCacheItemOwner(refreshedCacheItem));
+    const storageKey = buildCacheStorageKey(cacheItem.imageId, normalizedIndex, getCacheItemOwner(refreshedCacheItem));
     analysisResultsCache.value.set(cacheMapKey, refreshedCacheItem);
     localStorage.setItem(storageKey, JSON.stringify(refreshedCacheItem));
     return refreshedCacheItem;
@@ -500,9 +587,9 @@ function getCachedResult(imageId, indexType) {
   // 尝试多种键格式
   const possibleKeys = [
     key,
-    `${imageId}_${indexType}`, // 原始大小写
-    `${imageId}_${indexType.toUpperCase()}`, // 大写
-    `${imageId}_${indexType.toLowerCase()}` // 小写
+    `${imageId}_${indexType}`, // 兼容旧版内存键
+    `${imageId}_${indexType.toUpperCase()}`,
+    `${imageId}_${indexType.toLowerCase()}`
   ];
   
   let cached = null;
@@ -516,10 +603,26 @@ function getCachedResult(imageId, indexType) {
       break;
     }
   }
+  if (!cached) {
+    const currentUser = getCurrentUserContext();
+    const normalizedIndex = normalizeCacheIndexType(indexType);
+    const matchedEntry = Array.from(analysisResultsCache.value.entries()).find(([, cacheItem]) => (
+      String(cacheItem?.imageId || '') === String(imageId || '')
+      && normalizeCacheIndexType(cacheItem?.indexType) === normalizedIndex
+      && canViewHistoryItem(cacheItem, currentUser, {
+        adminCanViewAll: true,
+        adminCanViewOwnerless: true
+      })
+    ));
+    if (matchedEntry) {
+      [matchedKey, cached] = matchedEntry;
+    }
+  }
   
   // 2. 如果内存中没有，尝试从localStorage直接获取
   if (!cached) {
     const storageKeys = [
+      buildCacheStorageKey(imageId, indexType),
       `analysis_result_${imageId}_${indexType.toLowerCase()}`,
       `analysis_result_${imageId}_${indexType}`,
       `analysis_result_${imageId}_${indexType.toUpperCase()}`
@@ -531,9 +634,12 @@ function getCachedResult(imageId, indexType) {
         if (storedData) {
           const parsedData = buildNormalizedCacheItem(JSON.parse(storedData));
           
-          if (parsedData && parsedData.resultData) {
+          if (parsedData && parsedData.resultData && canViewHistoryItem(parsedData, getCurrentUserContext(), {
+            adminCanViewAll: true,
+            adminCanViewOwnerless: true
+          })) {
             // 将结果保存到内存缓存中
-            const memKey = `${imageId}_${indexType.toLowerCase()}`;
+            const memKey = buildCacheMapKey(imageId, indexType, getCacheItemOwner(parsedData));
             analysisResultsCache.value.set(memKey, parsedData);
             
             cached = parsedData;
@@ -549,7 +655,13 @@ function getCachedResult(imageId, indexType) {
   
   // 3. 处理找到的缓存
   if (cached) {
-    // 检查缓存是否过期（24小时）
+    if (!canViewHistoryItem(cached, getCurrentUserContext(), {
+      adminCanViewAll: true,
+      adminCanViewOwnerless: true
+    })) {
+      return null;
+    }
+    // 检查缓存是否过期（临时数据保留90天）
     const isExpired = Date.now() - cached.timestamp > CACHE_MAX_AGE_MS;
     if (isExpired) {
       removeCachedEntry(imageId, indexType);
@@ -563,29 +675,35 @@ function getCachedResult(imageId, indexType) {
 }
 
 function clearCache() {
+  const currentUser = getCurrentUserContext();
   // 清空内存中的缓存
   analysisResultsCache.value.clear();
   
-  // 清空localStorage中的所有缓存
+  // 只清空当前账号的缓存，保留其他账号结果
   try {
-    // 先获取索引
     const cacheIndex = localStorage.getItem('analysis_cache_index');
+    const nextCacheKeys = [];
     if (cacheIndex) {
       const cacheKeys = JSON.parse(cacheIndex);
-      
-      // 删除每个缓存项
       if (Array.isArray(cacheKeys)) {
         cacheKeys.forEach(key => {
-          localStorage.removeItem(key);
+          const cacheItem = JSON.parse(localStorage.getItem(key) || 'null');
+          if (canViewHistoryItem(cacheItem, currentUser, {
+            adminCanViewAll: true,
+            adminCanViewOwnerless: true
+          })) {
+            localStorage.removeItem(key);
+          } else {
+            nextCacheKeys.push(key);
+          }
         });
       }
     }
-    
-    // 删除索引
-    localStorage.removeItem('analysis_cache_index');
-    
+    localStorage.setItem('analysis_cache_index', JSON.stringify(nextCacheKeys));
     // 兼容旧版缓存
-    localStorage.removeItem('analysis_results_cache');
+    if (!currentUser) {
+      localStorage.removeItem('analysis_results_cache');
+    }
   } catch (error) {
     console.warn('清除缓存失败:', error);
   }
@@ -679,6 +797,12 @@ function loadCacheFromStorage() {
         }
 
         const normalizedCacheData = buildNormalizedCacheItem(cacheData);
+        if (!canViewHistoryItem(normalizedCacheData, getCurrentUserContext(), {
+          adminCanViewAll: true,
+          adminCanViewOwnerless: true
+        })) {
+          continue;
+        }
 
         const isExpired = Date.now() - Number(normalizedCacheData.timestamp || 0) > CACHE_MAX_AGE_MS;
         if (isExpired) {
@@ -688,7 +812,11 @@ function loadCacheFromStorage() {
         }
         
         // 构建内存缓存键
-        const memKey = buildCacheMapKey(normalizedCacheData.imageId, normalizedCacheData.indexType);
+        const memKey = buildCacheMapKey(
+          normalizedCacheData.imageId,
+          normalizedCacheData.indexType,
+          getCacheItemOwner(normalizedCacheData)
+        );
         
         // 保存到内存缓存
         analysisResultsCache.value.set(memKey, normalizedCacheData);
@@ -710,13 +838,23 @@ function loadCacheFromStorage() {
               const [key, value] = item;
               if (key && value && value.imageId && value.indexType && value.resultData) {
                 const normalizedValue = buildNormalizedCacheItem(value);
+                if (!canViewHistoryItem(normalizedValue, getCurrentUserContext(), {
+                  adminCanViewAll: true,
+                  adminCanViewOwnerless: true
+                })) {
+                  return;
+                }
                 // 检查是否已经加载过这个缓存
                 const memKey = `${normalizedValue.imageId}_${normalizedValue.indexType.toLowerCase()}`;
                 if (!analysisResultsCache.value.has(memKey)) {
                   analysisResultsCache.value.set(memKey, normalizedValue);
                   
                   // 同时迁移到新格式
-                  const newStorageKey = `analysis_result_${normalizedValue.imageId}_${normalizedValue.indexType.toLowerCase()}`;
+                  const newStorageKey = buildCacheStorageKey(
+                    normalizedValue.imageId,
+                    normalizedValue.indexType,
+                    getCacheItemOwner(normalizedValue)
+                  );
                   localStorage.setItem(newStorageKey, JSON.stringify(normalizedValue));
                   
                   // 更新索引
@@ -977,9 +1115,28 @@ async function cancelAnalysis() {
 // 处理指数类型变化
 function handleIndexChange(index) {
   selectedIndex.value = index;
+  const normalizedIndex = normalizeCacheIndexType(index);
+  if (resultContainsIndex(resultData.value, normalizedIndex)) {
+    status.value = 'done';
+    messageStore.success(`已切换到${INDEX_LABEL_MAP[normalizedIndex] || normalizedIndex}结果`);
+    return;
+  }
+
+  if (currentImageId.value) {
+    const cached = getCachedResult(currentImageId.value, normalizedIndex);
+    if (cached?.resultData) {
+      resultData.value = cached.resultData;
+      syncRemoteCapabilities(cached.resultData);
+      status.value = 'done';
+      analysisProgress.value = 100;
+      messageStore.success(`已恢复${INDEX_LABEL_MAP[normalizedIndex] || normalizedIndex}缓存结果`);
+      return;
+    }
+  }
+
   resultData.value = null;
   status.value = 'waiting';
-  messageStore.info(`已切换到${index}指数，请点击"开始分析"进行计算`);
+  messageStore.info(`已切换到${INDEX_LABEL_MAP[normalizedIndex] || normalizedIndex}，请点击"开始分析"进行计算`);
 }
 
 // 组件卸载时清理
@@ -992,21 +1149,23 @@ onUnmounted(() => {
 <style scoped>
 .remote-sensing-analysis {
   display: flex;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
-  background: #f4f7fa;
+  background: #06182d;
 }
 
 /* 左侧控制面板 */
 .control-panel {
-  width: 360px;
-  background: #ffffff;
-  border-right: 1px solid #dbe6f0;
+  width: var(--ds-sidebar-width, 360px);
+  flex: 0 0 var(--ds-sidebar-width, 360px);
+  background: #0b2340;
+  border-right: 1px solid #1c4265;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
-  box-shadow: 2px 0 12px rgba(15, 23, 42, 0.06);
+  min-height: 0;
+  overflow: hidden;
+  box-shadow: 2px 0 18px rgba(0, 0, 0, 0.22);
 }
 
 /* 自定义滚动条样式 */
@@ -1015,34 +1174,34 @@ onUnmounted(() => {
 }
 
 .control-panel::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: #06182d;
   border-radius: 3px;
 }
 
 .control-panel::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: rgba(130, 153, 188, 0.45);
   border-radius: 3px;
   transition: background 0.2s ease;
 }
 
 .control-panel::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: rgba(196, 212, 235, 0.55);
 }
 
 /* 右侧结果区域 */
 .result-area {
   flex: 1;
   position: relative;
-  background: #f4f7fa;
-  min-height: 500px;
-  height: 100vh;
+  background: #06182d;
+  min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   min-width: 0;
   overflow-y: auto;
-  padding: 20px;
+  padding: 24px;
 }
 
 /* 右侧结果区域滚动条样式 */
@@ -1051,18 +1210,18 @@ onUnmounted(() => {
 }
 
 .result-area::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: #06182d;
   border-radius: 3px;
 }
 
 .result-area::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: rgba(130, 153, 188, 0.45);
   border-radius: 3px;
   transition: background 0.2s ease;
 }
 
 .result-area::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: rgba(196, 212, 235, 0.55);
 }
 
 /* 分析进度样式 */
@@ -1077,10 +1236,10 @@ onUnmounted(() => {
   justify-content: center;
   min-height: 100%;
   padding: 40px 32px;
-  border: 1px solid #dbe6f0;
+  border: 1px solid #1c4265;
   border-radius: 12px;
-  background: #ffffff;
-  box-shadow: 0 14px 34px rgba(30, 50, 70, 0.08);
+  background: #102d4d;
+  box-shadow: none;
 }
 
 :deep(.result-area > *) {
@@ -1099,7 +1258,7 @@ onUnmounted(() => {
 .progress-title {
   font-size: 24px;
   font-weight: 700;
-  color: #26384a;
+  color: #ffffff;
   margin-bottom: 28px;
 }
 
@@ -1107,22 +1266,22 @@ onUnmounted(() => {
   margin-top: 24px;
   width: 100%;
   padding: 18px 20px;
-  background: #f7fafc;
+  background: #0d2745;
   border-radius: 10px;
-  border: 1px solid #dbe6f0;
+  border: 1px solid #1c4265;
   text-align: left;
 }
 
 .status-text {
   font-size: 16px;
   font-weight: 600;
-  color: #26384a;
+  color: #ffffff;
   margin: 0 0 8px 0;
 }
 
 .status-detail {
   font-size: 14px;
-  color: #667789;
+  color: #8299bc;
   margin: 0;
   line-height: 1.6;
 }

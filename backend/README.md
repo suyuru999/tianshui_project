@@ -216,7 +216,8 @@ tianshuipy/
 - 不要把真实账号密码、数据库口令、GeoServer 密码写进仓库文本文件。
 - 首次交付请使用 `python manage.py create_superuser --username <用户名> --email <邮箱>` 创建管理员；如果不传 `--password`，命令会自动生成安全随机密码。
 - 默认 `manage.py` 使用 `tianshuipy.settings_dev`，适合 SQLite 单机运行；如需 PostgreSQL，请显式设置 `DJANGO_SETTINGS_MODULE=tianshuipy.settings_postgresql`。
-- `settings_postgresql` 现在默认要求配置 `SECRET_KEY`，并默认关闭匿名用户注册、匿名分析上传、匿名业务图层发布/删除、匿名叠加分析管理。
+- `settings_postgresql` 默认要求配置 `SECRET_KEY`，关闭匿名用户注册、匿名分析上传、匿名业务图层发布/删除、匿名叠加分析管理，并启用 HTTPS 重定向、安全 Cookie 和一年期 HSTS。
+- 仅在受控内网使用纯 HTTP 联调时，才在本机 `.env` 中显式设置 `SECURE_SSL_REDIRECT=False`、`SESSION_COOKIE_SECURE=False`、`CSRF_COOKIE_SECURE=False` 和 `SECURE_HSTS_SECONDS=0`；不要把这组值用于公网部署。
 - 如需保留现场演示体验，可在 `.env` 中按需打开这些开关：`ALLOW_PUBLIC_USER_REGISTRATION`、`ALLOW_ANONYMOUS_ANALYSIS_UPLOADS`、`ALLOW_ANONYMOUS_BUSINESS_LAYER_ADMIN`、`ALLOW_ANONYMOUS_OVERLAY_ADMIN`、`ALLOW_PUBLIC_FEEDBACK_MANAGEMENT`。
 
 ## 许可证

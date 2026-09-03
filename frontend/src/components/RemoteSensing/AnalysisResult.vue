@@ -12,42 +12,64 @@
     <template v-else-if="status === 'done'">
       <div class="result-content-apple">
         <div class="result-header-apple">
-          <h2 class="result-title-apple">{{ indexLabelMap[selectedIndex] }}分析结果</h2>
-          <el-button type="primary" @click="downloadResults" class="download-btn-apple">
-            <el-icon><Download /></el-icon>
-            下载数据
-          </el-button>
+          <h2 class="result-title-apple">{{ resultTitle }}分析结果</h2>
+          <div class="result-download-actions">
+            <el-button type="primary" @click="downloadResults" class="result-download-btn">
+              <el-icon><Download /></el-icon>
+              下载计算结果
+            </el-button>
           </div>
+        </div>
 
         <div v-if="resultData?.preview_mode || resultData?.preview_message" class="result-notice is-preview">
           <div class="notice-title">当前为大文件预览分析</div>
           <div class="notice-text">{{ resultData?.preview_message || '系统已自动切换为预览模式。' }}</div>
         </div>
 
-        <div v-if="resultData?.supported_index_labels?.length" class="result-notice is-hint">
-          <div class="notice-title">当前影像支持的指数</div>
-          <div class="notice-text">{{ resultData.supported_index_labels.join('、') }}</div>
-        </div>
-
         <div v-if="primaryVisualizationUrl" class="visualization-section">
-          <img
-            :src="primaryVisualizationUrl"
-            alt="指数可视化结果"
-            class="visualization-image"
-            @error="handleVisualizationError"
-          />
+          <div class="visualization-header">
+            <div class="visualization-title-block">
+              <h3>{{ resultTitle }}分布图</h3>
+              <span>{{ sourceFileName }}</span>
+            </div>
+          </div>
+          <div class="visualization-map-body">
+            <div class="visualization-image-frame">
+              <img
+                :src="primaryVisualizationUrl"
+                alt="指数可视化结果"
+                class="visualization-image"
+                @error="handleVisualizationError"
+              />
+            </div>
+            <div class="map-side-controls">
+              <div class="map-legend-panel" aria-label="生态质量图例">
+                <div class="legend-title">图例</div>
+                <div v-for="item in qualityLegendItems" :key="item.name" class="legend-row">
+                  <span class="legend-swatch" :style="{ backgroundColor: item.color }"></span>
+                  <span class="legend-name">{{ item.name }}</span>
+                </div>
+              </div>
+              <div class="result-image-actions map-edge-actions">
+                <el-button type="primary" @click="addCurrentResultToMainMap" class="result-download-btn image-download-btn map-add-btn">
+                  添加图层
+                </el-button>
+                <el-button v-if="primaryVisualizationUrl" type="primary" @click="downloadVisualization" class="result-download-btn image-download-btn image-secondary-btn">
+                  <el-icon><Download /></el-icon>
+                  图片
+                </el-button>
+                <el-button v-if="primaryResultFileUrl" type="primary" @click="downloadResultRaster" class="result-download-btn image-download-btn image-secondary-btn">
+                  <el-icon><Download /></el-icon>
+                  TIF
+                </el-button>
+              </div>
+            </div>
+          </div>
         </div>
         <div v-if="visualizationLoadError" class="result-notice is-warning">
           <div class="notice-title">可视化图片加载失败</div>
           <div class="notice-text">{{ visualizationLoadError }}</div>
         </div>
-
-        <ResultCompareMap
-          v-if="primaryCompareOverlay"
-          title="遥感结果叠加对比"
-          description="打开遥感影像底图后，可直接把当前彩色分析结果叠加在上面做对比。"
-          :compare-overlay="primaryCompareOverlay"
-        />
 
         <!-- 加载中 -->
         <div v-if="loading" class="loading-data-apple">
@@ -135,6 +157,13 @@
           <p>暂无分析结果数据</p>
           <p class="hint-text">请等待计算完成或重新开始分析</p>
         </div>
+
+        <ResultCompareMap
+          title="遥感结果叠加对比"
+          description="打开遥感影像底图后，可直接把当前彩色分析结果叠加在上面做对比。"
+          :compare-overlay="primaryCompareOverlay"
+          empty-text="当前指数结果暂未生成叠加图，请重新分析该指数后再查看。"
+        />
       </div>
     </template>
     <template v-else-if="status === 'error'">
@@ -157,9 +186,12 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { ElIcon, ElButton, ElTag, ElMessage } from 'element-plus';
 import { Loading, Download } from '@element-plus/icons-vue';
+import { useRouter } from 'vue-router';
 import * as echarts from 'echarts';
 import { remoteSensingService } from '../../services/api.js';
 import ResultCompareMap from '../Map/ResultCompareMap.vue';
+import { saveMainMapAnalysisLayer } from '../../utils/mainMapAnalysisLayers.js';
+import { saveBlobAsFile, saveUrlAsFile } from '../../utils/fileSave.js';
 
 const props = defineProps({
   status: String, // waiting | analyzing | done
@@ -169,6 +201,7 @@ const props = defineProps({
 });
 
 const loading = ref(false);
+const router = useRouter();
 const indicesData = ref([]);
 const pieChartRef = ref(null);
 const visualizationLoadError = ref('');
@@ -187,20 +220,74 @@ const indexLabelMap = computed(() => ({
   uploaded_raster: '上传成果栅格'
 }));
 
+const qualityLegendItems = [
+  { name: '优秀', color: '#5cc53a' },
+  { name: '良好', color: '#91d36c' },
+  { name: '中等', color: '#f0ab2f' },
+  { name: '较差', color: '#ff6868' },
+  { name: '差', color: '#c93422' }
+];
+
+const selectedIndexKey = computed(() => String(props.selectedIndex || '').toLowerCase());
+
+const selectedResultKey = computed(() => {
+  const aliasMap = {
+    lst: 'heat',
+    ndbsi: 'dryness'
+  };
+  return aliasMap[selectedIndexKey.value] || selectedIndexKey.value;
+});
+
 const primaryIndex = computed(() => {
   if (!indicesData.value.length) return null;
-  return indicesData.value.find((item) => item.index_type === 'rsei') || indicesData.value[0];
+  return indicesData.value.find((item) => String(item.index_type || '').toLowerCase() === selectedResultKey.value)
+    || indicesData.value[0];
+});
+
+const resultTitle = computed(() => {
+  const primaryType = primaryIndex.value?.index_type;
+  return indexLabelMap.value[primaryType] || indexLabelMap.value[props.selectedIndex] || '遥感生态指数';
 });
 
 const primaryVisualizationUrl = computed(() => {
   const primary = primaryIndex.value;
-  return normalizeVisualizationUrl(primary?.visualization_file_url || primary?.visualization_file || null);
+  return normalizeVisualizationUrl(
+    primary?.visualization_file_url
+    || primary?.visualization_file
+    || props.resultData?.visualization_file_url
+    || props.resultData?.result?.visualization_file_url
+    || props.resultData?.visualization_file
+    || null
+  );
+});
+
+const primaryResultFileUrl = computed(() => {
+  const primary = primaryIndex.value;
+  return normalizeVisualizationUrl(
+    primary?.result_file_url
+    || primary?.result_file
+    || primary?.compare_overlay?.result_file_url
+    || props.resultData?.result_file_url
+    || props.resultData?.result?.result_file_url
+    || props.resultData?.compare_overlay?.result_file_url
+    || props.resultData?.result?.compare_overlay?.result_file_url
+    || props.resultData?.result_file
+    || null
+  );
 });
 
 const primaryCompareOverlay = computed(() => {
   const primary = primaryIndex.value;
-  return primary?.compare_overlay || null;
+  return primary?.compare_overlay || props.resultData?.compare_overlay || props.resultData?.result?.compare_overlay || null;
 });
+
+const sourceFileName = computed(() => (
+  props.resultData?.filename
+  || props.resultData?.remote_sensing_image_name
+  || props.resultData?.source_filename
+  || primaryCompareOverlay.value?.source_filename
+  || '遥感生态指数结果'
+));
 
 function isUuidLike(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
@@ -376,7 +463,7 @@ function updatePieChart() {
   }
 
   const chartWidth = pieChart.getWidth();
-  const isWide = chartWidth >= 900; // 宽屏时图例在右侧，窄屏时放到底部
+  const isWide = chartWidth >= 520; // 两栏卡片内也优先把图例放右侧，减少底部留白
 
   const option = {
     tooltip: {
@@ -386,24 +473,30 @@ function updatePieChart() {
     legend: isWide
       ? {
           orient: 'vertical',
-          right: '6%',
+          right: '4%',
           top: 'middle',
-          textStyle: { fontSize: 14 }
+          itemWidth: 12,
+          itemHeight: 8,
+          itemGap: 10,
+          textStyle: { color: '#395875', fontSize: 12 }
         }
       : {
           type: 'scroll',
           orient: 'horizontal',
           bottom: 0,
           left: 'center',
-          textStyle: { fontSize: 12 },
+          itemWidth: 12,
+          itemHeight: 8,
+          itemGap: 10,
+          textStyle: { color: '#395875', fontSize: 12 },
           pageIconColor: '#409EFF'
         },
     series: [
       {
         name: '面积分布',
         type: 'pie',
-        radius: ['40%', '70%'],
-        center: isWide ? ['40%', '50%'] : ['50%', '45%'],
+        radius: isWide ? ['36%', '60%'] : ['36%', '58%'],
+        center: isWide ? ['39%', '50%'] : ['50%', '46%'],
         avoidLabelOverlap: true,
         itemStyle: {
           borderRadius: 10,
@@ -413,12 +506,18 @@ function updatePieChart() {
         label: {
           show: true,
           formatter: '{b}\n{d}%',
-          fontSize: 12
+          color: '#395875',
+          fontSize: 11
+        },
+        labelLine: {
+          length: 12,
+          length2: 10,
+          smooth: true
         },
         emphasis: {
           label: {
             show: true,
-            fontSize: 14,
+            fontSize: 13,
             fontWeight: 'bold'
           }
         },
@@ -576,8 +675,52 @@ function handleVisualizationError(event) {
     : '图片地址为空或服务未返回有效文件。';
 }
 
+function buildDownloadName(extension) {
+  const label = resultTitle.value || indexLabelMap.value[props.selectedIndex] || props.selectedIndex || '遥感生态指数';
+  const safeLabel = String(label).replace(/[\\/:*?"<>|()\s]+/g, '_').replace(/^_+|_+$/g, '') || 'remote_sensing_result';
+  return `${safeLabel}_${new Date().getTime()}.${extension}`;
+}
+
+async function downloadVisualization() {
+  try {
+    await saveUrlAsFile(primaryVisualizationUrl.value, buildDownloadName('png'), 'image/png');
+    ElMessage.success('结果图片已下载');
+  } catch (error) {
+    if (error?.name === 'AbortError') return;
+    console.error('下载结果图片失败:', error);
+    ElMessage.error('下载结果图片失败，请确认结果图片仍然可访问');
+  }
+}
+
+async function downloadResultRaster() {
+  try {
+    await saveUrlAsFile(primaryResultFileUrl.value, buildDownloadName('tif'), 'image/tiff');
+    ElMessage.success('结果tif已下载');
+  } catch (error) {
+    if (error?.name === 'AbortError') return;
+    console.error('下载结果tif失败:', error);
+    ElMessage.error('下载结果tif失败，请确认结果文件仍然可访问');
+  }
+}
+
+function addCurrentResultToMainMap() {
+  const result = saveMainMapAnalysisLayer({
+    id: `remote-${sourceFileName.value}-${selectedResultKey.value}-${primaryCompareOverlay.value?.overlay_image_url}`,
+    title: `${sourceFileName.value} - ${resultTitle.value}`,
+    subtitle: '遥感生态指数分析结果',
+    feature: '遥感分析',
+    compareOverlay: primaryCompareOverlay.value
+  });
+  if (!result.success) {
+    ElMessage.warning(result.message);
+    return;
+  }
+  ElMessage.success('已添加到主地图界面，可在图层控制中开关、排序或删除');
+  router.push('/');
+}
+
 // 下载结果
-function downloadResults() {
+async function downloadResults() {
   if (indicesData.value.length === 0) {
     ElMessage.warning('暂无数据可下载');
     return;
@@ -600,17 +743,14 @@ function downloadResults() {
 
   const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
   const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  const url = URL.createObjectURL(blob);
-
-  link.setAttribute('href', url);
-  link.setAttribute('download', `遥感生态指数分析结果_${new Date().getTime()}.csv`);
-  link.style.visibility = 'hidden';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-
-  ElMessage.success('数据下载成功');
+  try {
+    await saveBlobAsFile(blob, `遥感生态指数分析结果_${new Date().getTime()}.csv`, 'text/csv');
+    ElMessage.success('数据下载成功');
+  } catch (error) {
+    if (error?.name === 'AbortError') return;
+    console.error('数据下载失败:', error);
+    ElMessage.error('数据下载失败');
+  }
 }
 
 // 组件挂载时检查是否需要加载数据
@@ -632,9 +772,11 @@ onUnmounted(() => {
 <style scoped>
 .result-panel-apple {
   width: 100%;
-  min-height: 400px;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
   background: transparent;
   padding: 0;
 }
@@ -642,15 +784,20 @@ onUnmounted(() => {
 .placeholder-apple {
   align-self: center;
   margin: auto;
-  padding: 28px 32px;
-  border: 1px dashed #dbe6f0;
-  border-radius: 12px;
-  background: #ffffff;
-  color: #8a98a8;
-  font-size: 14px;
-  box-shadow: 0 8px 20px rgba(30, 50, 70, 0.05);
-  letter-spacing: 0.2px;
+  width: min(820px, 100%);
+  min-height: 260px;
+  padding: 32px;
+  border: 1px dashed #1c4265;
+  border-radius: 10px;
+  background: #102d4d;
+  color: #c4d4eb;
+  font-size: 15px;
+  box-shadow: none;
+  letter-spacing: 0;
   text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .loading-apple {
@@ -663,7 +810,7 @@ onUnmounted(() => {
 
 .loading-icon-apple {
   font-size: 48px;
-  color: #5e9cff;
+  color: #2f97b9;
   animation: apple-spin 1.2s linear infinite;
 }
 
@@ -673,7 +820,7 @@ onUnmounted(() => {
 }
 
 .loading-text-apple {
-  color: #2563eb;
+  color: #1f6f8f;
   font-size: 1.15rem;
   font-weight: 500;
   letter-spacing: 0.2px;
@@ -681,81 +828,260 @@ onUnmounted(() => {
 
 .result-content-apple {
   width: 100%;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
+  padding: 0;
 }
 
 .result-notice {
-  border-radius: 14px;
+  border-radius: 8px;
   padding: 14px 16px;
-  border: 1px solid transparent;
+  border: 1px solid #d9e3ed;
 }
 
 .result-notice.is-preview {
-  background: linear-gradient(180deg, #eef6ff 0%, #f9fbff 100%);
-  border-color: #bfdcff;
+  background: #f8fbfd;
 }
 
 .result-notice.is-hint {
-  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
-  border-color: #d7e7f6;
+  background: #ffffff;
 }
 
 .result-notice.is-warning {
-  background: linear-gradient(180deg, #fff8ef 0%, #ffffff 100%);
-  border-color: #f2d3aa;
+  background: #fffaf7;
 }
 
 .notice-title {
   margin-bottom: 6px;
   font-size: 14px;
   font-weight: 700;
-  color: #21507e;
+  color: #223244;
 }
 
 .notice-text {
   font-size: 13px;
   line-height: 1.6;
-  color: #4c657d;
+  color: #66798a;
 }
 
 .result-header-apple {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding-bottom: 16px;
-  border-bottom: 2px solid #e9eff5;
+  gap: 14px;
+  min-height: 54px;
+  padding: 12px 16px;
+  border: 1px solid #1c4265;
+  background: #102d4d;
+  border-radius: 8px;
 }
 
 .result-title-apple {
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: #222;
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
   margin: 0;
-  letter-spacing: 0.3px;
+  letter-spacing: 0;
 }
 
-.download-btn-apple {
-  border-radius: 12px;
-  padding: 10px 20px;
-  font-weight: 500;
+.result-download-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.result-download-btn {
+  --el-button-bg-color: #1677e8;
+  --el-button-border-color: #1677e8;
+  --el-button-hover-bg-color: #2b8cff;
+  --el-button-hover-border-color: #2b8cff;
+  --el-button-active-bg-color: #1265c8;
+  --el-button-active-border-color: #1265c8;
+  min-width: 118px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 6px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.result-download-btn + .result-download-btn {
+  margin-left: 0;
 }
 
 .visualization-section {
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid rgba(229, 231, 235, 0.8);
-  border-radius: 12px;
-  padding: 16px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: #132a48;
+  border: 1px solid #203b60;
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.visualization-header {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.visualization-title-block {
+  min-width: 0;
+}
+
+.visualization-title-block h3 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 18px;
+  line-height: 1.25;
+  font-weight: 700;
+}
+
+.visualization-title-block span {
+  display: block;
+  margin-top: 5px;
+  color: #8299bc;
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.result-image-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.map-edge-actions {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 8px;
+  background: rgba(19, 42, 72, 0.96);
+  border: 1px solid #203b60;
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+}
+
+.map-edge-actions .image-download-btn {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.visualization-map-body {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 118px;
+  gap: 12px;
+  min-height: 340px;
+  overflow: hidden;
+  background: #0b223c;
+  border: 1px solid #203b60;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.visualization-image-frame {
+  min-width: 0;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #d6e2ec;
+  border-radius: 6px;
+}
+
+.map-side-controls {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.map-legend-panel {
+  width: 100%;
+  padding: 10px;
+  background: #132a48;
+  border: 1px solid #203b60;
+  border-radius: 8px;
+  color: #c4d4eb;
+  box-shadow: none;
+}
+
+.legend-title {
+  margin-bottom: 8px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 22px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.legend-swatch {
+  width: 14px;
+  height: 8px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.legend-name {
+  white-space: nowrap;
+}
+
+.image-download-btn {
+  min-width: 116px;
+  height: 34px;
+}
+
+.image-secondary-btn {
+  --el-button-bg-color: #0d2745;
+  --el-button-border-color: #285a82;
+  --el-button-hover-bg-color: #183b61;
+  --el-button-hover-border-color: #2b8cff;
+  --el-button-active-bg-color: #102d4d;
+  --el-button-active-border-color: #1677ff;
+  color: #c4d4eb;
 }
 
 .visualization-image {
   display: block;
   width: 100%;
-  max-height: 520px;
+  height: clamp(320px, 38vh, 430px);
   object-fit: contain;
-  border-radius: 8px;
-  background: #f8fafc;
+  border-radius: 0;
+  background: #ffffff;
 }
 
 .loading-data-apple {
@@ -764,13 +1090,13 @@ onUnmounted(() => {
   justify-content: center;
   gap: 12px;
   padding: 40px;
-  color: #606266;
+  color: #66798a;
   font-size: 1rem;
 }
 
 .loading-icon-small {
   font-size: 24px;
-  color: #5e9cff;
+  color: #2f97b9;
   animation: apple-spin 1.2s linear infinite;
 }
 
@@ -778,119 +1104,174 @@ onUnmounted(() => {
 .statistics-section {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 0;
 }
 
 .stats-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+  align-items: stretch;
 }
 
 .stat-card {
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 16px;
-  padding: 20px;
-  box-shadow: 0 2px 12px rgba(60, 60, 60, 0.08);
-  transition: transform 0.2s, box-shadow 0.2s;
+  min-width: 0;
+  min-height: 208px;
+  background: #102d4d;
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: none;
+  border: 1px solid #285a82;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(60, 60, 60, 0.12);
+  transform: none;
+  border-color: #3374a2;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
 }
 
 .stat-card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #e9eff5;
+  gap: 10px;
+  min-height: 28px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #1c4265;
 }
 
 .stat-card-title {
-  font-size: 1.1rem;
+  min-width: 0;
+  font-size: 18px;
+  line-height: 1.35;
+  font-weight: 750;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stat-card-header :deep(.el-tag) {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 6px;
+  border-color: #20649a;
+  background: #123f67;
+  color: #28aaff;
+  font-size: 13px;
   font-weight: 600;
-  color: #303133;
 }
 
 .stat-card-body {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .stat-item {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 70px;
+  padding: 11px 12px;
+  border-radius: 7px;
+  background: #12385c;
+  border: 1px solid #245678;
 }
 
 .stat-label {
-  font-size: 0.85rem;
-  color: #909399;
+  font-size: 12px;
+  color: #c4d4eb;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .stat-value {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #303133;
+  min-width: 0;
+  display: block;
+  font-size: 21px;
+  line-height: 1.15;
+  font-weight: 700;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 /* 图表区域 */
 .charts-section {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-  gap: 24px;
-  margin-top: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 0;
+  align-items: stretch;
 }
 
 .chart-container {
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 16px;
-  padding: 24px;
-  box-shadow: 0 2px 12px rgba(60, 60, 60, 0.08);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: #132a48;
+  min-height: 380px;
+  border-radius: 10px;
+  padding: 20px;
+  box-shadow: none;
+  border: 1px solid #203b60;
+  align-self: stretch;
+  overflow: hidden;
 }
 
 .chart-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #303133;
+  font-size: 18px;
+  font-weight: 700;
+  color: #ffffff;
   margin: 0 0 16px 0;
+  min-height: 26px;
   text-align: center;
 }
 
 .chart-canvas {
   width: 100%;
-  height: 350px;
+  flex: 1 1 auto;
+  height: 320px;
+  background: #eef6ff;
+  border: 1px solid #d3e3f1;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 /* 无数据提示 */
 .no-data-apple {
   text-align: center;
   padding: 60px 32px;
-  color: #909399;
+  color: #66798a;
 }
 
 .error-state-card {
-  background: linear-gradient(180deg, #fff7f7 0%, #ffffff 100%);
-  border: 1px solid #ffd4d4;
-  border-radius: 18px;
+  background: #ffffff;
+  border: 1px solid #d9e3ed;
+  border-radius: 8px;
   padding: 24px;
-  box-shadow: 0 14px 30px rgba(216, 78, 78, 0.08);
+  box-shadow: none;
 }
 
 .error-title {
   margin: 0 0 10px;
   font-size: 20px;
-  color: #9f1f1f;
+  color: #b42318;
 }
 
 .error-message {
   margin: 0;
   font-size: 15px;
-  color: #6f2c2c;
+  color: #7a3d3d;
   font-weight: 600;
 }
 
@@ -900,7 +1281,7 @@ onUnmounted(() => {
   margin: 8px 0 0;
   font-size: 13px;
   line-height: 1.6;
-  color: #7a4a4a;
+  color: #7c6a6a;
 }
 
 .no-data-apple p {
@@ -910,29 +1291,34 @@ onUnmounted(() => {
 
 .hint-text {
   font-size: 0.95rem;
-  color: #b0b8c9;
+  color: #8093a3;
 }
 
 /* 数值解读样式 */
 .interpretation-content {
-  padding: 20px;
-  background: #fafafa;
+  flex: 1 1 auto;
+  height: 320px;
+  padding: 16px;
+  background: #eaf4ff;
   border-radius: 8px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid #d3e3f1;
+  overflow: hidden;
 }
 
 .interpretation-text {
-  max-height: 400px;
+  height: 100%;
+  max-height: none;
   overflow-y: auto;
 }
 
 .index-interpretation {
-  margin-bottom: 24px;
+  margin-bottom: 12px;
   padding: 16px;
-  background: white;
+  background: #f5faff;
   border-radius: 8px;
-  border-left: 4px solid #1890ff;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: none;
+  border: 1px solid #d3e3f1;
+  border-left: 4px solid #1677ff;
 }
 
 .index-interpretation:last-child {
@@ -940,36 +1326,37 @@ onUnmounted(() => {
 }
 
 .index-name {
-  margin: 0 0 16px 0;
-  font-size: 16px;
+  margin: 0 0 12px 0;
+  font-size: 18px;
   font-weight: 600;
-  color: #1890ff;
-  border-bottom: 1px solid #f0f0f0;
-  padding-bottom: 8px;
+  color: #17314d;
+  border-bottom: 1px solid #d3e3f1;
+  padding-bottom: 10px;
 }
 
 .interpretation-items {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .interpretation-item {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 12px;
   line-height: 1.6;
+  font-size: 14px;
 }
 
 .item-label {
   font-weight: 600;
-  color: #333;
-  min-width: 80px;
+  color: #17314d;
+  min-width: 88px;
   flex-shrink: 0;
 }
 
 .item-content {
-  color: #666;
+  color: #5c7288;
   flex: 1;
   text-align: justify;
 }
@@ -977,7 +1364,7 @@ onUnmounted(() => {
 .no-data-text {
   text-align: center;
   padding: 40px 20px;
-  color: #999;
+  color: #8093a3;
 }
 
 .no-data-text p {
@@ -986,6 +1373,48 @@ onUnmounted(() => {
 
 /* 响应式设计 */
 @media (max-width: 900px) {
+  .result-header-apple {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .result-download-actions {
+    justify-content: flex-start;
+  }
+
+  .result-image-actions {
+    justify-content: flex-start;
+    max-width: none;
+    align-self: stretch;
+  }
+
+  .map-edge-actions {
+    width: auto;
+    margin: 0 10px 10px;
+    flex-direction: row;
+    align-self: auto;
+  }
+
+  .visualization-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .visualization-map-body {
+    grid-template-columns: 1fr;
+  }
+
+  .map-side-controls {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .map-legend-panel {
+    width: auto;
+    margin: 0;
+  }
+
   .stats-cards {
     grid-template-columns: 1fr;
   }
@@ -995,7 +1424,46 @@ onUnmounted(() => {
   }
 
   .chart-canvas {
-    height: 300px;
+    height: 280px;
+  }
+}
+
+@media (max-width: 1680px) {
+  .stats-cards {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .stat-card {
+    min-height: 196px;
+    padding: 14px;
+  }
+
+  .stat-card-title {
+    font-size: 16px;
+  }
+
+  .stat-label {
+    font-size: 12px;
+  }
+
+  .stat-item {
+    min-height: 62px;
+    padding: 9px 10px;
+  }
+
+  .stat-value {
+    font-size: 18px;
+  }
+}
+
+@media (max-width: 1280px) {
+  .stats-cards {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+
+  .charts-section {
+    grid-template-columns: 1fr;
   }
 }
 </style>

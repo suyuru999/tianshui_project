@@ -103,52 +103,53 @@
           </div>
         </div>
 
-        <div class="section">
-          <div class="section-header">
-            <Files class="section-icon" />
-            <span>最近结果</span>
-          </div>
+        <div class="section history-section">
           <div class="section-content">
-            <div class="history-toolbar">
-              <span>{{ historyItems.length }} 条</span>
-              <div class="history-toolbar-actions">
-                <button
-                  v-if="historyItems.length > 0"
-                  type="button"
-                  class="history-action-btn"
-                  @click="clearHistoryItems"
-                >
-                  清空
-                </button>
-                <button
-                  type="button"
-                  class="history-action-btn primary"
-                  @click="historyExpanded = !historyExpanded"
-                >
-                  {{ historyExpanded ? '收起' : '展开' }}
-                </button>
+            <div class="history-card">
+              <div class="history-card__title-row">
+                <Files class="history-card__icon" />
+                <span class="history-card__title">最近结果</span>
               </div>
-            </div>
-            <div v-if="historyExpanded && historyItems.length > 0" class="history-list">
-              <div
-                v-for="item in historyItems"
-                :key="item.id"
-                class="history-item"
-              >
-                <button type="button" class="history-item-main" @click="restoreHistoryItem(item)">
-                  <div class="history-item-title">{{ item.title }}</div>
-                  <div class="history-item-subtitle">{{ item.subtitle }}</div>
-                  <div class="history-item-time">{{ formatHistoryTime(item.timestamp) }}</div>
-                </button>
-                <button type="button" class="history-delete-btn" @click="deleteHistoryItem(item)">删除</button>
+              <div class="history-card__summary-row">
+                <span class="history-card__count">{{ historyCount }} 条</span>
+                <div class="history-card__actions">
+                  <button
+                    v-if="historyExpanded && historyCount > 0"
+                    type="button"
+                    class="history-action-btn"
+                    @click="clearHistoryItems"
+                  >
+                    清空
+                  </button>
+                  <button
+                    type="button"
+                    class="history-action-btn primary"
+                    @click="historyExpanded = !historyExpanded"
+                  >
+                    {{ historyExpanded ? '收起' : '展开' }}
+                  </button>
+                </div>
               </div>
-            </div>
-            <div v-else-if="historyExpanded" class="history-empty">
-              这里会保留最近几次可直接查看的统计结果
-            </div>
-            <div v-else class="history-collapsed-tip">
-              <span v-if="historyItems.length > 0">点击展开查看历史结果，不会再挤占左侧主操作区域</span>
-              <span v-else>这里会保留最近几次可直接查看的统计结果</span>
+              <div class="history-card__description">
+                这里会保留最近几次可直接查看的统计结果
+              </div>
+              <div v-if="historyExpanded && historyCount > 0" class="history-list">
+                <div
+                  v-for="item in historyItems"
+                  :key="item.id"
+                  class="history-item"
+                >
+                  <button type="button" class="history-item-main" @click="restoreHistoryItem(item)">
+                    <div class="history-item-title">{{ item.title }}</div>
+                    <div class="history-item-subtitle">{{ getHistorySubtitle(item) }}</div>
+                    <div class="history-item-time">{{ formatHistoryTime(item.timestamp) }}</div>
+                  </button>
+                  <button type="button" class="history-delete-btn" @click="deleteHistoryItem(item)">删除</button>
+                </div>
+              </div>
+              <div v-else-if="historyExpanded" class="history-empty">
+                当前暂无历史结果
+              </div>
             </div>
           </div>
         </div>
@@ -193,21 +194,46 @@
       <div class="right-panel">
         <!-- 无数据时的占位符 -->
         <div v-if="!hasData" class="placeholder">
-          <div class="placeholder-text">请先上传数据并开始分析</div>
+          <div class="placeholder-text">请先上传数据并开始分析，或从左侧最近结果中选择历史结果</div>
         </div>
 
         <!-- 有数据时显示分析结果 -->
         <div v-else class="analysis-results">
-          <div v-if="analysisNotice" class="analysis-notice">
-            <div class="analysis-notice-title">结果说明</div>
-            <div class="analysis-notice-text">{{ analysisNotice }}</div>
+          <div class="results-header-bar">
+            <div class="results-header-title">结果操作</div>
+            <div class="result-download-actions">
+              <el-button
+                type="primary"
+                class="result-download-btn"
+                :disabled="!hasData"
+                @click="downloadCalculationResult"
+              >
+                <el-icon><Download /></el-icon>
+                下载计算结果
+              </el-button>
+            </div>
           </div>
-
+          <div class="metric-display-panel">
+            <div class="metric-display-title">结果显示</div>
+            <div class="metric-display-actions">
+              <button
+                v-for="metric in climateDisplayMetrics"
+                :key="metric.key"
+                type="button"
+                class="metric-display-btn"
+                :class="{ active: isMetricVisible(metric.key), disabled: !isMetricAvailable(metric.key) }"
+                :disabled="!isMetricAvailable(metric.key)"
+                @click="toggleClimateMetric(metric.key)"
+              >
+                {{ metric.shortLabel }}
+              </button>
+            </div>
+          </div>
           <!-- 统计概览 -->
           <div class="stats-overview">
             <h3>统计概览</h3>
             <div class="stats-grid">
-              <div v-for="stat in statistics" :key="stat.indicator" class="stat-item">
+              <div v-for="stat in visibleStatistics" :key="stat.indicator" class="stat-item">
                 <div class="stat-label">{{ stat.indicator }}</div>
                 <div class="stat-values">
                   <div class="stat-value">
@@ -228,6 +254,9 @@
                   </div>
                 </div>
               </div>
+              <div v-if="visibleStatistics.length === 0" class="metric-inline-empty">
+                请选择需要显示的气候指标
+              </div>
             </div>
           </div>
 
@@ -236,20 +265,120 @@
             <h3>数据可视化</h3>
             <div class="charts-grid">
               <div class="chart-container">
+                <div class="chart-card-actions">
+                  <button
+                    type="button"
+                    class="chart-icon-btn danger"
+                    title="隐藏该结果"
+                    aria-label="隐藏温度结果"
+                    @click="hideClimateMetric('temperature')"
+                  >
+                    <el-icon><Close /></el-icon>
+                  </button>
+                  <button
+                    type="button"
+                    class="chart-icon-btn"
+                    title="下载结果图片"
+                    aria-label="下载温度结果图片"
+                    :disabled="!chartHasData('temperature')"
+                    @click="downloadChartImage('temperature')"
+                  >
+                    <el-icon><Download /></el-icon>
+                  </button>
+                </div>
                 <h4>温度趋势图</h4>
-                <canvas ref="temperatureChart" width="400" height="200"></canvas>
+                <div class="chart-source" :class="{ empty: !metricDisplaySources.temperature }">
+                  {{ metricDisplaySources.temperature || '' }}
+                </div>
+                <canvas v-if="shouldShowChart('temperature')" ref="temperatureChart" class="chart-canvas" width="720" height="260"></canvas>
+                <div v-if="!shouldShowChart('temperature')" class="chart-empty">未显示温度结果</div>
               </div>
               <div class="chart-container">
+                <div class="chart-card-actions">
+                  <button
+                    type="button"
+                    class="chart-icon-btn danger"
+                    title="隐藏该结果"
+                    aria-label="隐藏降水结果"
+                    @click="hideClimateMetric('precipitation')"
+                  >
+                    <el-icon><Close /></el-icon>
+                  </button>
+                  <button
+                    type="button"
+                    class="chart-icon-btn"
+                    title="下载结果图片"
+                    aria-label="下载降水结果图片"
+                    :disabled="!chartHasData('precipitation')"
+                    @click="downloadChartImage('precipitation')"
+                  >
+                    <el-icon><Download /></el-icon>
+                  </button>
+                </div>
                 <h4>降水量柱状图</h4>
-                <canvas ref="precipitationChart" width="400" height="200"></canvas>
+                <div class="chart-source" :class="{ empty: !metricDisplaySources.precipitation }">
+                  {{ metricDisplaySources.precipitation || '' }}
+                </div>
+                <canvas v-if="shouldShowChart('precipitation')" ref="precipitationChart" class="chart-canvas" width="720" height="260"></canvas>
+                <div v-if="!shouldShowChart('precipitation')" class="chart-empty">未显示降水结果</div>
               </div>
               <div class="chart-container">
+                <div class="chart-card-actions">
+                  <button
+                    type="button"
+                    class="chart-icon-btn danger"
+                    title="隐藏该结果"
+                    aria-label="隐藏湿度结果"
+                    @click="hideClimateMetric('humidity')"
+                  >
+                    <el-icon><Close /></el-icon>
+                  </button>
+                  <button
+                    type="button"
+                    class="chart-icon-btn"
+                    title="下载结果图片"
+                    aria-label="下载湿度结果图片"
+                    :disabled="!chartHasData('humidity')"
+                    @click="downloadChartImage('humidity')"
+                  >
+                    <el-icon><Download /></el-icon>
+                  </button>
+                </div>
                 <h4>湿度面积图</h4>
-                <canvas ref="humidityChart" width="400" height="200"></canvas>
+                <div class="chart-source" :class="{ empty: !metricDisplaySources.humidity }">
+                  {{ metricDisplaySources.humidity || '' }}
+                </div>
+                <canvas v-if="shouldShowChart('humidity')" ref="humidityChart" class="chart-canvas" width="720" height="260"></canvas>
+                <div v-if="!shouldShowChart('humidity')" class="chart-empty">未显示湿度结果</div>
               </div>
               <div class="chart-container">
+                <div class="chart-card-actions">
+                  <button
+                    type="button"
+                    class="chart-icon-btn danger"
+                    title="隐藏该结果"
+                    aria-label="隐藏风速结果"
+                    @click="hideClimateMetric('wind_speed')"
+                  >
+                    <el-icon><Close /></el-icon>
+                  </button>
+                  <button
+                    type="button"
+                    class="chart-icon-btn"
+                    title="下载结果图片"
+                    aria-label="下载风速结果图片"
+                    :disabled="!chartHasData('wind_speed')"
+                    @click="downloadChartImage('wind_speed')"
+                  >
+                    <el-icon><Download /></el-icon>
+                  </button>
+                </div>
                 <h4>风速雷达图</h4>
-                <canvas ref="windSpeedChart" width="400" height="200"></canvas>
+                <div class="chart-source" :class="{ empty: !metricDisplaySources.wind_speed }">
+                  {{ metricDisplaySources.wind_speed || '' }}
+                </div>
+                <canvas v-if="shouldShowChart('wind_speed')" ref="windSpeedChart" class="chart-canvas" width="720" height="260"></canvas>
+                <div v-if="!shouldShowChart('wind_speed')" class="chart-empty">未显示风速结果</div>
               </div>
             </div>
           </div>
@@ -261,10 +390,12 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { ArrowLeft, CircleCheck, CircleClose, Files, Search } from '@element-plus/icons-vue'
-import { climateMonitoringService } from '../services/api.js'
+import { computed, nextTick, ref, onMounted, onUnmounted } from 'vue'
+import { ArrowLeft, CircleCheck, CircleClose, Download, Close, Files, Search } from '@element-plus/icons-vue'
+import { authService, climateMonitoringService } from '../services/api.js'
 import { clearResultHistory, formatHistoryTime, loadResultHistory, removeResultHistory, saveResultHistory } from '../utils/resultHistory.js'
+import { getCurrentUserContext, setCurrentUserContext } from '../utils/userContext.js'
+import { prepareFileSave, saveBlobAsFile } from '../utils/fileSave.js'
 
 // 响应式数据
 const fileInput = ref(null)
@@ -289,7 +420,26 @@ const chartData = ref({
   humidity: [],
   windSpeed: []
 })
+const activeClimateMetrics = ref([])
 const chartYearLabels = ref([])
+const chartLabelsByMetric = ref({
+  temperature: [],
+  precipitation: [],
+  humidity: [],
+  wind_speed: []
+})
+const metricSourceLabels = ref({
+  temperature: '',
+  precipitation: '',
+  humidity: '',
+  wind_speed: ''
+})
+const metricDisplaySources = ref({
+  temperature: '',
+  precipitation: '',
+  humidity: '',
+  wind_speed: ''
+})
 
 // 图表ref
 const temperatureChart = ref(null)
@@ -300,6 +450,19 @@ const windSpeedChart = ref(null)
 // 状态轮询间隔
 let statusCheckInterval = null
 const HISTORY_KEY = 'climate_monitoring'
+const chartTitleMap = {
+  temperature: '温度趋势图',
+  precipitation: '降水量柱状图',
+  humidity: '湿度面积图',
+  wind_speed: '风速雷达图'
+}
+
+const chartRefMap = {
+  temperature: temperatureChart,
+  precipitation: precipitationChart,
+  humidity: humidityChart,
+  wind_speed: windSpeedChart
+}
 
 // 文件选择处理
 const handleFileSelect = (event) => {
@@ -394,6 +557,467 @@ const climateMetricBadges = [
   { key: 'humidity', label: '湿度' },
   { key: 'wind_speed', label: '风速' }
 ]
+const climateMetricLabels = {
+  temperature: '温度',
+  precipitation: '降水',
+  humidity: '湿度',
+  wind_speed: '风速'
+}
+const climateChartKeyMap = {
+  temperature: 'temperature',
+  precipitation: 'precipitation',
+  humidity: 'humidity',
+  wind_speed: 'windSpeed'
+}
+const climateDisplayMetrics = [
+  { key: 'temperature', shortLabel: '温度', label: '温度(°C)', chartKey: 'temperature' },
+  { key: 'precipitation', shortLabel: '降水', label: '降水量(mm)', chartKey: 'precipitation' },
+  { key: 'humidity', shortLabel: '湿度', label: '湿度(%)', chartKey: 'humidity' },
+  { key: 'wind_speed', shortLabel: '风速', label: '风速(m/s)', chartKey: 'windSpeed' }
+]
+const climateMetricOrder = climateDisplayMetrics.reduce((acc, metric, index) => {
+  acc[metric.key] = index
+  return acc
+}, {})
+
+const emptyClimateChartData = () => ({
+  temperature: [],
+  precipitation: [],
+  humidity: [],
+  windSpeed: []
+})
+
+const emptyMetricArrayMap = () => ({
+  temperature: [],
+  precipitation: [],
+  humidity: [],
+  wind_speed: []
+})
+
+const emptyMetricTextMap = () => ({
+  temperature: '',
+  precipitation: '',
+  humidity: '',
+  wind_speed: ''
+})
+
+const getMetricDefinition = (metricKey) => climateDisplayMetrics.find(metric => metric.key === metricKey)
+const getMetricLabel = (metricKey) => chartTitleMap[metricKey] || climateMetricLabels[metricKey] || metricKey
+const sortMetricKeys = (metricKeys = []) => (
+  Array.from(new Set(metricKeys))
+    .filter(metricKey => getMetricDefinition(metricKey))
+    .sort((a, b) => (climateMetricOrder[a] ?? 99) - (climateMetricOrder[b] ?? 99))
+)
+const getPayloadChartSeries = (payload, metricKey) => {
+  const metric = getMetricDefinition(metricKey)
+  if (!metric) return null
+  const candidateKeys = metric.chartKey === 'windSpeed'
+    ? [metric.chartKey, 'wind_speed']
+    : [metric.chartKey]
+  for (const key of candidateKeys) {
+    if (Object.prototype.hasOwnProperty.call(payload?.chartData || {}, key) && Array.isArray(payload.chartData[key]) && payload.chartData[key].length > 0) {
+      return payload.chartData[key]
+    }
+  }
+  return null
+}
+
+const hasPayloadChartSeries = (payload, metricKey) => {
+  const series = getPayloadChartSeries(payload, metricKey)
+  return Array.isArray(series) && series.length > 0
+}
+
+const formatClimateStatValue = (value) => {
+  const numericValue = Number(value)
+  return Number.isFinite(numericValue) ? numericValue.toFixed(1) : '--'
+}
+
+const getClimateMetricKeyFromIndicator = (indicator = '') => {
+  const indicatorText = String(indicator || '').trim()
+  if (!indicatorText) return ''
+  const matched = climateDisplayMetrics.find(metric => (
+    indicatorText.includes(metric.shortLabel)
+    || indicatorText.includes(metric.label)
+    || metric.label.includes(indicatorText)
+  ))
+  return matched?.key || ''
+}
+
+const calculateSeriesStatistics = (series = []) => {
+  const values = Array.isArray(series)
+    ? series.map(value => Number(value)).filter(value => Number.isFinite(value))
+    : []
+
+  if (values.length === 0) {
+    return null
+  }
+
+  const sum = values.reduce((accumulator, value) => accumulator + value, 0)
+  const average = sum / values.length
+  const variance = values.length > 1
+    ? values.reduce((accumulator, value) => accumulator + ((value - average) ** 2), 0) / (values.length - 1)
+    : 0
+
+  return {
+    avg: average,
+    max: Math.max(...values),
+    min: Math.min(...values),
+    std: Math.sqrt(variance)
+  }
+}
+
+const normalizeStatisticRecord = (metricKey, rawStat, indicatorFallback = '') => {
+  if (!rawStat || typeof rawStat !== 'object') {
+    return null
+  }
+
+  const average = rawStat.average ?? rawStat.avg ?? rawStat.mean
+  const max = rawStat.max ?? rawStat.maximum
+  const min = rawStat.min ?? rawStat.minimum
+  const stdDev = rawStat.stdDev ?? rawStat.std ?? rawStat.standardDeviation ?? rawStat.standard_deviation
+  const hasAnyValue = [average, max, min, stdDev].some(value => value !== null && value !== undefined && value !== '')
+
+  if (!hasAnyValue) {
+    return null
+  }
+
+  return {
+    metricKey,
+    indicator: rawStat.indicator || indicatorFallback,
+    average: formatClimateStatValue(average),
+    max: formatClimateStatValue(max),
+    min: formatClimateStatValue(min),
+    stdDev: formatClimateStatValue(stdDev)
+  }
+}
+
+const readStatisticRecordFromSource = (metric, source) => {
+  if (!source || typeof source !== 'object') {
+    return null
+  }
+
+  if (Array.isArray(source)) {
+    const matched = source.find((stat) => (
+      stat?.metricKey === metric.key
+      || getClimateMetricKeyFromIndicator(stat?.indicator) === metric.key
+    ))
+    return normalizeStatisticRecord(metric.key, matched, metric.label)
+  }
+
+  const directMetricRecord = source[metric.key]
+  if (directMetricRecord && typeof directMetricRecord === 'object' && !Array.isArray(directMetricRecord)) {
+    return normalizeStatisticRecord(metric.key, directMetricRecord, metric.label)
+  }
+
+  const hasFlatFields = ['avg', 'max', 'min', 'std'].some(statKey => (
+    Object.prototype.hasOwnProperty.call(source, `${metric.key}_${statKey}`)
+  ))
+  if (hasFlatFields) {
+    return normalizeStatisticRecord(metric.key, {
+      average: source[`${metric.key}_avg`],
+      max: source[`${metric.key}_max`],
+      min: source[`${metric.key}_min`],
+      stdDev: source[`${metric.key}_std`] ?? source[`${metric.key}_stdDev`]
+    }, metric.label)
+  }
+
+  return null
+}
+
+const buildClimateStatisticItems = (payload = {}) => {
+  const statisticsSource = payload?.statistics
+  const chartSource = payload?.chart_data || payload?.chartData || {}
+
+  return climateDisplayMetrics
+    .map((metric) => {
+      const fromStatistics = readStatisticRecordFromSource(metric, statisticsSource)
+      if (fromStatistics) {
+        return fromStatistics
+      }
+
+      const fromRootFields = readStatisticRecordFromSource(metric, payload)
+      if (fromRootFields) {
+        return fromRootFields
+      }
+
+      const series = getPayloadChartSeries({ chartData: chartSource }, metric.key)
+      const derived = calculateSeriesStatistics(series)
+      if (!derived) {
+        return null
+      }
+
+      return {
+        metricKey: metric.key,
+        indicator: metric.label,
+        average: formatClimateStatValue(derived.avg),
+        max: formatClimateStatValue(derived.max),
+        min: formatClimateStatValue(derived.min),
+        stdDev: formatClimateStatValue(derived.std)
+      }
+    })
+    .filter(Boolean)
+}
+
+const buildClimateChartData = (source = {}) => ({
+  temperature: Array.isArray(source.temperature) ? source.temperature : [],
+  precipitation: Array.isArray(source.precipitation) ? source.precipitation : [],
+  humidity: Array.isArray(source.humidity) ? source.humidity : [],
+  windSpeed: Array.isArray(source.wind_speed) ? source.wind_speed : Array.isArray(source.windSpeed) ? source.windSpeed : []
+})
+
+const getClimateChartDataKey = (metricKey) => {
+  return climateDisplayMetrics.find(metric => metric.key === metricKey)?.chartKey || metricKey
+}
+
+const getMetricsFromHistoryPayload = (payload) => {
+  const metrics = new Set(
+    buildClimateStatisticItems({
+      ...payload,
+      statistics: payload?.statistics,
+      chart_data: payload?.chartData || payload?.chart_data || {}
+    }).map(stat => stat.metricKey)
+  )
+
+  if (metrics.size === 0) {
+    const selected = payload?.selectedMetric
+    if (selected && Object.prototype.hasOwnProperty.call(climateMetricLabels, selected)) {
+      metrics.add(selected)
+    }
+
+    const inferred = payload?.fileCapabilities?.inferred_metric
+    if (inferred && Object.prototype.hasOwnProperty.call(climateMetricLabels, inferred)) {
+      metrics.add(inferred)
+    }
+  }
+
+  return Array.from(metrics)
+}
+
+const historyCount = computed(() => Array.isArray(historyItems.value) ? historyItems.value.length : 0)
+
+const chartHasData = (chartKey) => {
+  const dataKey = getClimateChartDataKey(chartKey)
+  return Array.isArray(chartData.value?.[dataKey]) && chartData.value[dataKey].length > 0
+}
+
+const resolveStatisticMetricKey = (stat) => {
+  if (stat?.metricKey) return stat.metricKey
+  const indicator = String(stat?.indicator || '')
+  const matched = climateDisplayMetrics.find(metric => indicator.includes(metric.shortLabel) || indicator === metric.label)
+  return matched?.key || ''
+}
+
+const getAvailableClimateMetricKeys = () => {
+  return climateDisplayMetrics
+    .filter(metric => (
+      chartHasData(metric.chartKey)
+      || statistics.value.some(stat => resolveStatisticMetricKey(stat) === metric.key)
+    ))
+    .map(metric => metric.key)
+}
+
+const getPayloadMetricKeys = (payload) => {
+  const metricKeys = new Set(getMetricsFromHistoryPayload(payload))
+  buildClimateStatisticItems({
+    ...payload,
+    statistics: payload?.statistics,
+    chart_data: payload?.chartData || payload?.chart_data || {}
+  }).forEach(stat => metricKeys.add(stat.metricKey))
+  return Array.from(metricKeys).filter(metricKey => getMetricDefinition(metricKey))
+}
+
+const isMetricAvailable = (metricKey) => getAvailableClimateMetricKeys().includes(metricKey)
+
+const isMetricVisible = (metricKey) => activeClimateMetrics.value.includes(metricKey) && isMetricAvailable(metricKey)
+
+const visibleStatistics = computed(() => (
+  climateDisplayMetrics
+    .filter(metric => isMetricVisible(metric.key))
+    .flatMap(metric => statistics.value.filter(stat => resolveStatisticMetricKey(stat) === metric.key))
+))
+
+const hasVisibleMetrics = computed(() => (
+  activeClimateMetrics.value.some(metricKey => isMetricAvailable(metricKey))
+))
+
+const shouldShowChart = (metricKey) => {
+  const metric = climateDisplayMetrics.find(item => item.key === metricKey)
+  return Boolean(metric && isMetricVisible(metric.key) && chartHasData(metric.chartKey))
+}
+
+const setActiveClimateMetrics = (preferredKeys) => {
+  const availableKeys = getAvailableClimateMetricKeys()
+  const preferred = Array.isArray(preferredKeys)
+    ? sortMetricKeys(preferredKeys.filter(key => availableKeys.includes(key)))
+    : availableKeys
+  activeClimateMetrics.value = preferred
+}
+
+const syncCurrentMetricMeta = (sourceLabel = '') => {
+  const nextLabels = emptyMetricArrayMap()
+  const nextSources = emptyMetricTextMap()
+  getAvailableClimateMetricKeys().forEach(metricKey => {
+    nextLabels[metricKey] = Array.isArray(chartYearLabels.value) ? chartYearLabels.value : []
+    nextSources[metricKey] = sourceLabel
+  })
+  chartLabelsByMetric.value = nextLabels
+  metricSourceLabels.value = nextSources
+}
+
+const getChartSourceLabel = (metricKey) => metricDisplaySources.value?.[metricKey] || metricSourceLabels.value?.[metricKey] || ''
+
+const setChartSourceLabel = (metricKey, sourceLabel) => {
+  metricSourceLabels.value = {
+    ...metricSourceLabels.value,
+    [metricKey]: sourceLabel || ''
+  }
+  metricDisplaySources.value = {
+    ...metricDisplaySources.value,
+    [metricKey]: sourceLabel || ''
+  }
+}
+
+const clearChartSourceLabels = () => {
+  metricSourceLabels.value = emptyMetricTextMap()
+  metricDisplaySources.value = emptyMetricTextMap()
+}
+
+const refreshHasData = () => {
+  hasData.value = statistics.value.length > 0 || Object.values(chartData.value).some(values => values.length > 0)
+}
+
+const clearMetricDisplayState = (metricKey) => {
+  const metric = getMetricDefinition(metricKey)
+  if (!metric) return
+
+  chartData.value = {
+    ...chartData.value,
+    [metric.chartKey]: []
+  }
+  chartLabelsByMetric.value = {
+    ...chartLabelsByMetric.value,
+    [metricKey]: []
+  }
+  metricSourceLabels.value = {
+    ...metricSourceLabels.value,
+    [metricKey]: ''
+  }
+  metricDisplaySources.value = {
+    ...metricDisplaySources.value,
+    [metricKey]: ''
+  }
+  statistics.value = statistics.value.filter(stat => resolveStatisticMetricKey(stat) !== metricKey)
+  activeClimateMetrics.value = sortMetricKeys(activeClimateMetrics.value.filter(key => key !== metricKey))
+  refreshHasData()
+}
+
+const buildDownloadBaseName = () => {
+  const rawName = selectedFile.value?.name || restoredFileName.value || '气候监测结果'
+  return String(rawName)
+    .replace(/\.[^.]+$/, '')
+    .replace(/[\\/:*?"<>|\s]+/g, '_')
+    .replace(/^_+|_+$/g, '') || '气候监测结果'
+}
+
+const buildDownloadName = (suffix, extension) => `${buildDownloadBaseName()}_${suffix}.${extension}`
+
+const csvEscape = (value) => {
+  const text = String(value ?? '')
+  const escaped = text.replace(/"/g, '""')
+  return /[",\n\r]/.test(escaped) ? `"${escaped}"` : escaped
+}
+
+const downloadCalculationResult = async () => {
+  if (!hasData.value || statistics.value.length === 0) {
+    errorMessage.value = '当前没有可下载的计算结果'
+    return
+  }
+
+  try {
+    const headers = ['指标', '平均值', '最大值', '最小值', '标准差', '当前显示', '来源']
+    const rows = statistics.value.map((stat) => {
+      const metricKey = resolveStatisticMetricKey(stat)
+      return [
+        stat.indicator || getMetricLabel(metricKey),
+        stat.average,
+        stat.max,
+        stat.min,
+        stat.stdDev,
+        isMetricVisible(metricKey) ? '是' : '否',
+        getChartSourceLabel(metricKey) || ''
+      ].map(csvEscape).join(',')
+    })
+    const csvContent = ['\ufeff' + headers.map(csvEscape).join(','), ...rows].join('\n')
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    await saveBlobAsFile(blob, buildDownloadName('气候计算结果', 'csv'), 'text/csv')
+    successMessage.value = '计算结果已下载'
+    setTimeout(() => {
+      successMessage.value = ''
+    }, 3000)
+  } catch (error) {
+    if (error?.name === 'AbortError') return
+    console.error('下载计算结果失败:', error)
+    errorMessage.value = '下载计算结果失败'
+  }
+}
+
+const downloadChartImage = async (metricKey) => {
+  const canvas = chartRefMap[metricKey]?.value
+  if (!canvas || !chartHasData(metricKey)) {
+    errorMessage.value = '当前图表暂无可下载的图片'
+    return
+  }
+
+  try {
+    const saveTarget = await prepareFileSave(buildDownloadName(getMetricLabel(metricKey), 'png'), 'image/png')
+    const blob = await new Promise((resolve, reject) => {
+      canvas.toBlob((result) => {
+        if (!result) {
+          reject(new Error('图表图片生成失败'))
+          return
+        }
+        resolve(result)
+      }, 'image/png')
+    })
+    await saveTarget.write(blob)
+    successMessage.value = `${getMetricLabel(metricKey)}已下载`
+    setTimeout(() => {
+      successMessage.value = ''
+    }, 3000)
+  } catch (error) {
+    if (error?.name === 'AbortError') return
+    console.error('下载结果图片失败:', error)
+    errorMessage.value = '下载结果图片失败'
+  }
+}
+
+const toggleClimateMetric = async (metricKey) => {
+  if (!isMetricAvailable(metricKey)) return
+  if (activeClimateMetrics.value.includes(metricKey)) {
+    activeClimateMetrics.value = sortMetricKeys(activeClimateMetrics.value.filter(key => key !== metricKey))
+    metricDisplaySources.value = {
+      ...metricDisplaySources.value,
+      [metricKey]: ''
+    }
+  } else {
+    activeClimateMetrics.value = sortMetricKeys([...activeClimateMetrics.value, metricKey])
+    if (!metricDisplaySources.value?.[metricKey] && metricSourceLabels.value?.[metricKey]) {
+      metricDisplaySources.value = {
+        ...metricDisplaySources.value,
+        [metricKey]: metricSourceLabels.value[metricKey]
+      }
+    }
+  }
+  await nextTick()
+  generateCharts()
+}
+
+const hideClimateMetric = async (metricKey) => {
+  if (!isMetricAvailable(metricKey)) return
+  clearMetricDisplayState(metricKey)
+  await nextTick()
+  generateCharts()
+}
 
 const isClimateAnalysisBlocked = computed(() => !!fileCapabilities.value?.unsupported_for_climate)
 const showMetricSelector = computed(() => !!fileCapabilities.value?.manual_selection_required)
@@ -410,6 +1034,34 @@ const selectedMetricLabel = computed(() => {
   const current = climateMetricBadges.find(metric => metric.key === selectedMetric.value)
   return current ? current.label : ''
 })
+
+const getPrimaryHistoryMetricKey = (payload = {}) => {
+  const preferredKeys = [
+    payload?.selectedMetric,
+    payload?.fileCapabilities?.inferred_metric,
+    ...(Array.isArray(payload?.activeClimateMetrics) ? payload.activeClimateMetrics : []),
+    ...getPayloadMetricKeys(payload)
+  ]
+
+  return preferredKeys.find(metricKey => (
+    metricKey && Object.prototype.hasOwnProperty.call(climateMetricLabels, metricKey)
+  )) || ''
+}
+
+const getHistorySubtitle = (item) => {
+  const payload = item?.payload || {}
+  const metricKey = getPrimaryHistoryMetricKey(payload)
+  const metricLabel = metricKey ? climateMetricLabels[metricKey] : ''
+  const count = Array.isArray(payload.statistics) && payload.statistics.length > 0
+    ? payload.statistics.length
+    : 1
+
+  if (metricLabel) {
+    return `${metricLabel} ${count}组统计结果`
+  }
+
+  return item?.subtitle || '气候结果'
+}
 
 const capabilityModeText = computed(() => {
   if (!fileCapabilities.value) return ''
@@ -445,24 +1097,29 @@ const clearAnalysisState = () => {
   analysisNotice.value = ''
   statistics.value = []
   analysisTaskId.value = null
-  chartData.value = {
-    temperature: [],
-    precipitation: [],
-    humidity: [],
-    windSpeed: []
-  }
+  chartData.value = emptyClimateChartData()
+  activeClimateMetrics.value = []
   chartYearLabels.value = []
+  chartLabelsByMetric.value = emptyMetricArrayMap()
+  metricSourceLabels.value = emptyMetricTextMap()
+  clearChartSourceLabels()
 }
 
 const buildHistoryPayload = () => ({
   fileName: selectedFile.value?.name || restoredFileName.value || '气候统计结果',
   fileCapabilities: fileCapabilities.value,
   selectedMetric: selectedMetric.value,
+  activeClimateMetrics: activeClimateMetrics.value,
   statistics: statistics.value,
-  analysisNotice: analysisNotice.value,
   chartData: chartData.value,
-  chartYearLabels: chartYearLabels.value
+  chartYearLabels: chartYearLabels.value,
+  chartLabelsByMetric: chartLabelsByMetric.value,
+  metricSourceLabels: metricSourceLabels.value
 })
+
+const refreshHistoryItems = () => {
+  historyItems.value = loadResultHistory(HISTORY_KEY)
+}
 
 const persistCurrentResult = () => {
   if (statistics.value.length === 0) {
@@ -473,43 +1130,74 @@ const persistCurrentResult = () => {
   historyItems.value = saveResultHistory(HISTORY_KEY, {
     id: `${payload.fileName}_${Date.now()}`,
     title: payload.fileName,
-    subtitle: `${statistics.value.length} 组统计结果`,
+    subtitle: getHistorySubtitle({ payload }),
     timestamp: Date.now(),
     payload
-  })
+  }, { maxItems: 24 })
 }
 
 const restoreHistoryItem = (item) => {
   const payload = item?.payload
-  if (!payload?.statistics || !payload?.chartData) {
+  if (!payload?.statistics || !(payload?.chartData || payload?.chart_data)) {
     errorMessage.value = '该历史结果已失效，请重新分析'
     return
   }
 
   selectedFile.value = null
   restoredFileName.value = payload.fileName || item.title || ''
-  fileCapabilities.value = payload.fileCapabilities || null
-  selectedMetric.value = payload.selectedMetric || ''
-  statistics.value = Array.isArray(payload.statistics) ? payload.statistics : []
-  analysisNotice.value = payload.analysisNotice || ''
-  chartData.value = {
-    temperature: Array.isArray(payload.chartData.temperature) ? payload.chartData.temperature : [],
-    precipitation: Array.isArray(payload.chartData.precipitation) ? payload.chartData.precipitation : [],
-    humidity: Array.isArray(payload.chartData.humidity) ? payload.chartData.humidity : [],
-    windSpeed: Array.isArray(payload.chartData.windSpeed) ? payload.chartData.windSpeed : []
+  if (!hasData.value) {
+    fileCapabilities.value = payload.fileCapabilities || null
+    selectedMetric.value = payload.selectedMetric || ''
   }
-  chartYearLabels.value = Array.isArray(payload.chartYearLabels) ? payload.chartYearLabels : []
-  hasData.value = true
-  errorMessage.value = ''
-  successMessage.value = '已恢复历史统计结果'
 
+  const metricKeys = getPayloadMetricKeys(payload)
+  const incomingStats = buildClimateStatisticItems({
+    ...payload,
+    statistics: payload.statistics,
+    chart_data: payload.chartData || payload.chart_data || {}
+  }).filter(stat => metricKeys.includes(stat.metricKey))
+  const incomingStatMetricKeys = Array.from(new Set(incomingStats.map(stat => stat.metricKey).filter(Boolean)))
+
+  statistics.value = [
+    ...statistics.value.filter(stat => !incomingStatMetricKeys.includes(resolveStatisticMetricKey(stat))),
+    ...incomingStats
+  ]
+
+  const nextChartData = { ...chartData.value }
+  const nextMetricLabels = { ...chartLabelsByMetric.value }
+  const nextMetricSources = { ...metricSourceLabels.value }
+  const sourceLabel = payload.fileName || item.title || ''
+  metricKeys.forEach(metricKey => {
+    const metric = getMetricDefinition(metricKey)
+    if (!metric) return
+    const series = getPayloadChartSeries(payload, metricKey)
+    if (series && series.length > 0) {
+      nextChartData[metric.chartKey] = series
+      nextMetricLabels[metricKey] = Array.isArray(payload.chartLabelsByMetric?.[metricKey])
+        ? payload.chartLabelsByMetric[metricKey]
+        : Array.isArray(payload.chartYearLabels)
+          ? payload.chartYearLabels
+          : []
+      nextMetricSources[metricKey] = sourceLabel
+      setChartSourceLabel(metricKey, sourceLabel)
+    }
+  })
+  chartData.value = nextChartData
+  chartLabelsByMetric.value = nextMetricLabels
+  metricSourceLabels.value = nextMetricSources
+  chartYearLabels.value = Array.isArray(payload.chartYearLabels) ? payload.chartYearLabels : chartYearLabels.value
+  refreshHasData()
+  activeClimateMetrics.value = sortMetricKeys([...activeClimateMetrics.value, ...metricKeys])
+  errorMessage.value = ''
+  successMessage.value = '已添加到对应指标图框'
   setTimeout(() => {
     generateCharts()
   }, 100)
 }
 
 const deleteHistoryItem = (item) => {
-  historyItems.value = removeResultHistory(HISTORY_KEY, item.id)
+  removeResultHistory(HISTORY_KEY, item.id)
+  refreshHistoryItems()
   successMessage.value = '历史记录已删除'
 }
 
@@ -523,7 +1211,7 @@ const clearHistoryItems = () => {
   }
 
   clearResultHistory(HISTORY_KEY)
-  historyItems.value = []
+  refreshHistoryItems()
   successMessage.value = '历史记录已清空'
 }
 
@@ -568,6 +1256,7 @@ const startAnalysis = async () => {
   }
   
   try {
+    clearAnalysisState()
     isAnalyzing.value = true
     errorMessage.value = ''
     uploadProgress.value = 0
@@ -826,37 +1515,6 @@ const safeGetValue = (value, defaultValue = '--', precision = 1) => {
   return Number(value).toFixed(precision)
 }
 
-const climateMetricDefinitions = [
-  { key: 'temperature', label: '温度(°C)' },
-  { key: 'precipitation', label: '降水量(mm)' },
-  { key: 'humidity', label: '湿度(%)' },
-  { key: 'wind_speed', label: '风速(m/s)' }
-]
-
-const buildStatisticItems = (data) => {
-  return climateMetricDefinitions
-    .map(metric => {
-      const avgKey = `${metric.key}_avg`
-      const maxKey = `${metric.key}_max`
-      const minKey = `${metric.key}_min`
-      const stdKey = `${metric.key}_std`
-      const hasMetric = [avgKey, maxKey, minKey, stdKey].some(key => data[key] !== null && data[key] !== undefined && !isNaN(data[key]))
-
-      if (!hasMetric) {
-        return null
-      }
-
-      return {
-        indicator: metric.label,
-        average: safeGetValue(data[avgKey]),
-        max: safeGetValue(data[maxKey]),
-        min: safeGetValue(data[minKey]),
-        stdDev: safeGetValue(data[stdKey])
-      }
-    })
-    .filter(Boolean)
-}
-
 // 加载分析结果
 const loadAnalysisResults = async () => {
   try {
@@ -883,65 +1541,24 @@ const loadAnalysisResults = async () => {
     // 验证数据完整性
     validateAnalysisData(data)
     
-    statistics.value = buildStatisticItems(data)
+    clearAnalysisState()
+    statistics.value = buildClimateStatisticItems(data)
 
-    const rasterMeta = data.chart_data?.raster_metadata
-    if (rasterMeta?.source_type === 'single_metric_raster') {
-      const metricMap = {
-        temperature: '温度',
-        precipitation: '降水量',
-        humidity: '湿度',
-        wind_speed: '风速'
-      }
-      analysisNotice.value = `当前上传的是单变量气候栅格，系统识别并计算了“${metricMap[rasterMeta.inferred_metric] || rasterMeta.inferred_metric}”指标；其余指标未包含在该文件中，因此不会显示为计算结果。`
-    } else if (data.chart_data?.vector_metadata?.source_type === 'vector_attribute_table') {
-      const metricMap = {
-        temperature: '温度',
-        precipitation: '降水量',
-        humidity: '湿度',
-        wind_speed: '风速'
-      }
-      const labels = (data.chart_data.vector_metadata.available_metrics || [])
-        .map(key => metricMap[key] || key)
-        .join('、')
-      const yearRange = data.chart_data.vector_metadata.year_range
-      const yearText = Array.isArray(yearRange) && yearRange.length === 2
-        ? `，年份范围 ${yearRange[0]}-${yearRange[1]}`
-        : ''
-      const layoutText = data.chart_data.vector_metadata.table_layout === 'year_wide'
-        ? '年份字段宽表'
-        : '属性表'
-      analysisNotice.value = `当前上传的是 Shapefile ${layoutText}，系统已自动识别并统计其中的 ${labels || '气候'} 数据${yearText}。`
-    } else {
-      analysisNotice.value = ''
-    }
-    
     // 更新图表数据 - 添加验证
-    if (data.chart_data && typeof data.chart_data === 'object') {
-      chartData.value = {
-        temperature: Array.isArray(data.chart_data.temperature) ? data.chart_data.temperature : [],
-        precipitation: Array.isArray(data.chart_data.precipitation) ? data.chart_data.precipitation : [],
-        humidity: Array.isArray(data.chart_data.humidity) ? data.chart_data.humidity : [],
-        windSpeed: Array.isArray(data.chart_data.wind_speed) ? data.chart_data.wind_speed : []
-      }
-      chartYearLabels.value = Array.isArray(data.chart_data.vector_metadata?.year_labels)
-        ? data.chart_data.vector_metadata.year_labels
-        : []
-    } else {
-      console.warn('图表数据不存在或格式无效，使用空数据')
-      chartData.value = {
-        temperature: [],
-        precipitation: [],
-        humidity: [],
-        windSpeed: []
-      }
-      chartYearLabels.value = []
-    }
+    const chartSource = data.chart_data && typeof data.chart_data === 'object' ? data.chart_data : {}
+    chartData.value = buildClimateChartData(chartSource)
+    chartYearLabels.value = Array.isArray(chartSource.vector_metadata?.year_labels)
+      ? chartSource.vector_metadata.year_labels
+      : []
+  clearChartSourceLabels()
 
     if (statistics.value.length === 0) {
       throw new Error('当前文件未解析出可展示的气候指标')
     }
 
+    syncCurrentMetricMeta(selectedFile.value?.name || restoredFileName.value || '当前分析结果')
+    setActiveClimateMetrics()
+    refreshHasData()
     persistCurrentResult()
     
     // 生成图表
@@ -964,9 +1581,15 @@ const generateCharts = () => {
   drawWindSpeedChart()
 }
 
-const getTimeAxisLabel = (index) => {
-  const label = chartYearLabels.value[index]
+const getTimeAxisLabel = (index, metricKey = '') => {
+  const labels = chartLabelsByMetric.value?.[metricKey] || chartYearLabels.value
+  const label = labels[index]
   return label !== undefined && label !== null ? String(label) : String(index + 1)
+}
+
+const getChartX = (margin, chartWidth, index, length) => {
+  if (length <= 1) return margin.left + chartWidth / 2
+  return margin.left + (chartWidth / (length - 1)) * index
 }
 
 // 清理函数
@@ -978,9 +1601,17 @@ const cleanup = () => {
 }
 
 // 组件挂载
-onMounted(() => {
+onMounted(async () => {
   console.log('气候监测组件已挂载')
-  historyItems.value = loadResultHistory(HISTORY_KEY)
+  if (getCurrentUserContext()) {
+    try {
+      const user = await authService.getProfile({ silentError: true })
+      setCurrentUserContext(user)
+    } catch {
+      setCurrentUserContext(null)
+    }
+  }
+  refreshHistoryItems()
 })
 
 // 组件卸载时清理
@@ -1078,8 +1709,8 @@ const drawTemperatureChart = () => {
   
   const step = Math.max(1, Math.floor(data.length / 8))
   for (let i = 0; i < data.length; i += step) {
-    const x = margin.left + (chartWidth / (data.length - 1)) * i
-    ctx.fillText(getTimeAxisLabel(i), x, canvas.height - margin.bottom + 20)
+    const x = getChartX(margin, chartWidth, i, data.length)
+    ctx.fillText(getTimeAxisLabel(i, 'temperature'), x, canvas.height - margin.bottom + 20)
   }
   
   // 绘制轴标签
@@ -1103,7 +1734,7 @@ const drawTemperatureChart = () => {
   ctx.beginPath()
   
   data.forEach((value, index) => {
-    const x = margin.left + (chartWidth / (data.length - 1)) * index
+    const x = getChartX(margin, chartWidth, index, data.length)
     const y = margin.top + chartHeight - ((value - minValue) / range) * chartHeight
     
     if (index === 0) {
@@ -1118,7 +1749,7 @@ const drawTemperatureChart = () => {
   // 绘制数据点
   ctx.fillStyle = '#e74c3c'
   data.forEach((value, index) => {
-    const x = margin.left + (chartWidth / (data.length - 1)) * index
+    const x = getChartX(margin, chartWidth, index, data.length)
     const y = margin.top + chartHeight - ((value - minValue) / range) * chartHeight
     
     ctx.beginPath()
@@ -1214,7 +1845,7 @@ const drawPrecipitationChart = () => {
   const step = Math.max(1, Math.floor(data.length / 8))
   for (let i = 0; i < data.length; i += step) {
     const x = margin.left + (chartWidth / data.length) * (i + 0.5)
-    ctx.fillText(getTimeAxisLabel(i), x, canvas.height - margin.bottom + 20)
+    ctx.fillText(getTimeAxisLabel(i, 'precipitation'), x, canvas.height - margin.bottom + 20)
   }
   
   // 绘制轴标签
@@ -1331,8 +1962,8 @@ const drawHumidityChart = () => {
   
   const step = Math.max(1, Math.floor(data.length / 8))
   for (let i = 0; i < data.length; i += step) {
-    const x = margin.left + (chartWidth / (data.length - 1)) * i
-    ctx.fillText(getTimeAxisLabel(i), x, canvas.height - margin.bottom + 20)
+    const x = getChartX(margin, chartWidth, i, data.length)
+    ctx.fillText(getTimeAxisLabel(i, 'humidity'), x, canvas.height - margin.bottom + 20)
   }
   
   // 绘制轴标签
@@ -1359,7 +1990,7 @@ const drawHumidityChart = () => {
   ctx.moveTo(margin.left, canvas.height - margin.bottom)
   
   data.forEach((value, index) => {
-    const x = margin.left + (chartWidth / (data.length - 1)) * index
+    const x = getChartX(margin, chartWidth, index, data.length)
     const y = margin.top + chartHeight - ((value - minValue) / range) * chartHeight
     ctx.lineTo(x, y)
   })
@@ -1535,6 +2166,9 @@ const drawWindSpeedChart = () => {
 
 .left-panel {
   width: 360px;
+  min-width: 360px;
+  max-width: 360px;
+  flex: 0 0 360px;
   background: #ffffff;
   border-right: 1px solid #dbe6f0;
   display: flex;
@@ -1564,11 +2198,12 @@ const drawWindSpeedChart = () => {
 }
 
 .panel-header {
-  background: linear-gradient(135deg, #1f78d1 0%, #4a9ae6 100%);
+  background: #132a48;
   color: white;
-  padding: 22px 18px;
+  padding: 18px 18px 16px;
   text-align: left;
-  box-shadow: 0 2px 10px rgba(31, 120, 209, 0.18);
+  box-shadow: none;
+  border-bottom: 1px solid rgba(153, 177, 202, 0.14);
 }
 
 .back-home-link {
@@ -1600,18 +2235,21 @@ const drawWindSpeedChart = () => {
   margin: 0;
   font-size: 17px;
   font-weight: 700;
+  line-height: 1.22;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .panel-header p {
   margin: 10px 0 0 0;
   font-size: 12px;
-  opacity: 0.92;
+  color: rgba(255, 255, 255, 0.82);
   line-height: 1.6;
 }
 
 /* 功能区块 */
 .section {
-  padding: 18px 16px;
+  padding: 14px 16px;
   border-bottom: 1px solid #edf2f7;
 }
 
@@ -1623,14 +2261,15 @@ const drawWindSpeedChart = () => {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 14px;
-  font-weight: 600;
-  color: #2f455c;
+  margin-bottom: 12px;
+  font-weight: 700;
+  color: #223244;
   font-size: 15px;
 }
 
 .section-icon {
   font-size: 16px;
+  color: #2f97b9;
 }
 
 .section-content {
@@ -1658,9 +2297,9 @@ const drawWindSpeedChart = () => {
 .upload-zone {
   width: 100%;
   background: #f8fbfd;
-  border: 1px dashed #cfddea;
-  border-radius: 10px;
-  padding: 24px 16px;
+  border: 1px dashed #cbd8e4;
+  border-radius: 8px;
+  padding: 18px 14px;
   text-align: center;
   cursor: pointer;
   transition: all 0.2s;
@@ -1671,13 +2310,13 @@ const drawWindSpeedChart = () => {
 }
 
 .upload-zone:hover {
-  border-color: #4a9ae6;
-  background: #f2f8fd;
+  border-color: #8fb3cc;
+  background: #eef6fb;
 }
 
 .upload-icon {
   font-size: 24px;
-  color: #1890ff;
+  color: #2f97b9;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1692,47 +2331,47 @@ const drawWindSpeedChart = () => {
 .upload-text {
   font-size: 14px;
   font-weight: 600;
-  color: #2f455c;
+  color: #223244;
 }
 
 .upload-hint {
   font-size: 12px;
-  color: #667789;
+  color: #66798a;
 }
 
 .upload-types {
   font-size: 11px;
-  color: #8a98a8;
+  color: #8093a3;
 }
 
 .file-status {
   font-size: 12px;
-  color: #5f7184;
+  color: #66798a;
   text-align: center;
   padding: 8px 12px;
   background: #f7fafc;
-  border-radius: 8px;
-  border: 1px solid #dbe6f0;
+  border-radius: 7px;
+  border: 1px solid #d9e3ed;
 }
 
 .capability-card {
-  background: linear-gradient(180deg, #f7fbff 0%, #ffffff 100%);
-  border: 1px solid #d7e7f6;
-  border-radius: 10px;
+  background: #f8fbfd;
+  border: 1px solid #d9e3ed;
+  border-radius: 8px;
   padding: 12px;
-  box-shadow: 0 8px 20px rgba(31, 120, 209, 0.06);
+  box-shadow: none;
 }
 
 .capability-title {
   font-size: 13px;
   font-weight: 700;
-  color: #24405f;
+  color: #223244;
   margin-bottom: 6px;
 }
 
 .capability-mode {
   font-size: 12px;
-  color: #5d7488;
+  color: #66798a;
   margin-bottom: 10px;
 }
 
@@ -1746,7 +2385,7 @@ const drawWindSpeedChart = () => {
   margin-top: 10px;
   font-size: 12px;
   line-height: 1.6;
-  color: #5d7488;
+  color: #66798a;
 }
 
 .capability-reason.warning {
@@ -1756,20 +2395,20 @@ const drawWindSpeedChart = () => {
 .metric-selector {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid #e5eef6;
+  border-top: 1px solid #edf2f7;
 }
 
 .metric-selector-label {
   margin-bottom: 8px;
   font-size: 12px;
   font-weight: 700;
-  color: #36516b;
+  color: #223244;
 }
 
 .metric-selector-current {
   margin-bottom: 10px;
   font-size: 12px;
-  color: #1f78d1;
+  color: #1f6f8f;
   font-weight: 700;
 }
 
@@ -1783,7 +2422,7 @@ const drawWindSpeedChart = () => {
   height: 32px;
   padding: 0 12px;
   border-radius: 999px;
-  border: 1px solid #cfe0ee;
+  border: 1px solid #d9e3ed;
   background: #f8fbfd;
   color: #587085;
   font-size: 12px;
@@ -1793,16 +2432,16 @@ const drawWindSpeedChart = () => {
 }
 
 .metric-option:hover {
-  border-color: #8dbce8;
-  color: #1f78d1;
-  background: #eef6fd;
+  border-color: #8fb3cc;
+  color: #1f6f8f;
+  background: #eef6fb;
 }
 
 .metric-option.active {
-  border-color: #9fc8f1;
-  color: #1f78d1;
-  background: #e8f4ff;
-  box-shadow: inset 0 0 0 1px rgba(31, 120, 209, 0.08);
+  border-color: #2f97b9;
+  color: #1f6f8f;
+  background: #eaf5fa;
+  box-shadow: inset 0 0 0 1px rgba(47, 151, 185, 0.08);
 }
 
 .capability-tag {
@@ -1814,8 +2453,8 @@ const drawWindSpeedChart = () => {
 }
 
 .capability-tag.active {
-  background: #e8f4ff;
-  color: #1f78d1;
+  background: #eaf5fa;
+  color: #1f6f8f;
   border-color: #b7d8fb;
 }
 
@@ -1828,16 +2467,16 @@ const drawWindSpeedChart = () => {
 .analysis-btn {
   width: 100%;
   height: 42px;
-  background: #1f78d1;
+  background: #1677ff;
   color: white;
-  border: none;
+  border: 1px solid rgba(47, 151, 185, 0.2);
   padding: 0 16px;
-  border-radius: 8px;
+  border-radius: 7px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: 0 4px 10px rgba(31, 120, 209, 0.18);
+  box-shadow: none;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1845,15 +2484,15 @@ const drawWindSpeedChart = () => {
 }
 
 .analysis-btn:hover:not(.disabled) {
-  background: #3389dd;
+  background: #0e62dd;
   transform: translateY(-1px);
-  box-shadow: 0 8px 18px rgba(31, 120, 209, 0.2);
+  box-shadow: 0 8px 18px rgba(37, 120, 156, 0.18);
 }
 
 .analysis-btn.disabled {
   cursor: not-allowed;
-  background: #f5f5f5;
-  color: #999;
+  background: #d6dee6;
+  color: #7c8d9d;
   opacity: 0.6;
   transform: none;
   box-shadow: none;
@@ -1862,54 +2501,107 @@ const drawWindSpeedChart = () => {
 .history-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-height: 240px;
+  gap: 8px;
+  max-height: 220px;
   overflow-y: auto;
 }
 
+.history-card {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #1d4264;
+  border-radius: 8px;
+  background: #0d2745;
+}
+
+.history-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.history-card__icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  color: #26b6e8;
+}
+
+.history-card__title {
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.history-card__summary-row,
 .history-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
+  margin-top: 10px;
   font-size: 12px;
-  color: #6f8192;
+  color: #8299bc;
 }
 
+.history-card__count {
+  min-width: 0;
+  color: #c4d4eb;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.history-card__actions,
 .history-toolbar-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.history-card__description {
+  margin-top: 8px;
+  color: #8299bc;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .history-action-btn {
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: #4a7db2;
+  min-width: 56px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid #1c4265;
+  border-radius: 6px;
+  background: #0d2745;
+  color: #c4d4eb;
   font-size: 12px;
   font-weight: 600;
+  line-height: 1;
   cursor: pointer;
 }
 
 .history-action-btn.primary {
-  color: #1f78d1;
+  color: #ffffff;
+  background: #183b61;
+  border-color: #285a82;
 }
 
 .history-item {
   width: 100%;
   display: flex;
   align-items: stretch;
-  gap: 10px;
+  gap: 8px;
   padding: 10px;
-  border: 1px solid #dbe6f0;
-  border-radius: 10px;
-  background: #f8fbfd;
+  border: 1px solid #1d4264;
+  border-radius: 8px;
+  background: #102d4d;
 }
 
 .history-item:hover {
-  border-color: #bfd5e8;
-  background: #eef5fb;
+  border-color: #285a82;
+  background: #183b61;
 }
 
 .history-item-main {
@@ -1929,10 +2621,12 @@ const drawWindSpeedChart = () => {
 .history-delete-btn {
   align-self: center;
   min-width: 44px;
-  padding: 6px 0;
-  border: none;
-  background: transparent;
-  color: #d95c5c;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid rgba(239, 68, 68, 0.34);
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.12);
+  color: #ffb0a5;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -1941,7 +2635,7 @@ const drawWindSpeedChart = () => {
 .history-item-title {
   font-size: 13px;
   font-weight: 700;
-  color: #2f455c;
+  color: #ffffff;
   line-height: 1.5;
   word-break: break-all;
 }
@@ -1950,16 +2644,16 @@ const drawWindSpeedChart = () => {
 .history-item-time {
   margin-top: 4px;
   font-size: 12px;
-  color: #6f8192;
+  color: #8299bc;
 }
 
 .history-empty {
   margin-top: 10px;
-  padding: 16px 12px;
-  border: 1px dashed #dbe6f0;
-  border-radius: 10px;
-  background: #f8fbfd;
-  color: #8a98a8;
+  padding: 14px 12px;
+  border: 1px dashed #285a82;
+  border-radius: 8px;
+  background: #102d4d;
+  color: #8299bc;
   font-size: 13px;
   text-align: center;
 }
@@ -1991,7 +2685,7 @@ const drawWindSpeedChart = () => {
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #1890ff 0%, #40a9ff 100%);
+  background: #1677ff;
   transition: width 0.5s ease-in-out;
   border-radius: 4px;
   position: relative;
@@ -2005,7 +2699,7 @@ const drawWindSpeedChart = () => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%);
+  background: #1677ff;
   animation: shimmer 2s infinite;
 }
 
@@ -2026,21 +2720,23 @@ const drawWindSpeedChart = () => {
 }
 
 .error-message {
-  background: #fff7f7;
-  color: #b42318;
-  padding: 16px;
-  border-radius: 10px;
-  margin: 0 16px 16px;
-  border: 1px solid #f3d2cf;
-  font-size: 14px;
+  background: rgba(239, 68, 68, 0.12);
+  color: #ffaaa3;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin: 12px 16px 16px;
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  font-size: 13px;
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  box-shadow: 0 8px 20px rgba(180, 35, 24, 0.06);
+  gap: 10px;
+  box-shadow: none;
 }
 
 .error-icon {
-  font-size: 20px;
+  width: 18px;
+  height: 18px;
+  font-size: 18px;
   flex-shrink: 0;
   margin-top: 2px;
 }
@@ -2051,13 +2747,15 @@ const drawWindSpeedChart = () => {
 
 .error-title {
   font-weight: 600;
-  margin-bottom: 5px;
-  font-size: 15px;
+  margin-bottom: 4px;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .error-details {
-  margin-bottom: 10px;
-  line-height: 1.4;
+  margin-bottom: 8px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .error-actions {
@@ -2066,56 +2764,59 @@ const drawWindSpeedChart = () => {
 }
 
 .retry-btn, .dismiss-btn {
-  height: 34px;
-  padding: 0 16px;
-  border: none;
-  border-radius: 8px;
-  font-size: 13px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid #1c4265;
+  border-radius: 6px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .retry-btn {
-  background: #1f78d1;
+  background: #1677ff;
   color: white;
-  box-shadow: 0 4px 10px rgba(31, 120, 209, 0.18);
+  box-shadow: none;
 }
 
 .retry-btn:hover {
-  background: #3389dd;
-  transform: translateY(-1px);
-  box-shadow: 0 8px 18px rgba(31, 120, 209, 0.2);
+  background: #2688ff;
+  transform: none;
+  box-shadow: none;
 }
 
 .dismiss-btn {
-  background: #f7fafc;
-  color: #5f7184;
-  border: 1px solid #dbe6f0;
+  background: #0d2745;
+  color: #c4d4eb;
+  border: 1px solid #1c4265;
 }
 
 .dismiss-btn:hover {
-  background: #eef5fb;
-  border-color: #bfd5e8;
-  color: #315f8c;
+  background: #183b61;
+  border-color: #285a82;
+  color: #ffffff;
 }
 
 .success-message {
-  background: #f4fbf7;
-  color: #1f7a4f;
-  padding: 16px;
-  border-radius: 10px;
-  margin: 0 16px 16px;
-  border: 1px solid #cde7d7;
-  font-size: 14px;
+  background: rgba(47, 194, 107, 0.12);
+  color: #9ff1bf;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin: 12px 16px 16px;
+  border: 1px solid rgba(47, 194, 107, 0.28);
+  font-size: 13px;
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  box-shadow: 0 8px 20px rgba(31, 122, 79, 0.06);
+  gap: 10px;
+  box-shadow: none;
 }
 
 .success-icon {
-  font-size: 20px;
+  width: 18px;
+  height: 18px;
+  font-size: 18px;
   flex-shrink: 0;
   margin-top: 2px;
 }
@@ -2126,13 +2827,15 @@ const drawWindSpeedChart = () => {
 
 .success-title {
   font-weight: 600;
-  margin-bottom: 5px;
-  font-size: 15px;
+  margin-bottom: 4px;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .success-details {
-  margin-bottom: 10px;
-  line-height: 1.4;
+  margin-bottom: 8px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .success-actions {
@@ -2210,7 +2913,7 @@ const drawWindSpeedChart = () => {
   padding: 16px 18px;
   border-radius: 12px;
   border: 1px solid #d7e7f6;
-  background: linear-gradient(180deg, #f7fbff 0%, #ffffff 100%);
+  background: #132a48;
   box-shadow: 0 10px 24px rgba(31, 120, 209, 0.08);
 }
 
@@ -2225,6 +2928,97 @@ const drawWindSpeedChart = () => {
   font-size: 13px;
   line-height: 1.7;
   color: #5b7185;
+}
+
+.results-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid #dbe6f0;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(30, 50, 70, 0.06);
+}
+
+.results-header-title {
+  color: #26384a;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.result-download-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.result-download-btn {
+  height: 38px;
+}
+
+.metric-display-panel {
+  margin-bottom: 20px;
+  padding: 18px 20px;
+  border: 1px solid #dbe6f0;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(30, 50, 70, 0.06);
+}
+
+.metric-display-title {
+  margin-bottom: 12px;
+  color: #26384a;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.metric-display-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(110px, 1fr));
+  gap: 10px;
+}
+
+.metric-display-btn {
+  min-height: 38px;
+  border: 1px solid #dbe6f0;
+  border-radius: 8px;
+  background: #f8fbfd;
+  color: #526171;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.metric-display-btn:hover:not(.disabled) {
+  border-color: #9fc8f1;
+  background: #eef7ff;
+  color: #1f78d1;
+}
+
+.metric-display-btn.active {
+  border-color: #1f78d1;
+  background: #1f78d1;
+  color: #ffffff;
+}
+
+.metric-display-btn.disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.metric-inline-empty {
+  grid-column: 1 / -1;
+  padding: 20px 24px;
+  border: 1px dashed #dbe6f0;
+  border-radius: 10px;
+  background: #f8fbfd;
+  color: #8a98a8;
+  font-size: 14px;
+  text-align: center;
 }
 
 @keyframes fadeIn {
@@ -2314,41 +3108,133 @@ const drawWindSpeedChart = () => {
 
 .charts-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-  gap: 25px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
   width: 100%;
-  min-width: 800px; /* 确保图表网格最小宽度 */
+  min-width: 0;
 }
 
 .chart-container {
-  background: #f8fbfd;
-  padding: 20px;
-  border-radius: 10px;
-  border: 1px solid #dbe6f0;
-  min-width: 400px; /* 确保图表容器最小宽度 */
-  overflow: hidden; /* 防止内容溢出 */
+  background: #0d2745;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid #1d4264;
+  position: relative;
+  min-width: 0;
+  min-height: 306px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-card-actions {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 8px;
+  z-index: 2;
 }
 
 .chart-container h4 {
-  color: #2f455c;
-  margin-bottom: 15px;
+  color: #ffffff;
+  margin: 0 76px 8px;
   font-size: 14px;
-  text-align: center;
+  text-align: left;
   font-weight: 700;
+  line-height: 1.4;
 }
 
-.chart-container canvas {
-  width: 100%;
-  height: 200px;
+.chart-source {
+  min-height: 18px;
+  margin-bottom: 10px;
+  color: #8299bc;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-source.empty {
+  visibility: hidden;
+}
+
+.chart-icon-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #cfe0ee;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #49719a;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.chart-icon-btn:hover:not(:disabled) {
+  border-color: #8dbce8;
+  color: #1f78d1;
+  background: #eef7ff;
+}
+
+.chart-icon-btn.danger {
+  color: #b54708;
+}
+
+.chart-icon-btn.danger:hover:not(:disabled) {
+  border-color: #f3b0a7;
+  color: #d14343;
+  background: #fff5f5;
+}
+
+.chart-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.chart-container canvas,
+.chart-canvas {
+  width: min(100%, 820px);
+  height: auto;
+  aspect-ratio: 720 / 260;
   border-radius: 6px;
-  background: white;
+  background: #f7fbff;
   max-width: 100%;
   display: block;
+  margin-top: auto;
+  align-self: center;
+  border: 1px solid #d3e3f1;
+}
+
+.chart-canvas--wind {
+  width: min(100%, 820px);
+  aspect-ratio: 720 / 260;
+  align-self: center;
+}
+
+.chart-empty {
+  width: min(100%, 820px);
+  min-height: 220px;
+  aspect-ratio: 720 / 260;
+  border-radius: 6px;
+  border: 1px dashed #285a82;
+  background: #102d4d;
+  color: #8299bc;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: auto;
+  align-self: center;
 }
 
 
 /* 响应式设计 */
-@media (max-width: 1200px) {
+@media (max-width: 900px) {
   .main-container {
     flex-direction: column;
   }
@@ -2361,6 +3247,10 @@ const drawWindSpeedChart = () => {
   
   .right-panel {
     min-height: 400px;
+  }
+
+  .metric-display-actions {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
   }
 }
 
@@ -2390,10 +3280,14 @@ const drawWindSpeedChart = () => {
   }
   
   .chart-container canvas {
-    height: 150px;
+    height: auto;
   }
   
   .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-display-actions {
     grid-template-columns: 1fr;
   }
 }

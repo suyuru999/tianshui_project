@@ -4,41 +4,81 @@
     <div class="sidebar">
       <!-- 系统标题 -->
       <div class="sidebar-header">
-        <h1>流域生态环境监管系统</h1>
+        <svg class="brand-header-decoration" viewBox="0 0 360 110" preserveAspectRatio="none" aria-hidden="true">
+          <path d="M0 0H310L360 55L310 110H0Z" class="brand-header-shape" />
+        </svg>
+        <div class="brand-row">
+          <div class="brand-copy">
+            <div class="brand-org-row">
+              <div class="brand-logo" aria-hidden="true">
+                <svg class="brand-logo-svg" viewBox="0 0 48 48" focusable="false">
+                  <circle cx="24" cy="24" r="22" fill="#ffffff" stroke="#d8e3ef" stroke-width="1.2" />
+                  <path d="M7 24C11 14.5 18 8.5 27.5 7.5C23 11.5 19 16.5 16.5 22.5C13.8 23 10.5 23.6 7 24Z" fill="#1e6fa8" />
+                  <path d="M14 34C20.5 31 24.5 24.8 27.7 17.6C30 22.5 33.8 27 41.5 30.8C35.2 37.8 24.8 40.3 14 34Z" fill="#5c9f3a" />
+                  <path d="M15.5 28.5C21 27 25.7 23.8 29.8 17.2C28 26 24 32 17.2 35.2C13.5 33.4 10.6 30.8 8.5 27.5C11 28.4 13.2 28.8 15.5 28.5Z" fill="#ffffff" opacity="0.92" />
+                  <path d="M8 24C12 14 19.8 7.6 30 7.5" fill="none" stroke="#1f5d93" stroke-width="1.1" stroke-linecap="round" />
+                </svg>
+              </div>
+              <div class="brand-org">甘肃煤田地质局综合普查队</div>
+            </div>
+            <h1>藉河流域生态环境监管信息系统</h1>
+          </div>
+        </div>
       </div>
 
       <!-- 用户信息 -->
-      <div class="user-section">
+      <div class="user-section" :class="{ 'user-section--guest': !currentUser }">
+        <div class="user-section-title">用户中心</div>
         <div class="user-info">
-          <User class="inline-icon user-icon" />
-          <span>{{ currentUser ? `${currentUser.username}（${currentUser.role_display || currentUser.role || '用户'}）` : '未登录' }}</span>
+          <div class="user-identity">
+            <User class="inline-icon user-icon" />
+            <span>{{ currentUser ? `${currentUser.username}（${currentUser.role_display || currentUser.role || '用户'}）` : '未登录' }}</span>
+          </div>
+          <button v-if="!currentUser" class="login-btn user-login-inline" @click="openLoginDialog">
+            登录
+          </button>
         </div>
-        <div class="user-actions">
+        <div v-if="currentUser" class="user-actions">
+          <button class="admin-btn governance-btn" @click="openDataGovernanceDialog">数据与备份</button>
           <button v-if="canManageUsers" class="admin-btn" @click="openUserManagementDialog">用户管理</button>
-          <button class="login-btn" @click="currentUser ? handleLogout() : openLoginDialog()">
-            {{ currentUser ? '退出' : '登录' }}
+          <button class="login-btn" @click="handleLogout">
+            退出
           </button>
         </div>
       </div>
 
-      <div v-if="loginDialogVisible" class="login-mask" @click.self="loginDialogVisible = false">
-        <div class="login-dialog">
+      <div v-if="loginDialogVisible" class="login-mask">
+        <form class="login-dialog" @submit.prevent="handleLogin" @keydown.stop>
           <div class="login-title">系统登录</div>
           <label class="login-field">
             <span>用户名</span>
-            <input v-model="loginForm.username" type="text" autocomplete="off" />
+            <input
+              ref="loginUsernameInput"
+              v-model="loginForm.username"
+              name="username"
+              type="text"
+              autocomplete="username"
+              autocapitalize="none"
+              spellcheck="false"
+            />
           </label>
           <label class="login-field">
             <span>密码</span>
-            <input v-model="loginForm.password" type="password" autocomplete="off" @keydown.enter="handleLogin" />
+            <input
+              v-model="loginForm.password"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+            />
           </label>
           <div class="login-actions">
-            <button class="dialog-cancel" @click="loginDialogVisible = false">取消</button>
-            <button class="dialog-confirm" :disabled="loginLoading" @click="handleLogin">
+            <button type="button" class="dialog-cancel" @click="loginDialogVisible = false">取消</button>
+            <button type="button" class="dialog-cancel" @click="openRegisterDialog">注册账号</button>
+            <button type="submit" class="dialog-confirm" :disabled="loginLoading">
               {{ loginLoading ? '登录中...' : '登录' }}
             </button>
           </div>
-        </div>
+        </form>
       </div>
 
       <!-- 图层管理 -->
@@ -57,11 +97,11 @@
               <ArrowDown class="inline-icon collapse-icon" :class="{ 'collapsed': !businessLayersExpanded }" />
             </div>
             <div class="layer-group-content" v-show="businessLayersExpanded">
-              <button class="upload-btn publish-btn" :disabled="businessLayerUploading" @click="triggerBusinessLayerUpload">
+              <button v-if="currentUser" class="upload-btn publish-btn" :disabled="businessLayerUploading" @click="triggerBusinessLayerUpload">
                 <Upload class="button-icon" />
                 {{ businessLayerUploading ? '发布中...' : '上传并发布业务图层' }}
               </button>
-              <button class="upload-btn service-btn" :disabled="businessLayerUploading" @click="openBusinessServiceDialog">
+              <button v-if="currentUser" class="upload-btn service-btn" :disabled="businessLayerUploading" @click="openBusinessServiceDialog">
                 <Connection class="button-icon" />
                 接入标准服务
               </button>
@@ -111,7 +151,7 @@
                 </div>
                 <div class="layer-controls">
                   <button
-                    v-if="layer.source === 'service' && layer.status !== 'published'"
+                    v-if="currentUser && layer.source === 'service' && layer.status !== 'published'"
                     class="layer-action-btn"
                     :disabled="isBusinessLayerBusy(layer)"
                     title="重新发布"
@@ -120,7 +160,7 @@
                     <Refresh class="button-icon" />
                   </button>
                   <button
-                    v-if="layer.source === 'service' && layer.status === 'published'"
+                    v-if="currentUser && layer.source === 'service' && layer.status === 'published'"
                     class="layer-action-btn"
                     :disabled="isBusinessLayerBusy(layer)"
                     title="撤销发布"
@@ -129,7 +169,7 @@
                     <Close class="button-icon" />
                   </button>
                   <button
-                    v-if="layer.source === 'service'"
+                    v-if="currentUser && layer.source === 'service'"
                     class="layer-action-btn danger"
                     :disabled="isBusinessLayerBusy(layer)"
                     title="删除记录"
@@ -138,7 +178,7 @@
                     <Delete class="button-icon" />
                   </button>
                   <button
-                    v-if="layer.source === 'service'"
+                    v-if="currentUser && layer.source === 'service'"
                     class="layer-action-btn"
                     :disabled="isBusinessLayerBusy(layer)"
                     title="样式配置"
@@ -147,7 +187,7 @@
                     <Setting class="button-icon" />
                   </button>
                   <button
-                    v-if="layer.source === 'service'"
+                    v-if="currentUser && layer.source === 'service'"
                     class="layer-action-btn"
                     :disabled="isBusinessLayerBusy(layer)"
                     title="操作日志"
@@ -169,7 +209,7 @@
           </div>
 
           <!-- 临时图层 -->
-          <div class="layer-group">
+          <div v-if="currentUser" class="layer-group">
             <div class="layer-group-header" @click="toggleTempLayers">
               <h4>临时图层</h4>
               <ArrowDown class="inline-icon collapse-icon" :class="{ 'collapsed': !tempLayersExpanded }" />
@@ -188,6 +228,11 @@
               >
             </div>
           </div>
+
+          <button class="export-btn layer-export-btn" @click="exportMap">
+            <Camera class="button-icon" />
+            导出地图为图片
+          </button>
         </div>
       </div>
 
@@ -212,11 +257,6 @@
             </div>
           </div>
 
-          <!-- 导出地图 -->
-          <button class="export-btn" @click="exportMap">
-            <Camera class="button-icon" />
-            导出地图为图片
-          </button>
         </div>
       </div>
 
@@ -234,7 +274,8 @@
               :key="func.id"
               type="button"
               class="function-item"
-              :class="{ active: route.path === func.route }"
+              :class="{ active: route.path === func.route, disabled: !canAccessBusinessFunction(func) }"
+              :disabled="!canAccessBusinessFunction(func)"
               @click="handleBusinessFunctionClick(func)"
             >
               <span class="function-leading">
@@ -294,7 +335,8 @@
 
       <div v-if="userEditDialogVisible" class="login-mask" @click.self="userEditDialogVisible = false">
         <div class="service-dialog">
-          <div class="login-title">{{ userEditMode === 'create' ? '新增用户' : '编辑用户' }}</div>
+          <div class="login-title">{{ userEditTitle }}</div>
+          <div v-if="userFormError" class="form-error-banner">{{ userFormError }}</div>
           <label class="login-field">
             <span>用户名</span>
             <input v-model="userForm.username" type="text" autocomplete="off" />
@@ -307,7 +349,7 @@
             <span>姓名</span>
             <input v-model="userForm.first_name" type="text" autocomplete="off" />
           </label>
-          <label class="login-field">
+          <label v-if="userEditMode !== 'register'" class="login-field">
             <span>角色</span>
             <select v-model="userForm.role">
               <option value="admin">管理员</option>
@@ -331,7 +373,7 @@
             <span>职位</span>
             <input v-model="userForm.position" type="text" autocomplete="off" />
           </label>
-          <label class="login-field">
+          <label v-if="userEditMode !== 'register'" class="login-field">
             <span>状态</span>
             <select v-model="userForm.is_active">
               <option :value="true">启用</option>
@@ -339,10 +381,10 @@
             </select>
           </label>
           <label class="login-field">
-            <span>{{ userEditMode === 'create' ? '密码' : '新密码（可留空）' }}</span>
+            <span>{{ userEditMode === 'edit' ? '新密码（可留空）' : '密码' }}</span>
             <input v-model="userForm.password" type="password" autocomplete="new-password" />
           </label>
-          <label v-if="userEditMode === 'create'" class="login-field">
+          <label v-if="userEditMode !== 'edit'" class="login-field">
             <span>确认密码</span>
             <input v-model="userForm.password_confirm" type="password" autocomplete="new-password" />
           </label>
@@ -382,11 +424,56 @@
           </div>
         </div>
       </div>
+
+      <div v-if="dataGovernanceDialogVisible" class="login-mask" @click.self="dataGovernanceDialogVisible = false">
+        <div class="service-dialog governance-dialog">
+          <div class="login-title">数据与备份</div>
+          <div class="governance-account">
+            当前账号：{{ currentUser?.username }}（{{ currentUser?.role_display || currentUser?.role || '用户' }}）
+          </div>
+          <div class="governance-grid">
+            <div class="governance-policy-card">
+              <div class="governance-policy-title">系统数据备份</div>
+              <div>管理员定期备份系统数据，备份频率为每日一次。</div>
+              <div>备份数据保存期限为 3 年，备份介质需离线存储，确保数据安全。</div>
+            </div>
+            <div class="governance-policy-card">
+              <div class="governance-policy-title">临时数据保留</div>
+              <div>操作人员上传的临时数据，系统保留期限为 90 天，超过期限自动删除。</div>
+              <div>重要数据需自行备份至本地指定目录。</div>
+            </div>
+          </div>
+          <div class="governance-history-head">
+            <span>我的结果缓存历史</span>
+            <button type="button" class="mini-text-btn" @click="refreshAccountResultHistory">刷新</button>
+          </div>
+          <div v-if="accountResultHistory.length === 0" class="empty-log">当前账号暂无本机结果缓存</div>
+          <div v-else class="governance-history-list">
+            <div v-for="item in accountResultHistory" :key="item.id" class="governance-history-item">
+              <div class="governance-history-main">
+                <span class="layer-pill">{{ item.feature }}</span>
+                <strong>{{ item.title }}</strong>
+                <small>{{ item.subtitle }}</small>
+              </div>
+              <div class="governance-history-meta">
+                <span>{{ item.timeText }}</span>
+                <span>{{ item.ownerText }}</span>
+                <span>{{ item.retentionText }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="login-actions">
+            <button class="dialog-confirm" @click="dataGovernanceDialogVisible = false">关闭</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 主地图区域 -->
     <div class="main-content">
-      <MapContainer ref="mapContainerRef" />
+      <div class="map-stage">
+        <MapContainer ref="mapContainerRef" />
+      </div>
     </div>
 
     <div v-if="businessServiceDialogVisible" class="login-mask" @click.self="businessServiceDialogVisible = false">
@@ -548,7 +635,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, reactive } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowDown,
@@ -575,6 +662,8 @@ import { useMapStore } from '../store/map'
 import { useRoute, useRouter } from 'vue-router'
 import { authService, spatialService } from '../services/api.js'
 import { ensureCsrfCookie } from '../utils/http.js'
+import { canViewHistoryItem, getCurrentUserContext, setCurrentUserContext } from '../utils/userContext.js'
+import { loadMainMapAnalysisLayers } from '../utils/mainMapAnalysisLayers.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -584,21 +673,28 @@ const { toggleLayerVisibility } = mapStore
 const fileInput = ref(null)
 const businessLayerInput = ref(null)
 const mapContainerRef = ref(null)
+const loginUsernameInput = ref(null)
 const coordinateInput = ref('')
 const currentUser = ref(null)
 const loginDialogVisible = ref(false)
 const loginLoading = ref(false)
 const userManagementDialogVisible = ref(false)
 const userManagementLoading = ref(false)
+const dataGovernanceDialogVisible = ref(false)
 const userEditDialogVisible = ref(false)
 const userEditMode = ref('create')
 const userSubmitting = ref(false)
+const userFormError = ref('')
 const permissionDialogVisible = ref(false)
 const permissionSubmitting = ref(false)
 const activeManagedUser = ref(null)
 const managedUsers = ref([])
 const permissionSchema = ref({})
 const permissionDraft = reactive({})
+const analysisResultLayers = ref([])
+let analysisLayerReloading = false
+let analysisLayerReloadQueued = false
+const accountResultHistory = ref([])
 const businessLayerUploading = ref(false)
 const businessLayerActionIds = ref(new Set())
 const businessServiceDialogVisible = ref(false)
@@ -660,6 +756,10 @@ const tempLayersExpanded = ref(true)
 const toolboxExpanded = ref(true)
 const businessFunctionsExpanded = ref(true)
 const canManageUsers = computed(() => Boolean(currentUser.value?.is_admin || currentUser.value?.role === 'admin'))
+const userEditTitle = computed(() => {
+  if (userEditMode.value === 'register') return '注册账号'
+  return userEditMode.value === 'create' ? '新增用户' : '编辑用户'
+})
 const permissionModuleLabels = {
   remote_sensing: '遥感生态指数分析',
   ecological_index: '生态环境指数计算',
@@ -673,6 +773,16 @@ const permissionLabels = {
   view: '查看',
   use: '使用',
   manage: '管理'
+}
+
+const hasUserPermission = (moduleName, permissionName = 'view') => {
+  if (!currentUser.value) return false
+  return true
+}
+
+const canAccessBusinessFunction = (func) => {
+  if (!func?.module) return true
+  return hasUserPermission(func.module, func.permission || 'view')
 }
 
 // 业务图层数据
@@ -706,24 +816,32 @@ const businessFunctions = reactive([
     id: 1,
     name: '遥感生态指数分析',
     icon: DataAnalysis,
+    module: 'remote_sensing',
+    permission: 'view',
     status: 'available'
   },
   {
     id: 2,
     name: '生态环境指数计算',
     icon: Histogram,
+    module: 'ecological_index',
+    permission: 'view',
     status: 'available'
   },
   {
     id: 3,
     name: '重大工程叠加分析',
     icon: Connection,
+    module: 'overlay_analysis',
+    permission: 'view',
     status: 'planned'
   },
   {
     id: 4,
     name: '气候环境监测统计',
     icon: TrendCharts,
+    module: 'climate_monitoring',
+    permission: 'view',
     status: 'available',
     route: '/climate-monitoring'
   },
@@ -731,6 +849,8 @@ const businessFunctions = reactive([
     id: 5,
     name: '民众意见反馈',
     icon: Message,
+    module: 'feedback',
+    permission: 'view',
     status: 'available',
     route: '/feedback'
   }
@@ -747,13 +867,30 @@ onMounted(() => {
   })
   loadCurrentUser()
   loadBusinessLayers()
+  window.addEventListener('tianshui-main-map-analysis-layers-updated', syncAnalysisResultLayers)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('tianshui-main-map-analysis-layers-updated', syncAnalysisResultLayers)
 })
 
 const loadCurrentUser = async () => {
+  if (!getCurrentUserContext()) {
+    currentUser.value = null
+    analysisResultLayers.value = []
+    accountResultHistory.value = []
+    return
+  }
   try {
     currentUser.value = await authService.getProfile({ silentError: true })
+    setCurrentUserContext(currentUser.value)
+    refreshAccountResultHistory()
+    loadAnalysisResultLayers()
   } catch {
     currentUser.value = null
+    setCurrentUserContext(null)
+    analysisResultLayers.value = []
+    mapContainerRef.value?.removeAnalysisResultLayers?.({ removePersisted: false })
   }
 }
 
@@ -766,9 +903,24 @@ const openLoginDialog = async () => {
   loginForm.username = ''
   loginForm.password = ''
   loginDialogVisible.value = true
+  await nextTick()
+  loginUsernameInput.value?.focus()
+}
+
+const openRegisterDialog = async () => {
+  loginDialogVisible.value = false
+  try {
+    await ensureCsrfCookie()
+  } catch (error) {
+    console.warn('打开注册框前获取 CSRF Cookie 失败:', error)
+  }
+  resetUserForm()
+  userEditMode.value = 'register'
+  userEditDialogVisible.value = true
 }
 
 const resetUserForm = () => {
+  userFormError.value = ''
   userForm.id = null
   userForm.username = ''
   userForm.email = ''
@@ -797,6 +949,9 @@ const handleLogin = async () => {
       password: loginForm.password
     })
     currentUser.value = result.user
+    setCurrentUserContext(result.user)
+    refreshAccountResultHistory()
+    loadAnalysisResultLayers()
     loginDialogVisible.value = false
     ElMessage.success('登录成功')
   } catch (error) {
@@ -813,6 +968,10 @@ const handleLogout = async () => {
     console.warn('后端登出请求未完成，已在前端清除登录状态:', error)
   } finally {
     currentUser.value = null
+    setCurrentUserContext(null)
+    analysisResultLayers.value = []
+    mapContainerRef.value?.removeAnalysisResultLayers?.({ removePersisted: false })
+    accountResultHistory.value = []
     managedUsers.value = []
     userManagementDialogVisible.value = false
     ElMessage.success('已退出登录')
@@ -869,36 +1028,60 @@ const openEditUserDialog = (user) => {
 }
 
 const submitUserForm = async () => {
+  userFormError.value = ''
   if (!userForm.username.trim()) {
-    ElMessage.warning('请填写用户名')
+    userFormError.value = '请填写用户名'
+    ElMessage.warning(userFormError.value)
     return
   }
-  if (userEditMode.value === 'create' && !userForm.password) {
-    ElMessage.warning('请填写初始密码')
+  if (userEditMode.value !== 'edit' && !userForm.password) {
+    userFormError.value = '请填写初始密码'
+    ElMessage.warning(userFormError.value)
     return
   }
-  if (userEditMode.value === 'create' && userForm.password !== userForm.password_confirm) {
-    ElMessage.warning('两次密码输入不一致')
+  if (userEditMode.value !== 'edit' && userForm.password.length < 8) {
+    userFormError.value = '密码至少需要 8 位'
+    ElMessage.warning(userFormError.value)
+    return
+  }
+  if (userEditMode.value !== 'edit' && userForm.password !== userForm.password_confirm) {
+    userFormError.value = '两次密码输入不一致'
+    ElMessage.warning(userFormError.value)
+    return
+  }
+  if (userEditMode.value === 'edit' && userForm.password && userForm.password.length < 8) {
+    userFormError.value = '新密码至少需要 8 位'
+    ElMessage.warning(userFormError.value)
     return
   }
 
   userSubmitting.value = true
   try {
-    if (userEditMode.value === 'create') {
-      await authService.createUser({
+    if (userEditMode.value !== 'edit') {
+      const payload = {
         username: userForm.username.trim(),
         email: userForm.email.trim(),
         first_name: userForm.first_name.trim(),
         last_name: userForm.last_name.trim(),
-        role: userForm.role,
+        role: userEditMode.value === 'register' ? 'user' : userForm.role,
         phone: userForm.phone.trim(),
         organization: userForm.organization.trim(),
         department: userForm.department.trim(),
         position: userForm.position.trim(),
+        is_active: userForm.is_active,
         password: userForm.password,
         password_confirm: userForm.password_confirm
-      })
-      ElMessage.success('用户创建成功')
+      }
+      if (userEditMode.value === 'register') {
+        await authService.register(payload, { skipAuth: true, silentError: true })
+        ElMessage.success('注册成功，请登录')
+        loginForm.username = userForm.username.trim()
+        loginForm.password = ''
+        loginDialogVisible.value = true
+      } else {
+        await authService.createUser(payload, { silentError: true })
+        ElMessage.success('用户创建成功')
+      }
     } else {
       const payload = {
         username: userForm.username.trim(),
@@ -915,13 +1098,17 @@ const submitUserForm = async () => {
       if (userForm.password) {
         payload.password = userForm.password
       }
-      await authService.updateUser(userForm.id, payload)
+      await authService.updateUser(userForm.id, payload, { silentError: true })
       ElMessage.success('用户更新成功')
     }
     userEditDialogVisible.value = false
-    await loadUsers()
+    if (canManageUsers.value) {
+      await loadUsers()
+    }
   } catch (error) {
     console.error(error)
+    userFormError.value = getRequestErrorMessage(error, userEditMode.value === 'register' ? '注册失败' : '用户保存失败')
+    ElMessage.error(userFormError.value)
   } finally {
     userSubmitting.value = false
   }
@@ -936,18 +1123,26 @@ const handleDeleteUser = async (user) => {
     await ElMessageBox.confirm(`确定删除用户 ${user.username} 吗？`, '删除用户', {
       type: 'warning',
       confirmButtonText: '删除',
-      cancelButtonText: '取消'
+      cancelButtonText: '取消',
+      customClass: 'user-delete-confirm-box',
+      modalClass: 'user-delete-confirm-mask',
+      distinguishCancelAndClose: true
     })
   } catch {
     return
   }
 
   try {
-    await authService.deleteUser(user.id)
+    await authService.deleteUser(user.id, { silentError: true })
     ElMessage.success('用户删除成功')
+    if (String(activeManagedUser.value?.id) === String(user.id)) {
+      activeManagedUser.value = null
+      permissionDialogVisible.value = false
+    }
     await loadUsers()
   } catch (error) {
     console.error(error)
+    ElMessage.error(getRequestErrorMessage(error, '用户删除失败'))
   }
 }
 
@@ -1007,6 +1202,10 @@ const savePermissions = async () => {
 
 // 跳转到遥感生态指数分析
 const handleBusinessFunctionClick = async (func) => {
+  if (!canAccessBusinessFunction(func)) {
+    ElMessage.warning('当前账号没有访问该模块的权限，请联系管理员分配权限')
+    return
+  }
   if (func.route) {
     router.push(func.route)
     return
@@ -1015,12 +1214,21 @@ const handleBusinessFunctionClick = async (func) => {
 }
 
 // 触发文件上传
+const requireLayerLogin = () => {
+  if (currentUser.value) return true
+  ElMessage.warning('请先登录后再进行图层操作')
+  openLoginDialog()
+  return false
+}
+
 const triggerFileUpload = () => {
-  fileInput.value.click()
+  if (!requireLayerLogin()) return
+  fileInput.value?.click()
 }
 
 const triggerBusinessLayerUpload = () => {
-  businessLayerInput.value.click()
+  if (!requireLayerLogin()) return
+  businessLayerInput.value?.click()
 }
 
 const syncBusinessServiceLayerType = () => {
@@ -1032,6 +1240,7 @@ const syncBusinessServiceLayerType = () => {
 }
 
 const openBusinessServiceDialog = () => {
+  if (!requireLayerLogin()) return
   businessServiceForm.name = ''
   businessServiceForm.description = ''
   businessServiceForm.layer_type = 'vector'
@@ -1120,6 +1329,7 @@ const setBusinessLayerBusy = (layer, busy) => {
 const isBusinessLayerBusy = (layer) => businessLayerActionIds.value.has(layer.id)
 
 const openBusinessLayerStyleDialog = (layer) => {
+  if (!requireLayerLogin()) return
   const config = layer?.serviceLayer?.style_config || {}
   activeBusinessLayer.value = layer
   businessLayerStyleForm.layer_type = layer?.serviceLayer?.layer_type || 'vector'
@@ -1138,6 +1348,7 @@ const openBusinessLayerStyleDialog = (layer) => {
 }
 
 const openBusinessLayerLogsDialog = async (layer) => {
+  if (!requireLayerLogin()) return
   activeBusinessLayer.value = layer
   businessLayerLogs.value = []
   businessLayerExpandedLogIds.value = new Set()
@@ -1173,8 +1384,28 @@ const formatLogDetails = (details) => {
 
 const getRequestErrorMessage = (error, fallback) => {
   const data = error?.response?.data
+  const flattenDetails = (value) => {
+    if (!value) return ''
+    if (typeof value === 'string') return value
+    if (Array.isArray(value)) return value.map(flattenDetails).filter(Boolean).join('；')
+    if (typeof value === 'object') {
+      return Object.entries(value)
+        .map(([key, item]) => {
+          const message = flattenDetails(item)
+          return message ? `${key}: ${message}` : ''
+        })
+        .filter(Boolean)
+        .join('；')
+    }
+    return String(value)
+  }
+  const detailMessage = flattenDetails(data?.details)
+  if (data?.error && detailMessage) {
+    return `${data.error}：${detailMessage}`
+  }
   return (
     data?.error ||
+    detailMessage ||
     data?.detail ||
     data?.message ||
     data?.non_field_errors?.[0] ||
@@ -1187,16 +1418,234 @@ const loadBusinessLayers = async () => {
   try {
     const result = await spatialService.getBusinessLayers()
     const records = Array.isArray(result) ? result : (result.results || [])
+    const recordIds = new Set(records.map(record => String(record.id)))
+    for (let index = businessLayers.length - 1; index >= 0; index -= 1) {
+      const item = businessLayers[index]
+      if (item.source === 'service' && !recordIds.has(String(item.id))) {
+        businessLayers.splice(index, 1)
+      }
+    }
     records.forEach(upsertBusinessLayer)
+    await nextTick()
+    mapContainerRef.value?.pruneBusinessServiceLayers(records)
   } catch (error) {
     console.warn('业务图层列表加载失败:', error)
   }
+}
+
+const safeJsonParse = (rawValue, fallback) => {
+  if (!rawValue) return fallback
+  try {
+    return JSON.parse(rawValue)
+  } catch (error) {
+    console.warn('解析本地结果缓存失败:', error)
+    return fallback
+  }
+}
+
+const formatAnalysisLayerTime = (timestamp) => {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+const formatFullDateTime = (timestamp) => {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+const getRetentionText = (timestamp) => {
+  const createdAt = Number(timestamp || 0)
+  if (!createdAt) return '临时数据保留 90 天'
+  const elapsedDays = Math.floor((Date.now() - createdAt) / (24 * 60 * 60 * 1000))
+  const remainingDays = Math.max(0, 90 - elapsedDays)
+  return `临时数据剩余约 ${remainingDays} 天`
+}
+
+const getOwnerText = (item) => {
+  const owner = item?.owner || item?.payload?.owner || item?.resultData?.owner
+  if (owner?.username) return `账号：${owner.username}`
+  return '历史本机缓存'
+}
+
+const normalizeAccountHistoryItem = (item) => ({
+  ...item,
+  timeText: formatFullDateTime(item.timestamp) || '时间未知',
+  ownerText: getOwnerText(item),
+  retentionText: getRetentionText(item.timestamp)
+})
+
+const getRemoteAccountHistory = () => {
+  const storageKeys = safeJsonParse(localStorage.getItem('analysis_cache_index'), [])
+  if (!Array.isArray(storageKeys)) return []
+
+  return storageKeys
+    .map((storageKey) => safeJsonParse(localStorage.getItem(storageKey), null))
+    .filter(item => item?.resultData && canViewHistoryItem(item, currentUser.value, {
+      adminCanViewAll: true,
+      adminCanViewOwnerless: true
+    }))
+    .map((item) => {
+      const indices = Array.isArray(item.resultData.indices) ? item.resultData.indices : []
+      const labels = indices
+        .map(index => index.index_type_display || index.index_type?.toUpperCase())
+        .filter(Boolean)
+        .join('、')
+      return normalizeAccountHistoryItem({
+        id: `remote-${item.imageId}-${item.indexType}-${item.timestamp}`,
+        feature: '遥感生态',
+        title: item.fileName || '遥感生态指数结果',
+        subtitle: labels || item.indexType?.toUpperCase() || '指数结果',
+        timestamp: item.timestamp,
+        owner: item.owner || item.resultData.owner
+      })
+    })
+}
+
+const getStoredResultHistory = (featureKey, featureLabel) => {
+  const history = safeJsonParse(localStorage.getItem(`tianshui_result_history_v1:${featureKey}`), [])
+  if (!Array.isArray(history)) return []
+  return history
+    .filter(item => canViewHistoryItem(item, currentUser.value, {
+      adminCanViewAll: true,
+      adminCanViewOwnerless: true
+    }))
+    .map(item => normalizeAccountHistoryItem({
+      id: `${featureKey}-${item.id}`,
+      feature: featureLabel,
+      title: item.title || item.payload?.fileName || '处理结果',
+      subtitle: item.subtitle || '结果缓存',
+      timestamp: item.timestamp,
+      owner: item.owner || item.payload?.owner,
+      payload: item.payload
+    }))
+}
+
+const refreshAccountResultHistory = () => {
+  if (!currentUser.value) {
+    accountResultHistory.value = []
+    return
+  }
+  accountResultHistory.value = [
+    ...getRemoteAccountHistory(),
+    ...getStoredResultHistory('ecological_index', '生态环境'),
+    ...getStoredResultHistory('climate_monitoring', '气候监测'),
+    ...getStoredResultHistory('overlay_analysis_view', '叠加分析'),
+  ]
+    .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
+    .slice(0, 18)
+}
+
+const openDataGovernanceDialog = () => {
+  refreshAccountResultHistory()
+  dataGovernanceDialogVisible.value = true
+}
+
+const getRemoteResultLayersFromCache = () => {
+  const storageKeys = safeJsonParse(localStorage.getItem('analysis_cache_index'), [])
+  if (!Array.isArray(storageKeys)) return []
+
+  return storageKeys.flatMap((storageKey) => {
+    const cacheItem = safeJsonParse(localStorage.getItem(storageKey), null)
+    if (!cacheItem || !canViewHistoryItem(cacheItem, currentUser.value, {
+      adminCanViewAll: true,
+      adminCanViewOwnerless: true
+    })) {
+      return []
+    }
+    const indices = Array.isArray(cacheItem?.resultData?.indices) ? cacheItem.resultData.indices : []
+    return indices
+      .filter(item => item?.compare_overlay?.overlay_image_url)
+      .map(item => ({
+        id: `remote-${cacheItem.imageId || cacheItem.backendImageId || storageKey}-${item.index_type}`,
+        title: `${cacheItem.fileName || '遥感生态指数'} - ${item.index_type_display || item.index_type?.toUpperCase() || '结果'}`,
+        subtitle: `遥感分析 ${formatAnalysisLayerTime(cacheItem.timestamp)}`,
+        compareOverlay: item.compare_overlay,
+        timestamp: Number(cacheItem.timestamp || 0)
+      }))
+  })
+}
+
+const getEcologicalResultLayersFromCache = () => {
+  const history = safeJsonParse(localStorage.getItem('tianshui_result_history_v1:ecological_index'), [])
+  if (!Array.isArray(history)) return []
+
+  return history
+    .filter(item => canViewHistoryItem(item, currentUser.value, {
+      adminCanViewAll: true,
+      adminCanViewOwnerless: true
+    }))
+    .filter(item => item?.payload?.compareOverlay?.overlay_image_url)
+    .map(item => ({
+      id: `ecological-${item.id}`,
+      title: `${item.title || item.payload.fileName || '生态环境指数'} - 土地利用结果图`,
+      subtitle: `生态指数 ${formatAnalysisLayerTime(item.timestamp)}`,
+      compareOverlay: item.payload.compareOverlay,
+      timestamp: Number(item.timestamp || 0)
+    }))
+}
+
+const loadAnalysisResultLayers = async () => {
+  if (analysisLayerReloading) {
+    analysisLayerReloadQueued = true
+    return
+  }
+
+  analysisLayerReloading = true
+  await nextTick()
+  try {
+    do {
+      analysisLayerReloadQueued = false
+
+      if (!currentUser.value) {
+        analysisResultLayers.value = []
+        mapContainerRef.value?.removeAnalysisResultLayers?.({ removePersisted: false })
+        continue
+      }
+
+      const layers = loadMainMapAnalysisLayers(currentUser.value, {
+        adminCanViewAll: false,
+        adminCanViewOwnerless: false
+      })
+      analysisResultLayers.value = layers
+      mapContainerRef.value?.removeAnalysisResultLayers?.({ removePersisted: false })
+      layers.forEach((item) => {
+        mapContainerRef.value?.addResultOverlayLayer(item.compareOverlay, {
+          id: item.id,
+          name: '分析结果图层',
+          subtitle: item.title,
+          opacity: item.opacity || 0.68
+        })
+      })
+    } while (analysisLayerReloadQueued)
+  } finally {
+    analysisLayerReloading = false
+  }
+}
+
+const syncAnalysisResultLayers = async () => {
+  await loadAnalysisResultLayers()
 }
 
 const handleBusinessLayerUpload = async (event) => {
   const file = event.target.files[0]
   event.target.value = ''
   if (!file) return
+  if (!requireLayerLogin()) return
 
   businessLayerUploading.value = true
   try {
@@ -1218,6 +1667,7 @@ const handleBusinessLayerUpload = async (event) => {
 }
 
 const handleBusinessServiceCreate = async () => {
+  if (!requireLayerLogin()) return
   syncBusinessServiceLayerType()
   if (!businessServiceForm.name.trim()) {
     ElMessage.warning('请填写图层名称')
@@ -1252,6 +1702,7 @@ const handleBusinessServiceCreate = async () => {
 }
 
 const handleBusinessLayerPublish = async (layer) => {
+  if (!requireLayerLogin()) return
   if (!layer?.serviceLayer?.id || isBusinessLayerBusy(layer)) return
   setBusinessLayerBusy(layer, true)
   try {
@@ -1267,6 +1718,7 @@ const handleBusinessLayerPublish = async (layer) => {
 }
 
 const handleBusinessLayerUnpublish = async (layer) => {
+  if (!requireLayerLogin()) return
   if (!layer?.serviceLayer?.id || isBusinessLayerBusy(layer)) return
   try {
     await ElMessageBox.confirm(
@@ -1280,7 +1732,7 @@ const handleBusinessLayerUnpublish = async (layer) => {
 
   setBusinessLayerBusy(layer, true)
   try {
-    mapContainerRef.value?.removeLayerById(layer.id)
+    mapContainerRef.value?.removeBusinessServiceLayer(layer.serviceLayer)
     layer.visible = false
     const result = await spatialService.unpublishBusinessLayer(layer.serviceLayer.id)
     upsertBusinessLayer(result)
@@ -1294,6 +1746,7 @@ const handleBusinessLayerUnpublish = async (layer) => {
 }
 
 const handleBusinessLayerDelete = async (layer) => {
+  if (!requireLayerLogin()) return
   if (!layer?.serviceLayer?.id || isBusinessLayerBusy(layer)) return
   try {
     await ElMessageBox.confirm(
@@ -1308,9 +1761,12 @@ const handleBusinessLayerDelete = async (layer) => {
   setBusinessLayerBusy(layer, true)
   try {
     await spatialService.deleteBusinessLayer(layer.serviceLayer.id)
-    mapContainerRef.value?.removeLayerById(layer.id)
+    mapContainerRef.value?.removeBusinessServiceLayer(layer.serviceLayer)
     const index = businessLayers.findIndex(item => item.id === layer.id)
     if (index > -1) businessLayers.splice(index, 1)
+    mapContainerRef.value?.pruneBusinessServiceLayers(
+      businessLayers.filter(item => item.source === 'service').map(item => item.serviceLayer)
+    )
     ElMessage.success(`${layer.name} 已删除`)
   } catch (error) {
     console.error(error)
@@ -1321,12 +1777,16 @@ const handleBusinessLayerDelete = async (layer) => {
 }
 
 const handleBusinessLayerStyleSave = async () => {
+  if (!requireLayerLogin()) return
   if (!activeBusinessLayer.value?.serviceLayer?.id) return
   businessLayerStyleSubmitting.value = true
   try {
+    const targetLayer = activeBusinessLayer.value
     const payload = {
-      style_name: businessLayerStyleForm.style_name,
-      sld_content: businessLayerStyleForm.sld_content
+      style_name: businessLayerStyleForm.style_name
+    }
+    if (businessLayerStyleForm.sld_content !== (targetLayer.serviceLayer.sld_content || '')) {
+      payload.sld_content = businessLayerStyleForm.sld_content
     }
     if (businessLayerStyleForm.layer_type === 'vector') {
       Object.assign(payload, {
@@ -1344,8 +1804,9 @@ const handleBusinessLayerStyleSave = async () => {
         nodata: businessLayerStyleForm.nodata === '' ? null : Number(businessLayerStyleForm.nodata)
       })
     }
-    const result = await spatialService.updateBusinessLayerStyle(activeBusinessLayer.value.serviceLayer.id, payload)
+    const result = await spatialService.updateBusinessLayerStyle(targetLayer.serviceLayer.id, payload)
     upsertBusinessLayer(result)
+    mapContainerRef.value?.addBusinessServiceLayer(result, targetLayer.visible)
     businessLayerStyleDialogVisible.value = false
     ElMessage.success(`${result.name} 样式已更新`)
   } catch (error) {
@@ -1359,6 +1820,8 @@ const handleBusinessLayerStyleSave = async () => {
 // 处理文件上传
 const handleFileUpload = (event) => {
   const file = event.target.files[0]
+  event.target.value = ''
+  if (!requireLayerLogin()) return
   if (file) {
     mapContainerRef.value?.loadLocalFile(file).then((success) => {
       if (success) {
@@ -1366,7 +1829,6 @@ const handleFileUpload = (event) => {
       }
     })
   }
-  event.target.value = ''
 }
 
 // 坐标定位
@@ -1431,24 +1893,29 @@ const toggleBusinessFunctions = () => {
 
 <style scoped>
 .map-view {
+  position: relative;
   display: flex;
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  background: #06182d;
 }
 
 /* 左侧边栏 */
 .sidebar {
-  width: 350px;
+  width: 360px;
   height: 100vh;
-  background: white;
-  border-right: 1px solid #e8e8e8;
+  background: #0b2340;
+  border-right: 1px solid #18385d;
   display: flex;
   flex-direction: column;
-  box-shadow: 2px 0 8px rgba(0,0,0,0.1);
+  box-shadow: 2px 0 18px rgba(0, 0, 0, 0.22);
   overflow-y: auto;
   overflow-x: hidden;
   flex-shrink: 0;
+  color: #c4d4eb;
+  position: relative;
+  z-index: 4;
 }
 
 .sidebar-header,
@@ -1458,33 +1925,136 @@ const toggleBusinessFunctions = () => {
 }
 
 .sidebar-header {
-  background: #1890ff;
-  color: white;
-  padding: 16px;
-  text-align: center;
+  position: relative;
+  min-height: 110px;
+  padding: 0;
+  text-align: left;
+  background: #0b2340;
+  border-bottom: 1px solid #18385d;
+  overflow: hidden;
+}
+
+.brand-header-decoration {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.brand-header-shape {
+  fill: #06182d;
+}
+
+.brand-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  min-height: 110px;
+  padding: 22px 34px 20px 24px;
+  min-width: 0;
+}
+
+.brand-logo {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.brand-logo-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.brand-copy {
+  min-width: 0;
+  width: 100%;
+}
+
+.brand-org-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.brand-org {
+  color: #91a9c4;
+  font-size: 14px;
+  line-height: 1.3;
+  font-weight: 400;
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar-header h1 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 500;
+  margin: 9px 0 0;
+  font-size: 21px;
+  line-height: 1.22;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+/* 左侧信息区 */
+.user-section,
+.section {
+  margin: 0 16px 18px;
+  border-radius: 8px;
+  border: 1px solid #18385d;
+  background: transparent;
+  box-shadow: none;
 }
 
 /* 用户信息 */
 .user-section {
-  padding: 16px;
-  border-bottom: 1px solid #f0f0f0;
+  margin-top: 14px;
+  padding: 14px;
+  background: #102d4d;
+  border-color: #1d4264;
+  box-shadow: none;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+  gap: 10px;
+  overflow: visible;
+}
+
+.user-section-title {
+  padding-bottom: 10px;
+  border-bottom: 1px solid #18385d;
+  color: #26b6e8;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.3;
 }
 
 .user-info {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #666;
+  color: #edf6fb;
+  min-width: 0;
+}
+
+.user-info span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  line-height: 1.35;
 }
 
 .inline-icon {
@@ -1501,61 +2071,92 @@ const toggleBusinessFunctions = () => {
 }
 
 .user-icon {
-  font-size: 16px;
-  color: #1677ff;
+  width: 28px;
+  height: 28px;
+  padding: 5px;
+  border: 1px solid #1677ff;
+  border-radius: 50%;
+  color: #26b6e8;
 }
 
 .user-actions {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+  width: 100%;
 }
 
 .admin-btn {
-  background: #eff6ff;
-  color: #1d4ed8;
-  border: 1px solid #bfdbfe;
-  padding: 6px 12px;
+  background: #1677ff;
+  color: #ffffff;
+  border: 1px solid #1677ff;
+  padding: 8px 10px;
   border-radius: 6px;
   cursor: pointer;
   font-size: 12px;
+  line-height: 1.2;
   font-weight: 600;
+  min-height: 36px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
 .admin-btn:hover {
-  background: #dbeafe;
+  background: #2688ff;
+  border-color: #2688ff;
+}
+
+.governance-btn {
+  color: #ffffff;
+  border-color: #1677ff;
+  background: #1677ff;
+}
+
+.governance-btn:hover {
+  background: #2688ff;
+  border-color: #2688ff;
 }
 
 .login-btn {
-  background: #1890ff;
-  color: white;
-  border: none;
-  padding: 6px 16px;
+  background: #102d4d;
+  color: #c4d4eb;
+  border: 1px solid #24527d;
+  padding: 8px 10px;
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
+  line-height: 1.2;
+  min-height: 36px;
+  width: 100%;
 }
 
 .login-btn:hover {
-  background: #40a9ff;
+  background: #183b61;
+  border-color: #2d6a9f;
+  color: #ffffff;
 }
 
 .login-mask {
   position: fixed;
   inset: 0;
-  z-index: 3000;
-  background: rgba(15, 23, 42, 0.28);
+  z-index: 9000;
+  background: rgba(8, 23, 43, 0.78);
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 24px;
 }
 
 .login-dialog {
   width: 320px;
   padding: 22px;
   border-radius: 10px;
-  background: #fff;
-  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+  background: #102d4d;
+  border: 1px solid #1c4265;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.36);
 }
 
 .service-dialog {
@@ -1564,15 +2165,42 @@ const toggleBusinessFunctions = () => {
   overflow-y: auto;
   padding: 22px;
   border-radius: 10px;
-  background: #fff;
-  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+  background: #102d4d;
+  border: 1px solid #1c4265;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.36);
 }
 
 .login-title {
   margin-bottom: 18px;
-  color: #1f2937;
+  color: #ffffff;
   font-size: 18px;
   font-weight: 700;
+}
+
+.form-error-banner {
+  margin: -6px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: 7px;
+  background: rgba(239, 68, 68, 0.12);
+  color: #ffaaa3;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+:global(.el-overlay.user-delete-confirm-mask),
+:global(.el-overlay.is-message-box) {
+  z-index: 5000 !important;
+}
+
+:global(.user-delete-confirm-box) {
+  z-index: 5001 !important;
+}
+
+:global(.user-delete-confirm-box .el-message-box__btns .el-button--primary) {
+  background: #d92d20;
+  border-color: #d92d20;
 }
 
 .login-field {
@@ -1580,27 +2208,27 @@ const toggleBusinessFunctions = () => {
   flex-direction: column;
   gap: 7px;
   margin-bottom: 14px;
-  color: #4b5563;
+  color: #c4d4eb;
   font-size: 13px;
 }
 
 .login-field input {
   height: 36px;
   padding: 0 10px;
-  border: 1px solid #d9e2ec;
+  border: 1px solid #1c4265;
   border-radius: 6px;
-  color: #1f2937;
-  background: #fff;
+  color: #ffffff;
+  background: #102d4d;
   outline: none;
 }
 
 .login-field select,
 .login-field textarea {
   padding: 8px 10px;
-  border: 1px solid #d9e2ec;
+  border: 1px solid #1c4265;
   border-radius: 6px;
-  color: #1f2937;
-  background: #fff;
+  color: #ffffff;
+  background: #102d4d;
   outline: none;
   font: inherit;
   resize: vertical;
@@ -1617,7 +2245,7 @@ const toggleBusinessFunctions = () => {
   min-width: 42px;
   height: 36px;
   padding: 4px;
-  border: 1px solid #d9e2ec;
+  border: 1px solid #1c4265;
   border-radius: 6px;
   background: #fff;
   cursor: pointer;
@@ -1626,8 +2254,8 @@ const toggleBusinessFunctions = () => {
 .login-field input:focus,
 .login-field select:focus,
 .login-field textarea:focus {
-  border-color: #1890ff;
-  box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.12);
+  border-color: #1677ff;
+  box-shadow: none;
 }
 
 .login-actions {
@@ -1637,15 +2265,58 @@ const toggleBusinessFunctions = () => {
   margin-top: 20px;
 }
 
+.login-dialog .login-actions button {
+  min-height: 36px;
+  padding: 0 16px;
+  border-radius: 6px;
+  line-height: 1;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.login-dialog .login-actions .dialog-confirm {
+  min-width: 84px;
+}
+
+.login-dialog .login-actions .dialog-cancel {
+  background: #102d4d;
+  border: 1px solid #24527d;
+  color: #c4d4eb;
+}
+
+.login-dialog .login-actions .dialog-cancel:hover {
+  background: #183b61;
+  border-color: #2d6a9f;
+  color: #ffffff;
+}
+
 .user-management-dialog {
-  width: min(960px, calc(100vw - 32px));
+  width: min(920px, calc(100vw - 48px));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  margin-left: 56px;
+  background: #0f223d;
+  border-color: #285276;
 }
 
 .user-admin-toolbar {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  margin-bottom: 16px;
+  margin-bottom: 0;
+}
+
+.user-management-dialog .login-title {
+  margin-bottom: 0;
+  line-height: 1.35;
+}
+
+.user-management-dialog .empty-log,
+.user-management-dialog .user-list,
+.user-management-dialog .login-actions {
+  grid-column: 1 / -1;
 }
 
 .user-list {
@@ -1656,10 +2327,10 @@ const toggleBusinessFunctions = () => {
 }
 
 .user-card {
-  border: 1px solid #dbe6f0;
-  border-radius: 12px;
+  border: 1px solid #1d4264;
+  border-radius: 8px;
   padding: 14px 16px;
-  background: #f8fbfd;
+  background: #132a48;
 }
 
 .user-card-head {
@@ -1673,18 +2344,27 @@ const toggleBusinessFunctions = () => {
 .user-card-name {
   font-size: 15px;
   font-weight: 700;
-  color: #24405f;
+  color: #ffffff;
 }
 
 .user-card-meta {
   font-size: 12px;
-  color: #6f8498;
+  color: #8299bc;
   margin-top: 4px;
 }
 
 .user-card-actions {
   display: flex;
   gap: 8px;
+  flex: 0 0 auto;
+}
+
+.user-card-actions .layer-action-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-color: #285276;
+  background: #0d2745;
 }
 
 .user-card-grid {
@@ -1692,11 +2372,117 @@ const toggleBusinessFunctions = () => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px 16px;
   font-size: 13px;
-  color: #4e6478;
+  color: #c4d4eb;
+}
+
+.user-card-grid div {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .permission-dialog {
   width: min(860px, calc(100vw - 32px));
+}
+
+.governance-dialog {
+  width: min(900px, calc(100vw - 32px));
+}
+
+.governance-account {
+  margin-top: -6px;
+  margin-bottom: 14px;
+  color: #5f7488;
+  font-size: 13px;
+}
+
+.governance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.governance-policy-card {
+  padding: 14px;
+  border: 1px solid #dbe6f0;
+  border-radius: 8px;
+  background: #f8fbfd;
+  color: #4e6478;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.governance-policy-title {
+  margin-bottom: 8px;
+  color: #24405f;
+  font-weight: 700;
+}
+
+.governance-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 8px 0 10px;
+  color: #24405f;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.governance-history-list {
+  display: grid;
+  gap: 10px;
+  max-height: 42vh;
+  overflow-y: auto;
+}
+
+.governance-history-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid #dbe6f0;
+  border-radius: 8px;
+  background: #102d4d;
+}
+
+.governance-history-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+}
+
+.governance-history-main strong,
+.governance-history-main small {
+  max-width: 100%;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.governance-history-main strong {
+  color: #26384a;
+  font-size: 13px;
+}
+
+.governance-history-main small,
+.governance-history-meta {
+  color: #6f8498;
+  font-size: 12px;
+}
+
+.governance-history-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  flex-shrink: 0;
 }
 
 .permission-subtitle {
@@ -1714,7 +2500,7 @@ const toggleBusinessFunctions = () => {
 
 .permission-group {
   border: 1px solid #dbe6f0;
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 14px 16px;
   background: #f8fbfd;
 }
@@ -1755,9 +2541,9 @@ const toggleBusinessFunctions = () => {
 }
 
 .dialog-confirm {
-  border: 1px solid #1890ff;
+  border: 1px solid #2f97b9;
   color: #fff;
-  background: #1890ff;
+  background: #2f97b9;
 }
 
 .dialog-confirm:disabled {
@@ -1767,8 +2553,12 @@ const toggleBusinessFunctions = () => {
 
 /* 功能区块 */
 .section {
-  padding: 14px 16px;
-  border-bottom: 1px solid #edf2f7;
+  margin: 0 16px 20px;
+  padding: 0 0 18px;
+  border: none;
+  border-bottom: 1px solid #18385d;
+  border-radius: 0;
+  background: transparent;
 }
 
 .section-header {
@@ -1777,24 +2567,25 @@ const toggleBusinessFunctions = () => {
   gap: 8px;
   margin-bottom: 10px;
   font-weight: 700;
-  color: #26384a;
+  color: #ffffff;
   cursor: pointer;
   user-select: none;
   transition: background 0.2s;
-  padding: 6px;
+  padding: 0 2px;
   border-radius: 6px;
   font-size: 14px;
+  line-height: 1.35;
 }
 
 .section-header:hover {
-  background: #eef4f9;
+  background: transparent;
 }
 
 .collapse-icon {
   margin-left: auto;
   font-size: 12px;
   transition: transform 0.3s;
-  color: #999;
+  color: #8299bc;
 }
 
 .collapse-icon.collapsed {
@@ -1803,7 +2594,7 @@ const toggleBusinessFunctions = () => {
 
 .section-content {
   animation: slideDown 0.3s ease-out;
-  padding: 0 4px;
+  padding: 0 2px;
 }
 
 @keyframes slideDown {
@@ -1818,7 +2609,10 @@ const toggleBusinessFunctions = () => {
 }
 
 .section-icon {
-  color: #4f78a0;
+  color: #26b6e8;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
 }
 
 /* 图层管理 */
@@ -1832,43 +2626,128 @@ const toggleBusinessFunctions = () => {
   justify-content: space-between;
   cursor: pointer;
   user-select: none;
-  padding: 4px 0;
-  margin-bottom: 8px;
+  padding: 2px 0;
+  margin-bottom: 10px;
   transition: background 0.2s;
   border-radius: 4px;
 }
 
 .layer-group-header:hover {
-  background: #f9f9f9;
+  background: transparent;
 }
 
 .layer-group-header h4 {
   margin: 0;
   font-size: 14px;
-  color: #666;
-  font-weight: normal;
+  color: #8299bc;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .layer-group-content {
-  padding: 0 12px;
+  padding: 0;
+}
+
+.analysis-layer-box {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid #1c4265;
+  border-radius: 7px;
+  background: #0d2745;
+}
+
+.analysis-layer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mini-text-btn {
+  border: 1px solid #24527d;
+  border-radius: 5px;
+  background: #102d4d;
+  color: #c4d4eb;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.analysis-layer-empty {
+  color: #8299bc;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.analysis-layer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.analysis-layer-item {
+  width: 100%;
+  min-height: 42px;
+  padding: 7px 9px;
+  border: 1px solid #1c4265;
+  border-radius: 6px;
+  background: #0d2745;
+  color: #c4d4eb;
+  text-align: left;
+  cursor: pointer;
+}
+
+.analysis-layer-item span,
+.analysis-layer-item small {
+  display: block;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.analysis-layer-item span {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.analysis-layer-item small {
+  margin-top: 3px;
+  color: #8299bc;
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .layer-item {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  padding: 8px 0;
-  border-bottom: 1px solid #f5f5f5;
+  min-height: 40px;
+  padding: 8px 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
   gap: 10px;
 }
 
 .layer-item:last-child {
-  border-bottom: none;
+  border-bottom: 1px solid transparent;
+}
+
+.layer-item:hover {
+  background: #183b61;
+  border-color: #1c4265;
 }
 
 .layer-info {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   font-size: 13px;
   min-width: 0;
@@ -1884,14 +2763,18 @@ const toggleBusinessFunctions = () => {
 
 .layer-main-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 0;
   min-width: 0;
 }
 
 .layer-icon,
 .function-icon {
-  color: #4b5563;
+  color: #26b6e8;
+}
+
+.layer-main-row > .layer-icon {
+  display: none;
 }
 
 .layer-text {
@@ -1901,28 +2784,30 @@ const toggleBusinessFunctions = () => {
 }
 
 .layer-text span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.35;
 }
 
 .layer-status {
   margin-top: 2px;
   font-size: 11px;
   line-height: 1.2;
-  color: #8c8c8c;
+  color: #8299bc;
 }
 
 .layer-status.published {
-  color: #15803d;
+  color: #77d9a3;
 }
 
 .layer-status.failed {
-  color: #b42318;
+  color: #ff9f98;
 }
 
 .layer-status.publishing {
-  color: #b7791f;
+  color: #ffcf7a;
 }
 
 .layer-meta-grid {
@@ -1937,23 +2822,23 @@ const toggleBusinessFunctions = () => {
   min-height: 22px;
   padding: 0 8px;
   border-radius: 6px;
-  border: 1px solid #dbe6f0;
-  background: #f7fafc;
-  color: #526171;
+  border: 1px solid #1c4265;
+  background: #0d2745;
+  color: #c4d4eb;
   font-size: 11px;
   line-height: 1;
 }
 
 .health-pill.health-healthy {
-  border-color: #ccebd7;
-  background: #f0fdf4;
-  color: #15803d;
+  border-color: rgba(119, 217, 163, 0.28);
+  background: rgba(23, 118, 79, 0.16);
+  color: #8fefbe;
 }
 
 .health-pill.health-unhealthy {
-  border-color: #f6c7c3;
-  background: #fff5f5;
-  color: #b42318;
+  border-color: rgba(255, 159, 152, 0.28);
+  background: rgba(136, 50, 45, 0.16);
+  color: #ffb5ad;
 }
 
 .layer-detail-list {
@@ -1973,12 +2858,12 @@ const toggleBusinessFunctions = () => {
 .detail-label {
   width: 34px;
   flex-shrink: 0;
-  color: #8a97a5;
+  color: #8299bc;
 }
 
 .detail-value {
-  color: #51606f;
-  word-break: break-all;
+  color: #c4d4eb;
+  word-break: break-word;
 }
 
 .layer-url {
@@ -1996,9 +2881,9 @@ const toggleBusinessFunctions = () => {
 
 .log-item {
   padding: 12px;
-  border: 1px solid #e4ebf2;
+  border: 1px solid #1c4265;
   border-radius: 8px;
-  background: #f8fbfd;
+  background: #0d2745;
 }
 
 .log-head {
@@ -2011,36 +2896,36 @@ const toggleBusinessFunctions = () => {
 
 .log-line {
   font-size: 12px;
-  color: #44515f;
+  color: #c4d4eb;
   line-height: 1.5;
 }
 
 .log-line.muted {
-  color: #8a97a5;
+  color: #8299bc;
   margin-top: 4px;
 }
 
 .log-toggle-btn {
   height: 24px;
   padding: 0 8px;
-  border: 1px solid #dbe6f0;
+  border: 1px solid #24527d;
   border-radius: 6px;
-  background: #fff;
-  color: #315f8c;
+  background: #102d4d;
+  color: #c4d4eb;
   font-size: 11px;
   cursor: pointer;
 }
 
 .log-toggle-btn:hover {
-  background: #eef5fb;
+  background: #183b61;
 }
 
 .log-details {
   margin: 8px 0 0;
   padding: 10px;
   border-radius: 6px;
-  background: #eef4f9;
-  color: #44515f;
+  background: #102d4d;
+  color: #c4d4eb;
   font-size: 11px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -2049,7 +2934,7 @@ const toggleBusinessFunctions = () => {
 
 .empty-log {
   padding: 16px 0;
-  color: #8a97a5;
+  color: #8299bc;
   font-size: 13px;
   text-align: center;
 }
@@ -2059,16 +2944,17 @@ const toggleBusinessFunctions = () => {
   align-items: center;
   gap: 5px;
   flex-shrink: 0;
+  padding-top: 1px;
 }
 
 .layer-action-btn {
   width: 24px;
   height: 24px;
   padding: 0;
-  border: 1px solid #dbe6f0;
+  border: 1px solid #24527d;
   border-radius: 5px;
-  background: #fff;
-  color: #315f8c;
+  background: #102d4d;
+  color: #c4d4eb;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2076,17 +2962,17 @@ const toggleBusinessFunctions = () => {
 }
 
 .layer-action-btn:hover {
-  background: #eef5fb;
-  border-color: #b7cde0;
+  background: #183b61;
+  border-color: #2d6a9f;
 }
 
 .layer-action-btn.danger {
-  color: #b42318;
+  color: #ffb4ae;
 }
 
 .layer-action-btn.danger:hover {
-  background: #fff1f0;
-  border-color: #ffccc7;
+  background: rgba(177, 54, 47, 0.16);
+  border-color: rgba(255, 159, 152, 0.28);
 }
 
 .layer-action-btn:disabled {
@@ -2115,7 +3001,8 @@ const toggleBusinessFunctions = () => {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: #ccc;
+  background-color: #0b2340;
+  border: 1px solid #47708f;
   transition: .4s;
   border-radius: 20px;
 }
@@ -2133,7 +3020,7 @@ const toggleBusinessFunctions = () => {
 }
 
 input:checked + .slider {
-  background-color: #1890ff;
+  background-color: #1677ff;
 }
 
 input:checked + .slider:before {
@@ -2141,25 +3028,26 @@ input:checked + .slider:before {
 }
 
 .load-btn {
-  background: #f5f5f5;
-  border: 1px solid #d9d9d9;
+  background: #102d4d;
+  border: 1px solid #1c4265;
   padding: 4px 8px;
   border-radius: 4px;
   font-size: 12px;
   cursor: pointer;
+  color: #c4d4eb;
 }
 
 .load-btn:hover {
-  background: #e6f7ff;
-  border-color: #1890ff;
+  background: #183b61;
+  border-color: #1677ff;
 }
 
 /* 上传按钮 */
 .upload-btn {
   width: 100%;
-  background: #1890ff;
+  background: #1677ff;
   color: white;
-  border: none;
+  border: 1px solid #1677ff;
   padding: 12px;
   border-radius: 6px;
   cursor: pointer;
@@ -2171,22 +3059,26 @@ input:checked + .slider:before {
   font-weight: 500;
   transition: all 0.2s;
   box-sizing: border-box;
-  height: 43.2px;
+  min-height: 44px;
+  height: auto;
+  line-height: 1.35;
+  white-space: normal;
 }
 
 .upload-btn:hover {
-  background: #40a9ff;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(24, 144, 255, 0.3);
+  background: #2688ff;
+  border-color: #2688ff;
+  transform: none;
+  box-shadow: none;
 }
 
 .publish-btn {
   margin-bottom: 8px;
-  background: #1890ff;
+  background: #1677ff;
 }
 
 .publish-btn:hover {
-  background: #40a9ff;
+  background: #2688ff;
 }
 
 .publish-btn:disabled {
@@ -2197,25 +3089,30 @@ input:checked + .slider:before {
 
 .service-btn {
   margin-bottom: 10px;
-  background: #1890ff;
+  background: #102d4d;
+  border-color: #24527d;
+  color: #c4d4eb;
 }
 
 .service-btn:hover {
-  background: #40a9ff;
+  background: #183b61;
+  border-color: #2d6a9f;
+  color: #ffffff;
 }
 
 /* 工具箱 */
 .tool-tip {
   font-size: 12px;
-  color: #999;
+  color: #8299bc;
   margin-bottom: 12px;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .coordinate-section h4 {
   margin: 0 0 8px 0;
   font-size: 14px;
-  color: #666;
+  color: #c4d4eb;
   font-weight: normal;
 }
 
@@ -2227,29 +3124,32 @@ input:checked + .slider:before {
 .coordinate-inputs input {
   flex: 1;
   padding: 8px;
-  border: 1px solid #d9d9d9;
+  border: 1px solid #1c4265;
   border-radius: 4px;
   font-size: 12px;
+  color: #c4d4eb;
+  background: #102d4d;
+  min-width: 0;
 }
 
 .locate-btn {
-  background: #1890ff;
+  background: #1677ff;
   color: white;
-  border: none;
+  border: 1px solid #1677ff;
   padding: 8px 12px;
   border-radius: 4px;
   cursor: pointer;
 }
 
 .locate-btn:hover {
-  background: #40a9ff;
+  background: #2688ff;
 }
 
 .export-btn {
   width: 100%;
-  background: #1890ff;
+  background: #1677ff;
   color: white;
-  border: none;
+  border: 1px solid #1677ff;
   padding: 12px;
   border-radius: 6px;
   cursor: pointer;
@@ -2261,14 +3161,18 @@ input:checked + .slider:before {
   font-weight: 500;
   transition: all 0.2s;
   box-sizing: border-box;
-  height: 43.2px;
+  min-height: 44px;
+  height: auto;
   margin-top: 12px;
+  line-height: 1.35;
+  white-space: normal;
 }
 
 .export-btn:hover {
-  background: #40a9ff;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(24, 144, 255, 0.3);
+  background: #2688ff;
+  border-color: #2688ff;
+  transform: none;
+  box-shadow: none;
 }
 
 /* 业务功能 */
@@ -2281,18 +3185,18 @@ input:checked + .slider:before {
 .function-item {
   appearance: none;
   width: 100%;
-  min-height: 52px;
+  min-height: 58px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 0 10px 0 8px;
-  border: 1px solid #e4ebf2;
+  padding: 10px 10px 10px 8px;
+  border: 1px solid transparent;
   border-radius: 8px;
-  background: #ffffff;
-  color: #2f455c;
+  background: transparent;
+  color: #c4d4eb;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-shadow: none;
   transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
   font-size: 13px;
   text-align: left;
@@ -2300,11 +3204,26 @@ input:checked + .slider:before {
 
 .function-item:hover,
 .function-item.active {
-  background: #f5f9fd;
-  border-color: #cfe0ef;
-  color: #315f8c;
-  box-shadow: 0 6px 18px rgba(49, 95, 140, 0.08);
-  transform: translateY(-1px);
+  background: #183b61;
+  border-color: #1c4265;
+  color: #ffffff;
+  box-shadow: none;
+  transform: none;
+}
+
+.function-item.disabled,
+.function-item:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.function-item.disabled:hover,
+.function-item:disabled:hover {
+  background: transparent;
+  border-color: transparent;
+  color: #c4d4eb;
 }
 
 .function-leading {
@@ -2316,23 +3235,29 @@ input:checked + .slider:before {
 }
 
 .function-icon-box {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #5b6f84;
-  background: #f4f8fb;
-  border: 1px solid #dbe6f0;
+  color: #c4d4eb;
+  background: #102d4d;
+  border: 1px solid #1c4265;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.function-icon-box svg {
+  width: 15px;
+  height: 15px;
 }
 
 .function-item:hover .function-icon-box,
 .function-item.active .function-icon-box {
-  color: #315f8c;
-  background: #eaf3fb;
-  border-color: #bfd5e8;
+  color: #ffffff;
+  background: #183b61;
+  border-color: #1677ff;
 }
 
 .function-copy {
@@ -2345,10 +3270,10 @@ input:checked + .slider:before {
 .function-name {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  text-overflow: clip;
   white-space: normal;
-  line-height: 1.3;
+  line-height: 1.35;
   font-weight: 600;
   font-size: 13px;
 }
@@ -2356,7 +3281,7 @@ input:checked + .slider:before {
 .function-arrow {
   width: 16px;
   height: 16px;
-  color: #93a5b8;
+  color: #8299bc;
   opacity: 0.7;
   transform: translateX(-2px);
   transition: opacity 0.18s ease, transform 0.18s ease;
@@ -2375,5 +3300,371 @@ input:checked + .slider:before {
   position: relative;
   min-width: 0;
   height: 100vh;
+  padding: 12px;
+  background: #06182d;
+  overflow: hidden;
+}
+
+.map-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid #1c4265;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.map-login-float {
+  position: absolute;
+  top: 18px;
+  right: 348px;
+  z-index: 1200;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 74px;
+  height: 38px;
+  padding: 0 16px;
+  border: 1px solid #24527d;
+  border-radius: 6px;
+  background: #102d4d;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+}
+
+.map-login-float:hover {
+  background: #183b61;
+  border-color: #2d6a9f;
+}
+
+.sidebar .section-content {
+  padding: 0 2px;
+}
+
+.sidebar .upload-zone {
+  background: #183b61;
+  border-color: #1c4265;
+}
+
+.sidebar .upload-zone:hover {
+  background: #183b61;
+  border-color: #1677ff;
+  box-shadow: none;
+}
+
+.sidebar .upload-text,
+.sidebar .upload-hint,
+.sidebar .upload-types,
+.sidebar .layer-name,
+.sidebar .analysis-layer-empty,
+.sidebar .log-line.muted {
+  color: #c4d4eb;
+}
+
+.sidebar .layer-group-content {
+  padding: 0 8px;
+}
+
+.sidebar .coordinate-section h4 {
+  margin-top: 2px;
+}
+
+.sidebar .coordinate-inputs input::placeholder {
+  color: #8299bc;
+}
+
+.sidebar .layer-action-btn,
+.sidebar .log-toggle-btn,
+.sidebar .mini-text-btn,
+.sidebar .load-btn {
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+/* 主界面最终深蓝 GIS 按钮与层级覆盖。 */
+.map-view {
+  --gis-page: #06182d;
+  --gis-workspace: #06182d;
+  --gis-sidebar: #0b2340;
+  --gis-card: #102d4d;
+  --gis-module: #0d2745;
+  --gis-hover: #183b61;
+  --gis-primary: #1677ff;
+  --gis-primary-hover: #2688ff;
+  --gis-accent: #26b6e8;
+  --gis-border: #1c4265;
+  --gis-border-strong: #285a82;
+  --gis-text: #ffffff;
+  --gis-muted: #c4d4eb;
+  --gis-subtle: #8299bc;
+  --gis-disabled: #5d7494;
+  background: var(--gis-page);
+  color: var(--gis-text);
+}
+
+.sidebar {
+  background: var(--gis-sidebar);
+  border-right: 1px solid var(--gis-border);
+  box-shadow: 2px 0 18px rgba(0, 0, 0, 0.24);
+}
+
+.sidebar-header {
+  background: var(--gis-page);
+  border-bottom: 1px solid var(--gis-border);
+}
+
+.user-info span {
+  color: var(--gis-muted);
+}
+
+.sidebar-header h1 {
+  color: var(--gis-text);
+}
+
+.user-section,
+.section,
+.analysis-layer-box {
+  background: var(--gis-card);
+  border: 1px solid var(--gis-border);
+  box-shadow: none;
+}
+
+.section-header,
+.layer-group-header h4,
+.coordinate-section h4,
+.analysis-layer-head {
+  color: var(--gis-text);
+}
+
+.section-icon,
+.user-icon,
+.layer-icon,
+.function-icon,
+.analysis-layer-head .inline-icon {
+  color: var(--gis-accent);
+}
+
+.admin-btn,
+.login-btn,
+.upload-btn,
+.publish-btn,
+.service-btn,
+.export-btn,
+.locate-btn,
+.dialog-confirm {
+  border: 1px solid var(--gis-primary);
+  border-radius: 6px;
+  background: var(--gis-primary);
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.admin-btn:hover,
+.login-btn:hover,
+.upload-btn:hover,
+.publish-btn:hover,
+.service-btn:hover,
+.export-btn:hover,
+.locate-btn:hover,
+.dialog-confirm:hover {
+  background: var(--gis-primary-hover);
+  border-color: var(--gis-primary-hover);
+  box-shadow: none;
+  transform: none;
+}
+
+.governance-btn {
+  background: var(--gis-primary);
+  border-color: var(--gis-primary);
+  color: #ffffff;
+}
+
+.login-btn,
+.service-btn {
+  background: #102d4d;
+  border-color: #24527d;
+  color: #c4d4eb;
+}
+
+.login-btn:hover,
+.service-btn:hover {
+  background: #183b61;
+  border-color: #2d6a9f;
+  color: #ffffff;
+}
+
+.dialog-cancel,
+.mini-text-btn,
+.load-btn,
+.log-toggle-btn,
+.layer-action-btn {
+  border: 1px solid var(--gis-border);
+  border-radius: 6px;
+  background: var(--gis-module);
+  color: var(--gis-muted);
+  box-shadow: none;
+}
+
+.dialog-cancel:hover,
+.mini-text-btn:hover,
+.load-btn:hover,
+.log-toggle-btn:hover,
+.layer-action-btn:hover {
+  background: var(--gis-hover);
+  border-color: var(--gis-border-strong);
+  color: var(--gis-text);
+}
+
+.function-item {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #9fb5ca;
+  box-shadow: none;
+}
+
+.function-item:hover {
+  background: var(--gis-module);
+  border-color: var(--gis-border);
+  color: var(--gis-text);
+  transform: none;
+}
+
+.function-item.active {
+  background: #183b61;
+  border-color: var(--gis-border-strong);
+  color: var(--gis-text);
+  box-shadow: inset 3px 0 0 var(--gis-primary);
+  transform: none;
+}
+
+.function-icon-box {
+  background: var(--gis-module);
+  border-color: var(--gis-border);
+  color: var(--gis-accent);
+}
+
+.function-item:hover .function-icon-box,
+.function-item.active .function-icon-box {
+  background: var(--gis-hover);
+  border-color: var(--gis-border-strong);
+  color: var(--gis-accent);
+}
+
+.analysis-layer-item,
+.log-item,
+.coordinate-inputs input {
+  background: var(--gis-module);
+  border: 1px solid var(--gis-border);
+  color: var(--gis-muted);
+}
+
+.coordinate-inputs input:focus {
+  border-color: var(--gis-border-strong);
+  box-shadow: none;
+}
+
+.layer-pill {
+  background: var(--gis-module);
+  border-color: var(--gis-border);
+  color: var(--gis-muted);
+}
+
+.slider {
+  background-color: #31506e;
+}
+
+input:checked + .slider {
+  background-color: var(--gis-primary);
+}
+
+.main-content {
+  background: var(--gis-workspace);
+}
+
+/* Final visual corrections for the referenced GIS workstation layout. */
+.map-view .sidebar-header {
+  min-height: 110px !important;
+  padding: 0 !important;
+  background: #0b2340 !important;
+  border-bottom-color: #18385d !important;
+  clip-path: none !important;
+  overflow: hidden !important;
+}
+
+.map-view .user-section {
+  margin: 14px 16px 18px !important;
+  padding: 14px !important;
+  background: #102d4d !important;
+  border: 1px solid #1d4264 !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.map-view .section {
+  margin: 0 16px 20px !important;
+  padding: 0 0 18px !important;
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid #18385d !important;
+  border-radius: 0 !important;
+}
+
+.map-view .user-actions {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+}
+
+.map-view .user-actions .admin-btn,
+.map-view .user-actions .login-btn {
+  width: 100% !important;
+  min-width: 0 !important;
+  padding: 8px 6px !important;
+  white-space: nowrap !important;
+}
+
+.map-view .user-icon {
+  width: 28px !important;
+  height: 28px !important;
+  padding: 5px !important;
+  border: 1px solid #1677ff !important;
+  border-radius: 50% !important;
+  color: #26b6e8 !important;
+}
+
+.map-view .section-header {
+  padding: 0 2px !important;
+}
+
+.map-view .section-icon {
+  width: 15px !important;
+  height: 15px !important;
+  flex: 0 0 15px !important;
+}
+
+.map-view .layer-main-row > .layer-icon {
+  display: none !important;
+}
+
+.map-view .layer-main-row {
+  gap: 0 !important;
+}
+
+@media (max-width: 1100px) {
+  .user-management-dialog {
+    margin-left: 0 !important;
+  }
+
+  .user-card-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .map-login-float {
+    display: none !important;
+  }
 }
 </style> 
