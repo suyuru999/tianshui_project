@@ -10,7 +10,7 @@
             <span>主界面</span>
           </RouterLink>
           <h1>气候环境监测统计</h1>
-          <p>上传表格或气候栅格数据，系统将自动生成统计图表。</p>
+          <p>可直接上传表格或 GeoTIFF，也可以上传包含 ADF、Shapefile 等数据的 ZIP 压缩包。</p>
         </div>
         
         <!-- 数据文件管理 -->
@@ -37,9 +37,9 @@
                     <path d="M9 15L12 12L15 15" stroke="#1890ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                   </svg>
                 </div>
-                <div class="upload-text">上传气候数据文件</div>
+                <div class="upload-text">上传气象数据文件</div>
                 <div class="upload-hint">拖放文件到此处或点击选择文件</div>
-                <div class="upload-types">支持 .csv/.xlsx/.xls 表格，.tif/.tiff 气候栅格，ADF文件夹ZIP，或完整 Shapefile ZIP（含 .shp/.dbf/.shx，系统将自动读取属性表分析）</div>
+                <div class="upload-types">支持 CSV、Excel、GeoTIFF 直接上传；ADF 文件夹或完整 Shapefile 组件请打包为 ZIP</div>
               </div>
               <div class="file-status">
                 {{ selectedFileLabel }}
@@ -513,7 +513,6 @@ const validateClimateDataFile = (file) => {
   }
 
   // 3. 检查文件类型
-  const allowedTypes = ['.csv', '.xlsx', '.xls', '.tif', '.tiff', '.zip']
   const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'))
   const shapefileSidecars = ['.shp', '.dbf', '.shx', '.prj', '.cpg', '.sbn', '.sbx']
   if (shapefileSidecars.includes(fileExtension)) {
@@ -522,10 +521,10 @@ const validateClimateDataFile = (file) => {
       errorMessage: '请不要单独上传 .shp/.dbf/.shx 等组件文件；请将完整 Shapefile 打包为一个 ZIP 后上传，系统会自动读取属性表进行气候统计分析。'
     }
   }
-  if (!allowedTypes.includes(fileExtension)) {
+  if (!['.csv', '.xlsx', '.xls', '.tif', '.tiff', '.zip'].includes(fileExtension)) {
     return {
       isValid: false,
-      errorMessage: '只支持 CSV、Excel、GeoTIFF、ADF 文件夹 ZIP，或完整 Shapefile ZIP'
+      errorMessage: '支持 CSV、Excel、GeoTIFF 直接上传；ADF 或完整 Shapefile 组件请打包为 ZIP 后上传'
     }
   }
 

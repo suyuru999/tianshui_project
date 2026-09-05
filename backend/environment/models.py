@@ -184,7 +184,8 @@ class ProcessingTask(models.Model):
         ordering = ['-created_at']
     
     def __str__(self):
-        return f"{self.task_type} - {self.remote_sensing_image.name} ({self.get_status_display()})" 
+        image_name = self.remote_sensing_image.name if self.remote_sensing_image else '无关联影像'
+        return f"{self.task_type} - {image_name} ({self.get_status_display()})"
 
 
 class CitizenFeedback(models.Model):
@@ -228,8 +229,15 @@ class ClimateDataFile(models.Model):
     file = models.FileField(upload_to='climate_data/', verbose_name='文件')
     file_type = models.CharField(
         max_length=10,
-        choices=[('csv', 'CSV'), ('xlsx', 'Excel'), ('tif', 'GeoTIFF'), ('zip', 'ADF ZIP')],
-        default='csv',
+        choices=[
+            ('csv', 'CSV'),
+            ('xlsx', 'Excel'),
+            ('xls', 'Excel 97-2003'),
+            ('tif', 'GeoTIFF'),
+            ('tiff', 'GeoTIFF'),
+            ('zip', 'ZIP'),
+        ],
+        default='zip',
         verbose_name='文件类型'
     )
     description = models.TextField(blank=True, null=True, verbose_name='描述')

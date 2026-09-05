@@ -373,11 +373,21 @@ const handleRefreshMap = (payload = {}) => {
     } else if (payload.action === 'deleted' && activeEcologyLayerKey.value === payload.type) {
       layerVisibility.ecology = false
     }
-  } else if (payload.action === 'deleted' && payload.type && layerVisibility[payload.type] !== undefined) {
-    layerVisibility[payload.type] = false
+  } else if (payload.action === 'deleted') {
+    if (String(payload.type || '').startsWith('economy')) {
+      layerVisibility.economy = false
+    } else if (String(payload.type || '').startsWith('engineering')) {
+      layerVisibility.engineering = false
+    } else if (payload.type && layerVisibility[payload.type] !== undefined) {
+      layerVisibility[payload.type] = false
+    }
   }
   if (payload.action === 'updated' && payload.type && layerVisibility[payload.type] !== undefined) {
     layerVisibility[payload.type] = true
+  } else if (payload.action === 'updated' && String(payload.type || '').startsWith('economy')) {
+    layerVisibility.economy = true
+  } else if (payload.action === 'updated' && String(payload.type || '').startsWith('engineering')) {
+    layerVisibility.engineering = true
   }
   if (mapContainerRef.value) {
     mapContainerRef.value.refreshMap(payload)

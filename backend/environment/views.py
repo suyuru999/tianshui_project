@@ -164,6 +164,33 @@ def _get_overlay_layer_configs():
                 os.path.join(base_dir, 'economy_vector'),
             ],
         },
+        'economy_point': {
+            'label': '经济数据点图层',
+            'store': 'economy_point_vector_store',
+            'kind': 'vector',
+            'layer_name': 'economy_point_vector',
+            'paths': [
+                os.path.join(base_dir, 'economy_point_vector'),
+            ],
+        },
+        'economy_line': {
+            'label': '经济数据线图层',
+            'store': 'economy_line_vector_store',
+            'kind': 'vector',
+            'layer_name': 'economy_line_vector',
+            'paths': [
+                os.path.join(base_dir, 'economy_line_vector'),
+            ],
+        },
+        'economy_polygon': {
+            'label': '经济数据面图层',
+            'store': 'economy_polygon_vector_store',
+            'kind': 'vector',
+            'layer_name': 'economy_polygon_vector',
+            'paths': [
+                os.path.join(base_dir, 'economy_polygon_vector'),
+            ],
+        },
         'engineering': {
             'label': '工程项目矢量',
             'store': 'engineering_vector_store',
@@ -171,6 +198,33 @@ def _get_overlay_layer_configs():
             'layer_name': 'engineering_vector',
             'paths': [
                 os.path.join(base_dir, 'engineering_vector'),
+            ],
+        },
+        'engineering_point': {
+            'label': '工程项目点数据',
+            'store': 'engineering_point_vector_store',
+            'kind': 'vector',
+            'layer_name': 'engineering_point_vector',
+            'paths': [
+                os.path.join(base_dir, 'engineering_point_vector'),
+            ],
+        },
+        'engineering_line': {
+            'label': '工程项目线数据',
+            'store': 'engineering_line_vector_store',
+            'kind': 'vector',
+            'layer_name': 'engineering_line_vector',
+            'paths': [
+                os.path.join(base_dir, 'engineering_line_vector'),
+            ],
+        },
+        'engineering_polygon': {
+            'label': '工程项目面数据',
+            'store': 'engineering_polygon_vector_store',
+            'kind': 'vector',
+            'layer_name': 'engineering_polygon_vector',
+            'paths': [
+                os.path.join(base_dir, 'engineering_polygon_vector'),
             ],
         },
     }
@@ -629,7 +683,7 @@ class RemoteSensingImageViewSet(viewsets.ModelViewSet):
 
 class EcologicalIndexViewSet(viewsets.ModelViewSet):
     """生态指数视图集"""
-    queryset = EcologicalIndex.objects.select_related('remote_sensing_image').all()
+    queryset = EcologicalIndex.objects.select_related('remote_sensing_image').order_by('-created_at', '-id')
     serializer_class = EcologicalIndexSerializer
     permission_classes = [permissions.AllowAny]
 
@@ -694,7 +748,7 @@ class RSEIResultViewSet(viewsets.ModelViewSet):
         'dryness',
         'heat',
         'rsei_result'
-    ).all()
+    ).order_by('-created_at', '-id')
     serializer_class = RSEIResultSerializer
     permission_classes = [permissions.AllowAny]
 
@@ -1256,6 +1310,323 @@ def _prepare_overlay_vector_dataset(uploaded_file, dataset_folder, fixed_name):
         'shp_path': shp_path,
         'encoding': encoding,
     }
+
+
+VECTOR_GEOMETRY_SUFFIXES = {
+    'point': {'POINT', 'POINTZ', 'POINTM', 'MULTIPOINT', 'MULTIPOINTZ', 'MULTIPOINTM'},
+    'line': {'POLYLINE', 'POLYLINEZ', 'POLYLINEM', 'LINESTRING', 'LINESTRINGZ', 'LINESTRINGM'},
+    'polygon': {'POLYGON', 'POLYGONZ', 'POLYGONM'},
+}
+
+
+def _overlay_business_vector_config(group, geometry_suffix=None):
+    if group not in {'economy', 'engineering'}:
+        raise ValueError('矢量数据类型必须是 economy 或 engineering')
+
+    if geometry_suffix:
+        data_type = f'{group}_{geometry_suffix}'
+        config = _get_overlay_layer_configs().get(data_type)
+        if not config:
+            raise ValueError(f'不支持的{group}矢量几何类型: {geometry_suffix}')
+        return data_type, config['paths'][0].split(os.sep)[-1], config['layer_name'], config['label']
+
+    config = _get_overlay_layer_configs().get(group)
+    return group, config['paths'][0].split(os.sep)[-1], config['layer_name'], config['label']
+
+
+def _detect_vector_geometry_suffix(shp_path):
+    shape_type = ''
+    if shapefile is not None:
+        with shapefile.Reader(shp_path) as reader:
+            shape_type = str(reader.shapeTypeName or '').upper()
+        for suffix, shape_types in VECTOR_GEOMETRY_SUFFIXES.items():
+            if shape_type in shape_types:
+                return suffix
+
+    # pyshp is optional in the GIS runtime. Use GDAL/OGR when it is absent so
+    # a point or line dataset is never silently misclassified as a polygon.
+    try:
+        from osgeo import ogr
+
+        datasource = ogr.Open(shp_path)
+        if datasource is not None:
+            layer = datasource.GetLayer(0)
+            geometry_type = ogr.GT_Flatten(layer.GetGeomType()) if layer is not None else None
+            ogr_types = {
+                'point': {ogr.wkbPoint, ogr.wkbMultiPoint},
+                'line': {ogr.wkbLineString, ogr.wkbMultiLineString},
+                'polygon': {ogr.wkbPolygon, ogr.wkbMultiPolygon},
+            }
+            for suffix, geometry_types in ogr_types.items():
+                if geometry_type in geometry_types:
+                    return suffix
+            shape_type = ogr.GeometryTypeToName(geometry_type) if geometry_type is not None else shape_type
+    except Exception as exc:
+        logger.warning(f'使用OGR识别矢量几何类型失败: {exc}')
+
+    raise ValueError(f'当前ZIP内是{shape_type or "未知"}几何，当前仅支持点、线、面矢量数据')
+
+
+def _find_complete_shapefiles(root_dir):
+    required = {'.shp', '.shx', '.dbf'}
+    candidates = {}
+    for current_root, _, file_names in os.walk(root_dir):
+        for file_name in file_names:
+            ext = Path(file_name).suffix.lower()
+            if ext not in required:
+                continue
+            stem = Path(file_name).stem.lower()
+            candidates.setdefault((current_root, stem), set()).add(ext)
+
+    shp_paths = []
+    for (current_root, stem), extensions in candidates.items():
+        if required.issubset(extensions):
+            for file_name in os.listdir(current_root):
+                if Path(file_name).stem.lower() == stem and Path(file_name).suffix.lower() == '.shp':
+                    shp_paths.append(os.path.join(current_root, file_name))
+                    break
+
+    return shp_paths
+
+
+def _extract_all_shapefiles_from_upload(uploaded_file, group):
+    probe_dir = os.path.join(settings.MEDIA_ROOT, 'ecological_projects', f'{group}_upload_probe_{uuid.uuid4().hex}')
+    os.makedirs(probe_dir, exist_ok=True)
+    zip_path = os.path.join(probe_dir, get_valid_filename(uploaded_file.name) or f'{group}.zip')
+    with open(zip_path, 'wb+') as destination:
+        for chunk in uploaded_file.chunks():
+            destination.write(chunk)
+
+    is_valid_zip, zip_message = validate_shapefile_zip(zip_path)
+    if not is_valid_zip:
+        remove_tree(probe_dir)
+        raise ValueError(zip_message)
+
+    _extract_shapefile_zip(zip_path, probe_dir)
+    shp_paths = _find_complete_shapefiles(probe_dir)
+    if not shp_paths:
+        remove_tree(probe_dir)
+        raise ValueError('ZIP中未找到完整Shapefile组件，至少需要同名 .shp/.shx/.dbf')
+
+    return probe_dir, zip_path, shp_paths
+
+
+def _prepare_overlay_vector_layers_from_upload(uploaded_file, group):
+    probe_dir, zip_path, source_shp_paths = _extract_all_shapefiles_from_upload(uploaded_file, group)
+    selected_layers = []
+    used_suffixes = set()
+    try:
+        for source_shp in source_shp_paths:
+            geometry_suffix = _detect_vector_geometry_suffix(source_shp)
+            if geometry_suffix in used_suffixes:
+                logger.info(f"{uploaded_file.name} 中包含多个{geometry_suffix}图层，保留第一个并跳过: {source_shp}")
+                continue
+            used_suffixes.add(geometry_suffix)
+
+            data_type, dataset_folder, layer_name, layer_label = _overlay_business_vector_config(group, geometry_suffix)
+            selected_layers.append({
+                'data_type': data_type,
+                'dataset_folder': dataset_folder,
+                'layer_name': layer_name,
+                'layer_label': layer_label,
+                'source_shp': source_shp,
+                'geometry_suffix': geometry_suffix,
+            })
+
+        if not selected_layers:
+            raise ValueError('ZIP中没有可用的点、线或面Shapefile')
+
+        for layer_type in [group, *(f'{group}_{suffix}' for suffix in VECTOR_GEOMETRY_SUFFIXES.keys())]:
+            config = _get_overlay_layer_configs().get(layer_type)
+            if not config:
+                continue
+            for path in config.get('paths') or []:
+                if os.path.isdir(path):
+                    remove_tree(path)
+                elif os.path.exists(path):
+                    os.remove(path)
+
+        prepared_layers = []
+        for selected in selected_layers:
+            data_type = selected['data_type']
+            dataset_folder = selected['dataset_folder']
+            layer_name = selected['layer_name']
+            layer_label = selected['layer_label']
+            source_shp = selected['source_shp']
+            geometry_suffix = selected['geometry_suffix']
+            final_dir = os.path.join(settings.MEDIA_ROOT, 'ecological_projects', dataset_folder)
+            os.makedirs(final_dir, exist_ok=True)
+            shutil.copyfile(zip_path, os.path.join(final_dir, f'{layer_name}.zip'))
+            shp_path, encoding = _normalize_shapefile_dataset(source_shp, final_dir, layer_name)
+            prepared_layers.append({
+                'data_type': data_type,
+                'dataset_folder': dataset_folder,
+                'layer_name': layer_name,
+                'layer_label': layer_label,
+                'shp_path': shp_path,
+                'encoding': encoding,
+                'geometry_suffix': geometry_suffix,
+            })
+    finally:
+        remove_tree(probe_dir)
+
+    return prepared_layers
+
+
+def _clear_overlay_business_vector_metadata(group):
+    for layer_type in [group, *(f'{group}_{suffix}' for suffix in VECTOR_GEOMETRY_SUFFIXES.keys())]:
+        if layer_type in _get_overlay_layer_configs():
+            _clear_overlay_metadata(layer_type)
+
+
+def _delete_overlay_business_vector_services(group):
+    try:
+        from .geoserver_config import geoserver_manager
+    except Exception as exc:
+        logger.warning(f"清理{group}历史GeoServer服务失败: {exc}")
+        return
+
+    for layer_type in [group, *(f'{group}_{suffix}' for suffix in VECTOR_GEOMETRY_SUFFIXES.keys())]:
+        config = _get_overlay_layer_configs().get(layer_type)
+        if not config or config.get('kind') != 'vector':
+            continue
+        try:
+            geoserver_manager.delete_datastore(config['store'], recurse=True)
+        except Exception as exc:
+            logger.warning(f"删除{config['label']}GeoServer服务失败: {exc}")
+
+
+def _publish_overlay_business_vector_layer(layer_info, group):
+    publish_success = False
+    style_field_name = None
+    style_field_label = '经济指标'
+    try:
+        from .geoserver_config import geoserver_manager
+
+        publish_success = geoserver_manager.publish_shapefile(
+            layer_name=layer_info['layer_name'],
+            shapefile_path=layer_info['shp_path'],
+            charset=layer_info['encoding']
+        )
+
+        if publish_success:
+            if group == 'economy':
+                try:
+                    style_field_name, style_field_label = _detect_economy_style_field(
+                        layer_info['shp_path'],
+                        encoding=layer_info['encoding']
+                    )
+                    if style_field_name:
+                        min_val, max_val, mean_val = geoserver_manager._get_vector_statistics(layer_info['shp_path'], style_field_name)
+                    else:
+                        min_val, max_val, mean_val = (None, None, None)
+                    if style_field_name and min_val is not None and max_val is not None:
+                        sld_content = geoserver_manager._create_vector_sld_by_attribute(
+                            field_name=style_field_name,
+                            min_val=min_val,
+                            max_val=max_val,
+                            color_scheme='default'
+                        )
+                        try:
+                            geoserver_manager.delete_style(layer_info['layer_name'])
+                        except Exception:
+                            pass
+                        if geoserver_manager.create_style(layer_info['layer_name'], sld_content):
+                            geoserver_manager.apply_style_to_layer(layer_info['layer_name'], layer_info['layer_name'])
+                    else:
+                        logger.warning(f"{layer_info['layer_label']}无法识别可用经济分级字段，使用默认样式")
+                except Exception as exc:
+                    logger.warning(f"生成经济矢量样式失败: {exc}，使用默认样式")
+            else:
+                try:
+                    color_map = {
+                        'point': ('#1677ff', 0.85),
+                        'line': ('#00a3a3', 0.7),
+                        'polygon': ('#2A5BFF', 0.45),
+                    }
+                    color, opacity = color_map.get(layer_info.get('geometry_suffix'), ('#1677ff', 0.6))
+                    sld_content = geoserver_manager._create_vector_sld_simple(color=color, opacity=opacity)
+                    try:
+                        geoserver_manager.delete_style(layer_info['layer_name'])
+                    except Exception:
+                        pass
+                    if geoserver_manager.create_style(layer_info['layer_name'], sld_content):
+                        geoserver_manager.apply_style_to_layer(layer_info['layer_name'], layer_info['layer_name'])
+                except Exception as exc:
+                    logger.warning(f"生成工程矢量样式失败: {exc}，使用默认样式")
+    except Exception as exc:
+        logger.error(f"发布{layer_info['layer_label']}到GeoServer时出错: {exc}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+    return publish_success, style_field_name, style_field_label
+
+
+def _overlay_business_vector_upload_response(uploaded_file, description, group):
+    prepared_layers = _prepare_overlay_vector_layers_from_upload(uploaded_file, group)
+    _delete_overlay_business_vector_services(group)
+    _clear_overlay_business_vector_metadata(group)
+    results = []
+    for layer_info in prepared_layers:
+        publish_success, style_field_name, style_field_label = _publish_overlay_business_vector_layer(layer_info, group)
+        metadata = _update_overlay_metadata(
+            layer_info['data_type'],
+            description=description,
+            file_name=uploaded_file.name,
+            layer_name=layer_info['layer_name'],
+            source_type='uploaded_vector',
+            service_mode='geoserver' if publish_success else 'local',
+            geoserver_published=publish_success,
+        )
+        results.append({
+            'data_type': layer_info['data_type'],
+            'geometry_type': layer_info['geometry_suffix'],
+            'label': layer_info['layer_label'],
+            'layer_name': layer_info['layer_name'],
+            'shp_path': layer_info['shp_path'],
+            'geoserver_published': publish_success,
+            'style_field_name': style_field_name,
+            'style_field_label': style_field_label,
+            'metadata': metadata,
+        })
+
+    published_count = sum(1 for item in results if item['geoserver_published'])
+    labels = '、'.join(item['label'] for item in results)
+    group_label = '经济数据矢量' if group == 'economy' else '工程项目矢量'
+    all_published = published_count == len(results)
+    return Response({
+        'success': True,
+        'message': f'{group_label}上传成功，已识别并处理：{labels}' + ('' if all_published else '；部分图层使用本地GeoJSON显示'),
+        'file_name': uploaded_file.name,
+        'description': description,
+        'data_type': group,
+        'results': results,
+        'metadata': results[0]['metadata'] if results else {},
+    })
+
+
+def _engineering_upload_config(data_type):
+    data_type, dataset_folder, layer_name, layer_label = _overlay_business_vector_config(
+        'engineering',
+        data_type.replace('engineering_', '') if data_type.startswith('engineering_') else None
+    )
+    return dataset_folder, layer_name, layer_label
+
+
+def _get_engineering_geometry_layer_type(shp_path):
+    return f"engineering_{_detect_vector_geometry_suffix(shp_path)}"
+
+
+def _validate_engineering_geometry(shp_path, data_type):
+    """Prevent a point/polygon upload from being saved to the wrong layer slot."""
+    if data_type == 'engineering' or shapefile is None:
+        return
+
+    geometry_layer_type = _get_engineering_geometry_layer_type(shp_path)
+    if geometry_layer_type != data_type:
+        expected_label = '点' if data_type == 'engineering_point' else '面'
+        actual_label = '点' if geometry_layer_type == 'engineering_point' else '面'
+        raise ValueError(f'当前ZIP内是工程{actual_label}数据，不能作为工程{expected_label}数据上传')
 
 
 def _landuse_structure_payload(analyzer):
@@ -3211,8 +3582,20 @@ def validate_climate_file(file_obj):
     if file_name.endswith(('.shp', '.dbf', '.shx', '.prj', '.cpg', '.sbn', '.sbx')):
         errors.append('请将完整 Shapefile 组件打包为一个 ZIP 后上传，系统会自动读取属性表进行气候统计分析')
         return errors
-    if not file_name.endswith(('.csv', '.xlsx', '.xls', '.tif', '.tiff', '.zip')):
-        errors.append('只支持 CSV、Excel、GeoTIFF、ADF ZIP，或完整 Shapefile ZIP 文件格式(.csv, .xlsx, .xls, .tif, .tiff, .zip)')
+    supported_extensions = ('.csv', '.xlsx', '.xls', '.tif', '.tiff', '.zip')
+    if not file_name.endswith(supported_extensions):
+        errors.append('支持 CSV、Excel、GeoTIFF 直接上传；ADF 或完整 Shapefile 组件请打包为 ZIP 后上传')
+
+    # 扩展名只能作为第一层提示，接口还要确认文件本身确实是 ZIP。
+    if file_name.endswith('.zip'):
+        try:
+            file_obj.file.seek(0)
+            is_valid_zip = zipfile.is_zipfile(file_obj.file)
+            file_obj.file.seek(0)
+        except Exception:
+            is_valid_zip = False
+        if not is_valid_zip:
+            errors.append('上传文件不是有效的 ZIP 压缩包，请重新打包后上传')
     
     # 5. 检查文件名
     if not file_name or file_name.strip() == '':
@@ -3246,7 +3629,7 @@ def _detect_climate_file_capabilities(file_obj, file_type):
     source_type = 'climate_table'
     field_mapping = {}
 
-    if file_type in ['tif', 'tiff', 'zip']:
+    if file_type in ['csv', 'xlsx', 'xls', 'tif', 'tiff', 'zip']:
         from .climate_analysis import detect_climate_file_capabilities as detect_climate_source_capabilities
         raster_capability = detect_climate_source_capabilities(file_path or file_name, file_type)
         inferred_metric = raster_capability.get('inferred_metric')
@@ -3324,20 +3707,7 @@ def upload_climate_data(request):
         # 序列化数据
         serializer = ClimateDataFileUploadSerializer(data=request.data)
         if serializer.is_valid():
-            # 确定文件类型
-            file_name = file_obj.name.lower()
-            if file_name.endswith('.csv'):
-                file_type = 'csv'
-            elif file_name.endswith(('.xlsx', '.xls')):
-                file_type = 'xlsx'
-            elif file_name.endswith(('.tif', '.tiff')):
-                file_type = 'tif'
-            elif file_name.endswith('.zip'):
-                file_type = 'zip'
-            else:
-                return Response({
-                    'error': '不支持的文件格式'
-                }, status=400)
+            file_type = Path(file_obj.name).suffix.lower().lstrip('.')
             
             # 创建文件记录
             try:
@@ -4399,35 +4769,45 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                 'message': '不支持的数据类型'
             }, status=400)
 
-        config = layer_configs[layer_type]
-        geoserver_success = True
-        try:
-            from .geoserver_config import geoserver_manager
-            if config['kind'] == 'raster':
-                geoserver_success = geoserver_manager.delete_coveragestore(config['store'], recurse=True)
-            else:
-                geoserver_success = geoserver_manager.delete_datastore(config['store'], recurse=True)
-        except Exception as exc:
-            geoserver_success = False
-            logger.warning(f"删除{config['label']}GeoServer服务失败: {exc}")
+        if layer_type in {'economy', 'engineering'}:
+            target_layer_types = [layer_type, *(f'{layer_type}_{suffix}' for suffix in VECTOR_GEOMETRY_SUFFIXES.keys())]
+        else:
+            target_layer_types = [layer_type]
 
+        group_label = layer_configs[layer_type]['label']
         removed_paths = []
-        for path in config['paths']:
-            try:
-                if os.path.isdir(path):
-                    remove_tree(path)
-                    removed_paths.append(path)
-                elif os.path.exists(path):
-                    os.remove(path)
-                    removed_paths.append(path)
-            except Exception as exc:
-                logger.warning(f"删除本地文件失败 {path}: {exc}")
+        geoserver_success = True
+        for target_layer_type in target_layer_types:
+            config = layer_configs.get(target_layer_type)
+            if not config:
+                continue
 
-        _clear_overlay_metadata(layer_type)
+            try:
+                from .geoserver_config import geoserver_manager
+                if config['kind'] == 'raster':
+                    geoserver_success = geoserver_manager.delete_coveragestore(config['store'], recurse=True) and geoserver_success
+                else:
+                    geoserver_success = geoserver_manager.delete_datastore(config['store'], recurse=True) and geoserver_success
+            except Exception as exc:
+                geoserver_success = False
+                logger.warning(f"删除{config['label']}GeoServer服务失败: {exc}")
+
+            for path in config['paths']:
+                try:
+                    if os.path.isdir(path):
+                        remove_tree(path)
+                        removed_paths.append(path)
+                    elif os.path.exists(path):
+                        os.remove(path)
+                        removed_paths.append(path)
+                except Exception as exc:
+                    logger.warning(f"删除本地文件失败 {path}: {exc}")
+
+            _clear_overlay_metadata(target_layer_type)
 
         return Response({
             'success': geoserver_success,
-            'message': f"{config['label']}已删除" if geoserver_success else f"{config['label']}本地记录已清理，但GeoServer服务删除可能未完成",
+            'message': f"{group_label}已删除" if geoserver_success else f"{group_label}本地记录已清理，但GeoServer服务删除可能未完成",
             'data_type': layer_type,
             'removed_paths': removed_paths,
         })
@@ -5027,7 +5407,7 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['post'], url_path='upload-economy-vector', parser_classes=[MultiPartParser, FormParser])
     def upload_economy_vector(self, request):
-        """上传经济数据矢量"""
+        """上传经济数据矢量，支持同一ZIP内包含点/线/面Shapefile。"""
         try:
             if 'file' not in request.FILES:
                 return Response({
@@ -5052,114 +5432,7 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                     'success': False,
                     'message': '文件大小超过1GB限制'
                 }, status=400)
-
-            prepared = _prepare_overlay_vector_dataset(uploaded_file, 'economy_vector', 'economy_vector')
-            shp_path = prepared['shp_path']
-            encoding = prepared['encoding']
-            logger.info(f"✅ 经济矢量数据已准备就绪: {shp_path}")
-            
-            # 发布到GeoServer并生成样式
-            publish_success = False
-            try:
-                from .geoserver_config import geoserver_manager
-                
-                # 1. 发布Shapefile到GeoServer
-                logger.info("正在发布到GeoServer...")
-                
-                publish_success = geoserver_manager.publish_shapefile(
-                    layer_name='economy_vector',
-                    shapefile_path=shp_path,
-                    charset=encoding
-                )
-                
-                if publish_success:
-                    logger.info("✅ 成功发布到GeoServer")
-                    
-                    # 2. 读取矢量数据统计信息并生成样式
-                    style_field_name = None
-                    style_field_label = '经济指标'
-                    try:
-                        style_field_name, style_field_label = _detect_economy_style_field(shp_path, encoding=encoding)
-                        if style_field_name:
-                            min_val, max_val, mean_val = geoserver_manager._get_vector_statistics(shp_path, style_field_name)
-                        else:
-                            min_val, max_val, mean_val = (None, None, None)
-
-                        if style_field_name and min_val is not None and max_val is not None:
-                            logger.info(
-                                f"{style_field_label}字段统计信息({style_field_name}): "
-                                f"min={min_val}, max={max_val}, mean={mean_val}"
-                            )
-
-                            style_name = 'economy_vector'
-                            sld_content = geoserver_manager._create_vector_sld_by_attribute(
-                                field_name=style_field_name,
-                                min_val=min_val,
-                                max_val=max_val,
-                                color_scheme='default'
-                            )
-
-                            try:
-                                geoserver_manager.delete_style(style_name)
-                            except Exception:
-                                pass
-
-                            if geoserver_manager.create_style(style_name, sld_content):
-                                geoserver_manager.apply_style_to_layer('economy_vector', style_name)
-                                logger.info(f"✅ 经济矢量样式已自动生成并应用，分级字段: {style_field_name}")
-                        else:
-                            logger.warning("无法识别可用的经济分级字段，使用默认样式")
-                    except Exception as e:
-                        logger.warning(f"生成矢量样式失败: {e}，使用默认样式")
-                else:
-                    logger.error("❌ 发布到GeoServer失败")
-            except Exception as e:
-                logger.error(f"发布到GeoServer时出错: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
-            
-            # 返回结果
-            if publish_success:
-                metadata = _update_overlay_metadata(
-                    'economy',
-                    description=description,
-                    file_name=file_name,
-                    layer_name='economy_vector',
-                    source_type='uploaded_vector',
-                    service_mode='geoserver',
-                    geoserver_published=True,
-                )
-                return Response({
-                    'success': True,
-                    'message': '经济数据矢量上传并发布成功！',
-                    'file_name': file_name,
-                    'shp_path': shp_path,
-                    'layer_name': 'economy_vector',
-                    'style_field_name': style_field_name,
-                    'style_field_label': style_field_label,
-                    'description': description,
-                    'metadata': metadata,
-                })
-            else:
-                metadata = _update_overlay_metadata(
-                    'economy',
-                    description=description,
-                    file_name=file_name,
-                    layer_name='economy_vector',
-                    source_type='uploaded_vector',
-                    service_mode='local',
-                    geoserver_published=False,
-                )
-                return Response({
-                    'success': True,
-                    'message': '经济数据矢量已上传，GeoServer未连接，当前使用本地矢量图层显示。',
-                    'warning': 'GeoServer发布失败，已启用本地GeoJSON兜底。',
-                    'file_name': file_name,
-                    'shp_path': shp_path,
-                    'layer_name': 'economy_vector',
-                    'description': description,
-                    'metadata': metadata,
-                })
+            return _overlay_business_vector_upload_response(uploaded_file, description, 'economy')
                 
         except Exception as e:
             logger.error(f"上传经济矢量失败: {str(e)}")
@@ -5172,7 +5445,7 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['post'], url_path='upload-engineering-vector', parser_classes=[MultiPartParser, FormParser])
     def upload_engineering_vector(self, request):
-        """上传工程项目矢量"""
+        """上传工程项目矢量，支持同一ZIP内包含点/线/面Shapefile。"""
         try:
             if 'file' not in request.FILES:
                 return Response({
@@ -5197,106 +5470,7 @@ class OverlayAnalysisTaskViewSet(viewsets.ModelViewSet):
                     'success': False,
                     'message': '文件大小超过1GB限制'
                 }, status=400)
-
-            prepared = _prepare_overlay_vector_dataset(uploaded_file, 'engineering_vector', 'engineering_vector')
-            shp_path = prepared['shp_path']
-            encoding = prepared['encoding']
-            logger.info(f"✅ 工程矢量数据已准备就绪: {shp_path}")
-            
-            # 发布到GeoServer并生成样式
-            publish_success = False
-            try:
-                from .geoserver_config import geoserver_manager
-                import random
-                
-                # 1. 发布Shapefile到GeoServer
-                logger.info("正在发布到GeoServer...")
-                
-                publish_success = geoserver_manager.publish_shapefile(
-                    layer_name='engineering_vector',
-                    shapefile_path=shp_path,
-                    charset=encoding
-                )
-                
-                if publish_success:
-                    logger.info("✅ 成功发布到GeoServer")
-                    
-                    # 2. 为工程矢量生成动态样式（使用蓝色系统一样式）
-                    try:
-                        # 为每次上传生成稍有不同的蓝色调
-                        blue_shades = [
-                            ('#004CFF', 0.55),  # 纯蓝偏深
-                            ('#0066FF', 0.6),   # 亮蓝
-                            ('#0088FF', 0.55),  # 天蓝
-                            ('#2A5BFF', 0.6),   # 中蓝
-                        ]
-                        color, opacity = random.choice(blue_shades)
-                        
-                        style_name = 'engineering_vector'
-                        sld_content = geoserver_manager._create_vector_sld_simple(
-                            color=color,
-                            opacity=opacity
-                        )
-                        
-                        # 删除旧样式（如果存在）
-                        try:
-                            geoserver_manager.delete_style(style_name)
-                        except:
-                            pass
-                        
-                        # 创建并应用新样式
-                        if geoserver_manager.create_style(style_name, sld_content):
-                            geoserver_manager.apply_style_to_layer('engineering_vector', style_name)
-                            logger.info(f"✅ 工程矢量样式已生成（{color}）")
-                    except Exception as e:
-                        logger.warning(f"生成工程矢量样式失败: {e}，使用默认样式")
-                else:
-                    logger.error("❌ 发布到GeoServer失败")
-            except Exception as e:
-                logger.error(f"发布到GeoServer时出错: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
-            
-            # 返回结果
-            if publish_success:
-                metadata = _update_overlay_metadata(
-                    'engineering',
-                    description=description,
-                    file_name=file_name,
-                    layer_name='engineering_vector',
-                    source_type='uploaded_vector',
-                    service_mode='geoserver',
-                    geoserver_published=True,
-                )
-                return Response({
-                    'success': True,
-                    'message': '工程项目矢量上传并发布成功！',
-                    'file_name': file_name,
-                    'shp_path': shp_path,
-                    'layer_name': 'engineering_vector',
-                    'description': description,
-                    'metadata': metadata,
-                })
-            else:
-                metadata = _update_overlay_metadata(
-                    'engineering',
-                    description=description,
-                    file_name=file_name,
-                    layer_name='engineering_vector',
-                    source_type='uploaded_vector',
-                    service_mode='local',
-                    geoserver_published=False,
-                )
-                return Response({
-                    'success': True,
-                    'message': '工程项目矢量已上传，GeoServer未连接，当前使用本地矢量图层显示。',
-                    'warning': 'GeoServer发布失败，已启用本地GeoJSON兜底。',
-                    'file_name': file_name,
-                    'shp_path': shp_path,
-                    'layer_name': 'engineering_vector',
-                    'description': description,
-                    'metadata': metadata,
-                })
+            return _overlay_business_vector_upload_response(uploaded_file, description, 'engineering')
                 
         except Exception as e:
             logger.error(f"上传工程矢量失败: {str(e)}")

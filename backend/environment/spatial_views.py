@@ -648,7 +648,8 @@ def geoserver_status(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@authentication_classes([])
+@permission_classes([AllowAny])
 def system_health(request):
     """Return deployment health checks for database, media storage and GeoServer."""
     checks = {}

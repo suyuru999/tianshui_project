@@ -87,6 +87,10 @@
             <span class="label">区域名称</span>
             <span class="value">{{ getEconomyRegionName(economyData) }}</span>
           </div>
+          <div class="info-item" v-if="economyData.geometryType">
+            <span class="label">几何类型</span>
+            <span class="value">{{ formatGeometryType(economyData.geometryType) }}</span>
+          </div>
           <div class="info-item" v-if="economyData.layer_name">
             <span class="label">图层类型</span>
             <span class="value">{{ economyData.layer_name }}</span>
@@ -163,6 +167,9 @@
           >
             <div class="project-header">
               <span class="project-name">{{ getProjectName(project) }}</span>
+              <span v-if="project.geometryType" class="project-geometry-type">
+                {{ formatGeometryType(project.geometryType) }}
+              </span>
               <span
                 v-if="getProjectStatus(project)"
                 class="project-status"
@@ -311,6 +318,15 @@ const getProjectType = (project) => {
 
 const getProjectStatus = (project) => {
   return project?.status || project?.STATUS || ''
+}
+
+const formatGeometryType = (geometryType) => {
+  const labels = {
+    point: '点',
+    line: '线',
+    polygon: '面'
+  }
+  return labels[String(geometryType || '').toLowerCase()] || geometryType || '矢量'
 }
 
 const getEconomyRegionName = (economyData) => {

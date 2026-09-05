@@ -89,9 +89,19 @@ let referenceImageryLayer = null
 let ecologyRasterLayer = null
 let ecologyDisplayLayer = null
 let economyVectorLayer = null
+let economyPointVectorLayer = null
+let economyLineVectorLayer = null
+let economyPolygonVectorLayer = null
 let engineeringVectorLayer = null
+let engineeringPointVectorLayer = null
+let engineeringLineVectorLayer = null
+let engineeringPolygonVectorLayer = null
 let ecologyLayerMetadata = {}
 let referenceImageryRequestId = 0
+const localVectorSources = new Map()
+const ECONOMY_LAYER_TYPES = ['economy', 'economy_point', 'economy_line', 'economy_polygon']
+const ENGINEERING_LAYER_TYPES = ['engineering', 'engineering_point', 'engineering_line', 'engineering_polygon']
+const BUSINESS_VECTOR_LAYER_TYPES = [...ECONOMY_LAYER_TYPES, ...ENGINEERING_LAYER_TYPES]
 
 const hasFeatureProperties = (item) => {
   if (!item) return false
@@ -116,7 +126,12 @@ const clearPopupData = (layerType) => {
   const targets = Array.isArray(layerType) ? layerType : [layerType]
   const normalizedTargets = targets
     .filter(Boolean)
-    .map((item) => item === 'ecology_synced' || item === 'ecology_uploaded' ? 'ecology' : item)
+    .map((item) => {
+      if (item === 'ecology_synced' || item === 'ecology_uploaded') return 'ecology'
+      if (String(item).startsWith('economy')) return 'economy'
+      if (String(item).startsWith('engineering')) return 'engineering'
+      return item
+    })
 
   if (normalizedTargets.length === 0 || normalizedTargets.includes('ecology')) {
     popup.ecologyData = null
@@ -165,7 +180,7 @@ const ECOLOGY_GENERIC_CLASS_COLORS = {
 }
 
 const getOverlayVectorStyle = (layerType) => {
-  const isEconomy = layerType === 'economy'
+  const isEconomy = String(layerType || '').startsWith('economy')
   const color = isEconomy ? '#f59e0b' : '#1677ff'
   return new Style({
     stroke: new Stroke({ color, width: isEconomy ? 2 : 2.2 }),
@@ -176,6 +191,14 @@ const getOverlayVectorStyle = (layerType) => {
       stroke: new Stroke({ color: '#ffffff', width: 1.5 })
     })
   })
+}
+
+const getOverlayVectorGroup = (layerType) => String(layerType || '').startsWith('economy') ? 'economy' : 'engineering'
+
+const getOverlayVectorGroupLayers = (group) => {
+  return (group === 'economy' ? ECONOMY_LAYER_TYPES : ENGINEERING_LAYER_TYPES)
+    .map(layerType => getOverlayVectorLayerRef(layerType))
+    .filter(Boolean)
 }
 
 const parseFiniteNumber = (value) => {
@@ -259,12 +282,8 @@ const getEcologyClassification = (rawValue, sourceField = '') => {
 watch(() => props.layerVisibility, async (newVal) => {
   await syncReferenceImageryVisibility(newVal.referenceImagery)
   syncEcologyLayerVisibility(newVal.ecology)
-  if (economyVectorLayer) {
-    economyVectorLayer.setVisible(newVal.economy)
-  }
-  if (engineeringVectorLayer) {
-    engineeringVectorLayer.setVisible(newVal.engineering)
-  }
+  getOverlayVectorGroupLayers('economy').forEach(layer => layer.setVisible(newVal.economy))
+  getOverlayVectorGroupLayers('engineering').forEach(layer => layer.setVisible(newVal.engineering))
   if (!newVal.ecology) clearPopupData('ecology')
   if (!newVal.economy) clearPopupData('economy')
   if (!newVal.engineering) clearPopupData('engineering')
@@ -316,13 +335,73 @@ const buildEcologyWMSLayer = (layerName) => {
   })
 }
 
+const getOverlayVectorLayerName = (layerType) => {
+  const metadataLayerName = ecologyLayerMetadata?.[layerType]?.layer_name
+  if (metadataLayerName) return metadataLayerName
+  if (layerType === 'economy') return 'economy_vector'
+  if (layerType === 'economy_point') return 'economy_point_vector'
+  if (layerType === 'economy_line') return 'economy_line_vector'
+  if (layerType === 'economy_polygon') return 'economy_polygon_vector'
+  if (layerType === 'engineering_point') return 'engineering_point_vector'
+  if (layerType === 'engineering_line') return 'engineering_line_vector'
+  if (layerType === 'engineering_polygon') return 'engineering_polygon_vector'
+  return 'engineering_vector'
+}
+
+const getOverlayVectorVisibility = (layerType) => {
+  return getOverlayVectorGroup(layerType) === 'economy' ? props.layerVisibility.economy : props.layerVisibility.engineering
+}
+
+const getOverlayVectorOpacity = (layerType) => {
+  const group = getOverlayVectorGroup(layerType)
+  return Number(props.layerOpacity?.[group] ?? (group === 'economy' ? 60 : 80)) / 100
+}
+
+const getOverlayVectorZIndex = (layerType) => {
+  if (layerType === 'economy') return 3
+  if (layerType === 'economy_polygon') return 3
+  if (layerType === 'economy_line') return 4
+  if (layerType === 'economy_point') return 5
+  if (layerType === 'engineering_polygon') return 6
+  if (layerType === 'engineering_line') return 7
+  if (layerType === 'engineering_point') return 8
+  return 6
+}
+
+const getOverlayVectorLayerRef = (layerType) => {
+  if (layerType === 'economy') return economyVectorLayer
+  if (layerType === 'economy_point') return economyPointVectorLayer
+  if (layerType === 'economy_line') return economyLineVectorLayer
+  if (layerType === 'economy_polygon') return economyPolygonVectorLayer
+  if (layerType === 'engineering_point') return engineeringPointVectorLayer
+  if (layerType === 'engineering_line') return engineeringLineVectorLayer
+  if (layerType === 'engineering_polygon') return engineeringPolygonVectorLayer
+  return engineeringVectorLayer
+}
+
+const setOverlayVectorLayerRef = (layerType, layer) => {
+  if (layerType === 'economy') {
+    economyVectorLayer = layer
+  } else if (layerType === 'economy_point') {
+    economyPointVectorLayer = layer
+  } else if (layerType === 'economy_line') {
+    economyLineVectorLayer = layer
+  } else if (layerType === 'economy_polygon') {
+    economyPolygonVectorLayer = layer
+  } else if (layerType === 'engineering_point') {
+    engineeringPointVectorLayer = layer
+  } else if (layerType === 'engineering_line') {
+    engineeringLineVectorLayer = layer
+  } else if (layerType === 'engineering_polygon') {
+    engineeringPolygonVectorLayer = layer
+  } else {
+    engineeringVectorLayer = layer
+  }
+}
+
 const createOverlayWMSLayer = (layerType) => {
   const wmsBaseUrl = GEOSERVER_OWS_PROXY
-  const layerName = layerType === 'economy' ? 'economy_vector' : 'engineering_vector'
-  const opacity = layerType === 'economy'
-    ? Number(props.layerOpacity?.economy ?? 60) / 100
-    : Number(props.layerOpacity?.engineering ?? 80) / 100
-  const zIndex = layerType === 'economy' ? 3 : 4
+  const layerName = getOverlayVectorLayerName(layerType)
 
   const layer = new TileLayer({
     source: new TileWMS({
@@ -338,9 +417,9 @@ const createOverlayWMSLayer = (layerType) => {
       serverType: 'geoserver',
       crossOrigin: 'anonymous'
     }),
-    visible: props.layerVisibility[layerType],
-    opacity,
-    zIndex
+    visible: getOverlayVectorVisibility(layerType),
+    opacity: getOverlayVectorOpacity(layerType),
+    zIndex: getOverlayVectorZIndex(layerType)
   })
   layer.set('overlayLayerType', layerType)
   layer.set('overlayServiceMode', 'geoserver')
@@ -349,7 +428,7 @@ const createOverlayWMSLayer = (layerType) => {
 
 const removeOverlayVectorLayer = (layerType) => {
   if (!map) return
-  const currentLayer = layerType === 'economy' ? economyVectorLayer : engineeringVectorLayer
+  const currentLayer = getOverlayVectorLayerRef(layerType)
   if (currentLayer) {
     map.removeLayer(currentLayer)
   }
@@ -358,11 +437,11 @@ const removeOverlayVectorLayer = (layerType) => {
       map.removeLayer(layer)
     }
   })
-  if (layerType === 'economy') {
-    economyVectorLayer = null
-  } else {
-    engineeringVectorLayer = null
-  }
+  setOverlayVectorLayerRef(layerType, null)
+}
+
+const removeLocalVectorSource = (layerType) => {
+  localVectorSources.delete(layerType)
 }
 
 const setOverlayVectorLayer = (layerType, layer) => {
@@ -370,17 +449,13 @@ const setOverlayVectorLayer = (layerType, layer) => {
   if (!map || !layer) return
   layer.set('overlayLayerType', layerType)
   map.addLayer(layer)
-  if (layerType === 'economy') {
-    economyVectorLayer = layer
-  } else {
-    engineeringVectorLayer = layer
-  }
+  setOverlayVectorLayerRef(layerType, layer)
 }
 
 const ensureOverlayWMSLayer = (layerType) => {
-  const currentLayer = layerType === 'economy' ? economyVectorLayer : engineeringVectorLayer
+  const currentLayer = getOverlayVectorLayerRef(layerType)
   if (currentLayer?.get?.('overlayServiceMode') === 'geoserver') {
-    currentLayer.setVisible(props.layerVisibility[layerType])
+    currentLayer.setVisible(getOverlayVectorVisibility(layerType))
     return currentLayer
   }
   const layer = createOverlayWMSLayer(layerType)
@@ -388,10 +463,8 @@ const ensureOverlayWMSLayer = (layerType) => {
   return layer
 }
 
-const loadLocalVectorLayer = async (layerType, metadata) => {
-  if (!map || !metadata?.geojson_url) {
-    return false
-  }
+const loadLocalVectorSource = async (layerType, metadata) => {
+  if (!metadata?.geojson_url) return null
 
   try {
     const response = await request.get(metadata.geojson_url, {}, { skipAuth: true, silentError: true })
@@ -407,33 +480,92 @@ const loadLocalVectorLayer = async (layerType, metadata) => {
       })
     })
     source.getFeatures().forEach((feature) => feature.set('overlayVectorType', layerType))
+    localVectorSources.set(layerType, source)
+    return source
+  } catch (error) {
+    console.error(`${getOverlayVectorGroup(layerType) === 'economy' ? '经济数据矢量' : '工程项目矢量'}本地属性数据加载失败:`, error)
+    return null
+  }
+}
+
+const loadLocalVectorLayer = async (layerType, metadata, source = null) => {
+  if (!map || !metadata?.geojson_url) {
+    return false
+  }
+
+  try {
+    const vectorSource = source || await loadLocalVectorSource(layerType, metadata)
+    if (!vectorSource) return false
     const layer = new VectorLayer({
-      source,
-      visible: props.layerVisibility[layerType],
-      opacity: Number(props.layerOpacity?.[layerType] ?? (layerType === 'economy' ? 60 : 80)) / 100,
+      source: vectorSource,
+      visible: getOverlayVectorVisibility(layerType),
+      opacity: getOverlayVectorOpacity(layerType),
       style: getOverlayVectorStyle(layerType),
-      zIndex: layerType === 'economy' ? 3 : 4
+      zIndex: getOverlayVectorZIndex(layerType)
     })
     layer.set('overlayServiceMode', 'local')
     setOverlayVectorLayer(layerType, layer)
     return true
   } catch (error) {
-    console.error(`${layerType === 'economy' ? '经济数据矢量' : '工程项目矢量'}本地图层加载失败:`, error)
+    console.error(`${getOverlayVectorGroup(layerType) === 'economy' ? '经济数据矢量' : '工程项目矢量'}本地图层加载失败:`, error)
     return false
   }
+}
+
+const getLocalVectorFeaturesAtCoordinate = (coordinate) => {
+  if (!coordinate || !map) return []
+
+  const resolution = map.getView().getResolution() || 0
+  const tolerance = resolution * 8
+  const toleranceSquared = tolerance * tolerance
+  const matches = []
+
+  localVectorSources.forEach((source, layerType) => {
+    const visible = getOverlayVectorVisibility(layerType)
+    if (!visible) return
+
+    source.getFeatures().forEach((feature) => {
+      const geometry = feature.getGeometry?.()
+      if (!geometry) return
+
+      let hit = false
+      if (typeof geometry.intersectsCoordinate === 'function') {
+        hit = geometry.intersectsCoordinate(coordinate)
+      }
+
+      if (!hit && typeof geometry.getClosestPoint === 'function') {
+        const closestPoint = geometry.getClosestPoint(coordinate)
+        const dx = closestPoint[0] - coordinate[0]
+        const dy = closestPoint[1] - coordinate[1]
+        hit = (dx * dx) + (dy * dy) <= toleranceSquared
+      }
+
+      if (hit) {
+        matches.push({ feature, layerType })
+      }
+    })
+  })
+
+  return matches
 }
 
 const refreshOverlayVectorLayer = async (layerType) => {
   const metadata = ecologyLayerMetadata?.[layerType]
   if (!metadata?.published) {
     removeOverlayVectorLayer(layerType)
+    removeLocalVectorSource(layerType)
     clearPopupData(layerType)
     return
   }
 
   const shouldUseLocalGeoJSON = metadata?.service_mode === 'local' || metadata?.geoserver_published === false
+  let localSource = null
+  if (metadata?.geojson_url) {
+    localSource = await loadLocalVectorSource(layerType, metadata)
+  }
+
   if (shouldUseLocalGeoJSON && metadata?.geojson_url) {
-    const loaded = await loadLocalVectorLayer(layerType, metadata)
+    const loaded = await loadLocalVectorLayer(layerType, metadata, localSource)
     if (loaded) {
       return
     }
@@ -446,15 +578,17 @@ const refreshOverlayVectorLayer = async (layerType) => {
 }
 
 const refreshOverlayVectorLayers = async () => {
-  await refreshOverlayVectorLayer('economy')
-  await refreshOverlayVectorLayer('engineering')
+  await Promise.all(BUSINESS_VECTOR_LAYER_TYPES.map(layerType => refreshOverlayVectorLayer(layerType)))
 }
 
 // 创建WMS图层
 const createWMSLayers = () => {
-  economyVectorLayer = createOverlayWMSLayer('economy')
-  engineeringVectorLayer = createOverlayWMSLayer('engineering')
-  return [economyVectorLayer, engineeringVectorLayer]
+  const businessLayers = BUSINESS_VECTOR_LAYER_TYPES.map(layerType => {
+    const layer = createOverlayWMSLayer(layerType)
+    setOverlayVectorLayerRef(layerType, layer)
+    return layer
+  })
+  return businessLayers
 }
 
 const applyLayerOpacity = (opacityConfig = {}) => {
@@ -467,12 +601,8 @@ const applyLayerOpacity = (opacityConfig = {}) => {
   if (ecologyRasterLayer) {
     ecologyRasterLayer.setOpacity(ecologyDisplayLayer ? 0 : Number(opacityConfig.ecology ?? 88) / 100)
   }
-  if (economyVectorLayer) {
-    economyVectorLayer.setOpacity(Number(opacityConfig.economy ?? 60) / 100)
-  }
-  if (engineeringVectorLayer) {
-    engineeringVectorLayer.setOpacity(Number(opacityConfig.engineering ?? 80) / 100)
-  }
+  getOverlayVectorGroupLayers('economy').forEach(layer => layer.setOpacity(Number(opacityConfig.economy ?? 60) / 100))
+  getOverlayVectorGroupLayers('engineering').forEach(layer => layer.setOpacity(Number(opacityConfig.engineering ?? 80) / 100))
   map?.render()
 }
 
@@ -755,14 +885,16 @@ const handleMapClick = async (event) => {
         
     // 准备图层源映射
     const layerSources = {
-      ecology: props.layerVisibility.ecology ? ecologyRasterLayer?.getSource() : null,
-      economy: props.layerVisibility.economy && economyVectorLayer?.get?.('overlayServiceMode') === 'geoserver'
-        ? economyVectorLayer?.getSource()
-        : null,
-      engineering: props.layerVisibility.engineering && engineeringVectorLayer?.get?.('overlayServiceMode') === 'geoserver'
-        ? engineeringVectorLayer?.getSource()
-        : null
+      ecology: props.layerVisibility.ecology ? ecologyRasterLayer?.getSource() : null
     }
+    BUSINESS_VECTOR_LAYER_TYPES.forEach((layerType) => {
+      const layer = getOverlayVectorLayerRef(layerType)
+      const group = getOverlayVectorGroup(layerType)
+      const visible = group === 'economy' ? props.layerVisibility.economy : props.layerVisibility.engineering
+      layerSources[layerType] = visible && layer?.get?.('overlayServiceMode') === 'geoserver'
+        ? layer.getSource()
+        : null
+    })
     
     console.log('🔍 开始获取图层信息...')
         
@@ -777,27 +909,45 @@ const handleMapClick = async (event) => {
       console.log('🌿 生态数据:', popup.ecologyData)
         }
         
-        // 解析经济矢量数据
-        if (results.economy) {
-      popup.economyData = parseEconomyData(results.economy)
-      console.log('💰 经济数据:', popup.economyData)
+    for (const layerType of ECONOMY_LAYER_TYPES) {
+        if (results[layerType]) {
+        const parsedEconomyData = parseEconomyData(results[layerType])
+        if (parsedEconomyData) {
+          parsedEconomyData.geometryType = layerType.split('_').pop()
+          popup.economyData = parsedEconomyData
+          console.log('💰 经济数据:', popup.economyData)
+          break
         }
+      }
+    }
         
-        // 解析工程矢量数据
-        if (results.engineering) {
-      popup.engineeringData = parseEngineeringData(results.engineering)
+    ENGINEERING_LAYER_TYPES.forEach((layerType) => {
+      if (results[layerType]) {
+        popup.engineeringData.push(
+          ...parseEngineeringData(results[layerType]).map(item => ({
+            ...item,
+            geometryType: layerType.split('_').pop()
+          }))
+        )
+      }
+    })
+    if (popup.engineeringData.length > 0) {
       console.log('🏗️ 工程数据:', popup.engineeringData)
-        }
+    }
 
     const localFeatures = map.getFeaturesAtPixel(event.pixel, {
       hitTolerance: 6,
       layerFilter: (layer) => (
-        (props.layerVisibility.economy && layer === economyVectorLayer) ||
-        (props.layerVisibility.engineering && layer === engineeringVectorLayer)
+        (props.layerVisibility.economy && getOverlayVectorGroupLayers('economy').includes(layer)) ||
+        (props.layerVisibility.engineering && getOverlayVectorGroupLayers('engineering').includes(layer))
       )
     }) || []
-    const localEconomyFeature = localFeatures.find((feature) => feature.get('overlayVectorType') === 'economy')
-    const localEngineeringFeatures = localFeatures.filter((feature) => feature.get('overlayVectorType') === 'engineering')
+    const localCoordinateMatches = getLocalVectorFeaturesAtCoordinate(coord)
+    const localFeatureSet = new Set(localFeatures)
+    localCoordinateMatches.forEach(({ feature }) => localFeatureSet.add(feature))
+    const allLocalFeatures = Array.from(localFeatureSet)
+    const localEconomyFeature = allLocalFeatures.find((feature) => String(feature.get('overlayVectorType') || '').startsWith('economy'))
+    const localEngineeringFeatures = allLocalFeatures.filter((feature) => String(feature.get('overlayVectorType') || '').startsWith('engineering'))
 
     if (!popup.economyData && localEconomyFeature) {
       const properties = { ...localEconomyFeature.getProperties() }
@@ -806,6 +956,9 @@ const handleMapClick = async (event) => {
         type: 'FeatureCollection',
         features: [{ type: 'Feature', properties }]
       })
+      if (popup.economyData) {
+        popup.economyData.geometryType = String(localEconomyFeature.get('overlayVectorType') || '').split('_').pop()
+      }
     }
 
     if ((!popup.engineeringData || popup.engineeringData.length === 0) && localEngineeringFeatures.length > 0) {
@@ -817,6 +970,10 @@ const handleMapClick = async (event) => {
           return { type: 'Feature', properties }
         })
       })
+      popup.engineeringData = popup.engineeringData.map((item, index) => ({
+        ...item,
+        geometryType: String(localEngineeringFeatures[index]?.get('overlayVectorType') || '').split('_').pop()
+      }))
     }
         
     const shouldOpenPopup =
@@ -1211,11 +1368,11 @@ const toggleLayer = async (layerType) => {
     } else if (layerType === 'ecology' && ecologyRasterLayer) {
       syncEcologyLayerVisibility(props.layerVisibility.ecology)
     } else if (layerType === 'economy') {
-      await refreshOverlayVectorLayer('economy')
-      economyVectorLayer?.setVisible(props.layerVisibility.economy)
+      await Promise.all(ECONOMY_LAYER_TYPES.map(item => refreshOverlayVectorLayer(item)))
+      getOverlayVectorGroupLayers('economy').forEach(layer => layer.setVisible(props.layerVisibility.economy))
     } else if (layerType === 'engineering') {
-      await refreshOverlayVectorLayer('engineering')
-      engineeringVectorLayer?.setVisible(props.layerVisibility.engineering)
+      await Promise.all(ENGINEERING_LAYER_TYPES.map(item => refreshOverlayVectorLayer(item)))
+      getOverlayVectorGroupLayers('engineering').forEach(layer => layer.setVisible(props.layerVisibility.engineering))
     }
     
     map?.render()
@@ -1234,12 +1391,8 @@ const applyOverlayViewState = async () => {
   await refreshOverlayVectorLayers()
   syncEcologyLayerVisibility(props.layerVisibility.ecology)
 
-  if (economyVectorLayer) {
-    economyVectorLayer.setVisible(props.layerVisibility.economy)
-  }
-  if (engineeringVectorLayer) {
-    engineeringVectorLayer.setVisible(props.layerVisibility.engineering)
-  }
+  getOverlayVectorGroupLayers('economy').forEach(layer => layer.setVisible(props.layerVisibility.economy))
+  getOverlayVectorGroupLayers('engineering').forEach(layer => layer.setVisible(props.layerVisibility.engineering))
 
   if (!props.layerVisibility.ecology) clearPopupData('ecology')
   if (!props.layerVisibility.economy) clearPopupData('economy')
@@ -1286,21 +1439,16 @@ const handleRefreshMap = async (payload = {}) => {
     source.refresh()
   }
   
-  if (economyVectorLayer) {
-    const source = economyVectorLayer.getSource()
+  BUSINESS_VECTOR_LAYER_TYPES
+    .map(layerType => getOverlayVectorLayerRef(layerType))
+    .filter(Boolean)
+    .forEach((layer) => {
+    const source = layer.getSource()
     if (source?.updateParams) {
       source.updateParams({ 'timestamp': Date.now() })
     }
     source?.refresh?.()
-  }
-  
-  if (engineeringVectorLayer) {
-    const source = engineeringVectorLayer.getSource()
-    if (source?.updateParams) {
-      source.updateParams({ 'timestamp': Date.now() })
-    }
-    source?.refresh?.()
-  }
+  })
   
   // 强制地图重新渲染
   if (map) {

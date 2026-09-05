@@ -192,8 +192,8 @@
             <div class="upload-types">{{ currentDataType.fileTypes }}</div>
           </div>
           <div v-else class="file-info">
-            <div class="file-name">{{ files[selectedType].name }}</div>
-            <div class="file-size">{{ formatFileSize(files[selectedType].size) }}</div>
+            <div class="file-name">{{ getSelectedFileName(selectedType) }}</div>
+            <div class="file-size">{{ formatFileSize(getSelectedFileSize(selectedType)) }}</div>
             <button class="remove-btn" @click.stop="removeFile(selectedType)">移除</button>
           </div>
         </div>
@@ -222,25 +222,34 @@
         <div v-if="uploadStatus[selectedType]" :class="['status-message', uploadStatus[selectedType].type]">
           {{ uploadStatus[selectedType].message }}
         </div>
-        <div v-if="selectedType !== 'ecology' && publishedLayers[selectedType]" class="published-row">
-          <div>
-            <strong>{{ currentDataType.label }}</strong>
-            <span>已发布到地图</span>
-            <span v-if="publishedLayers[selectedType].fileName" class="published-meta">
-              文件：{{ publishedLayers[selectedType].fileName }}
-            </span>
-            <span v-if="publishedLayers[selectedType].description" class="published-meta published-description">
-              描述：{{ publishedLayers[selectedType].description }}
-            </span>
-          </div>
-          <button
-            class="delete-layer-btn"
-            :disabled="deleting[selectedType]"
-            @click="deleteUploadedLayer(selectedType)"
+        <template v-if="selectedType !== 'ecology'">
+          <div
+            v-for="publishedLayer in currentPublishedLayers"
+            :key="publishedLayer.type"
+            class="published-row"
           >
-            {{ deleting[selectedType] ? '删除中...' : '删除图层' }}
-          </button>
-        </div>
+            <div>
+              <strong>{{ publishedLayer.label || currentDataType.label }}</strong>
+              <span>已发布到地图</span>
+              <span v-if="publishedLayer.fileName" class="published-meta">
+                文件：{{ publishedLayer.fileName }}
+              </span>
+              <span v-if="publishedLayer.sublayerText" class="published-meta">
+                已识别：{{ publishedLayer.sublayerText }}
+              </span>
+              <span v-if="publishedLayer.description" class="published-meta published-description">
+                描述：{{ publishedLayer.description }}
+              </span>
+            </div>
+            <button
+              class="delete-layer-btn"
+              :disabled="deleting[selectedType]"
+              @click="deleteUploadedLayer(publishedLayer.type)"
+            >
+              {{ deleting[selectedType] ? '删除中...' : '删除图层' }}
+            </button>
+          </div>
+        </template>
       </div>
 
       <!-- 数据说明 -->
@@ -248,8 +257,8 @@
         <h4>数据要求说明</h4>
         <ul>
           <li><strong>生态指数栅格：</strong>可手动同步系统最近一次成功计算的 RSEI 结果，也可直接上传自己的生态栅格；如暂无结果，请先到“遥感生态指数分析”模块完成 RSEI 计算</li>
-          <li><strong>经济数据矢量：</strong>建议包含区域名称、经济指标、人口、面积等字段；系统现会自动识别常见字段名并尽量适配</li>
-          <li><strong>工程项目矢量：</strong>需包含字段：proj_name（项目名称）、proj_type（类型）、status（状态）、start_date、end_date、area_km2</li>
+          <li><strong>经济数据矢量：</strong>上传一个ZIP压缩包，可同时包含点/线/面Shapefile，系统自动分图层保存并同时显示；建议包含区域名称、经济指标、人口、面积等字段</li>
+          <li><strong>工程项目矢量：</strong>上传一个ZIP压缩包，可同时包含点/线/面Shapefile，系统自动分图层保存并同时显示；建议包含字段：proj_name（项目名称）、proj_type（类型）、status（状态）、start_date、end_date、area_km2</li>
           <li><strong>字符编码：</strong>所有矢量数据请使用UTF-8编码，确保中文正常显示</li>
           <li><strong>坐标系统：</strong>建议使用 EPSG:4326 (WGS84) 坐标系</li>
         </ul>
@@ -292,7 +301,7 @@ const dataTypes = [
     
     accept: '.zip',
     uploadText: '上传经济数据矢量文件',
-    fileTypes: '支持的文件类型: .zip (包含 .shp/.shx/.dbf/.prj)',
+    fileTypes: '支持的文件类型: .zip (可包含点/线/面Shapefile)',
     buttonText: '上传经济矢量'
   },
   {
@@ -301,8 +310,8 @@ const dataTypes = [
     tabLabel: '工程矢量',
     
     accept: '.zip',
-    uploadText: '上传工程项目矢量文件',
-    fileTypes: '支持的文件类型: .zip (包含 .shp/.shx/.dbf/.prj)',
+    uploadText: '上传工程项目点/线/面矢量压缩包',
+    fileTypes: '支持的文件类型: .zip (可包含点/线/面Shapefile)',
     buttonText: '上传工程矢量'
   }
 ]
@@ -313,6 +322,71 @@ const selectedType = ref('ecology')
 // 计算当前数据类型配置
 const currentDataType = computed(() => {
   return dataTypes.find(type => type.value === selectedType.value) || dataTypes[0]
+})
+
+const getPublishedLayerKey = (type) => {
+  if (type === 'ecology') return 'ecologyUploaded'
+  if (type === 'economy_point') return 'economyPoint'
+  if (type === 'economy_line') return 'economyLine'
+  if (type === 'economy_polygon') return 'economyPolygon'
+  if (type === 'engineering_point') return 'engineeringPoint'
+  if (type === 'engineering_line') return 'engineeringLine'
+  if (type === 'engineering_polygon') return 'engineeringPolygon'
+  return type
+}
+
+const vectorGroupLayerTypes = {
+  economy: ['economy_point', 'economy_line', 'economy_polygon'],
+  engineering: ['engineering_point', 'engineering_line', 'engineering_polygon']
+}
+
+const vectorGeometryLabels = {
+  point: '点数据',
+  line: '线数据',
+  polygon: '面数据'
+}
+
+const getVectorGeometryLabel = (type) => {
+  const suffix = String(type || '').split('_').pop()
+  return vectorGeometryLabels[suffix] || type
+}
+
+const getPublishedVectorGroupLayers = (group) => {
+  return (vectorGroupLayerTypes[group] || [])
+    .map((type) => ({ type, label: getVectorGeometryLabel(type), ...publishedLayers[getPublishedLayerKey(type)] }))
+    .filter(item => item.fileName || item.layerName)
+}
+
+const clearPublishedVectorGroup = (group) => {
+  ;(vectorGroupLayerTypes[group] || []).forEach((type) => {
+    publishedLayers[getPublishedLayerKey(type)] = null
+  })
+  publishedLayers[group] = null
+}
+
+const currentPublishedLayers = computed(() => {
+  if (selectedType.value === 'economy' || selectedType.value === 'engineering') {
+    const groupLayers = getPublishedVectorGroupLayers(selectedType.value)
+    const legacyLayer = publishedLayers[selectedType.value]
+    if (groupLayers.length === 0 && legacyLayer) {
+      return [{ type: selectedType.value, label: currentDataType.value.label, ...legacyLayer }]
+    }
+    if (groupLayers.length === 0) return []
+
+    const firstLayer = groupLayers[0]
+    return [{
+      type: selectedType.value,
+      label: currentDataType.value.label,
+      fileName: [...new Set(groupLayers.map(item => item.fileName).filter(Boolean))].join('、'),
+      description: firstLayer.description || '',
+      layerName: groupLayers.map(item => item.layerName).filter(Boolean).join(','),
+      updatedAt: firstLayer.updatedAt || null,
+      sublayerText: groupLayers.map(item => item.label).join('、')
+    }]
+  }
+
+  const item = publishedLayers[getPublishedLayerKey(selectedType.value)]
+  return item ? [{ type: selectedType.value, label: currentDataType.value.label, ...item }] : []
 })
 
 // 文件输入引用
@@ -354,7 +428,13 @@ const overlayMetadataKeyMap = {
   ecologySynced: 'ecology_synced',
   ecologyUploaded: 'ecology_uploaded',
   economy: 'economy',
-  engineering: 'engineering'
+  economyPoint: 'economy_point',
+  economyLine: 'economy_line',
+  economyPolygon: 'economy_polygon',
+  engineering: 'engineering',
+  engineeringPoint: 'engineering_point',
+  engineeringLine: 'engineering_line',
+  engineeringPolygon: 'engineering_polygon'
 }
 
 // 上传状态
@@ -382,7 +462,13 @@ const publishedLayers = reactive({
   ecologySynced: null,
   ecologyUploaded: null,
   economy: null,
-  engineering: null
+  economyPoint: null,
+  economyLine: null,
+  economyPolygon: null,
+  engineering: null,
+  engineeringPoint: null,
+  engineeringLine: null,
+  engineeringPolygon: null
 })
 
 const deleting = reactive({
@@ -414,17 +500,19 @@ const triggerFileInput = (type) => {
 
 // 处理文件选择
 const handleFileSelect = (event, type) => {
-  const file = event.target.files[0]
-  if (file) {
-    if (file.size > maxUploadSize) {
+  const selectedFiles = Array.from(event.target.files || [])
+  const nextFiles = selectedFiles.slice(0, 1)
+  if (nextFiles.length > 0) {
+    const oversized = nextFiles.find(file => file.size > maxUploadSize)
+    if (oversized) {
       uploadStatus[type] = {
         type: 'error',
-        message: '文件大小超过1GB限制'
+        message: `${oversized.name} 文件大小超过1GB限制`
       }
       return
     }
     
-    files[type] = file
+    files[type] = nextFiles[0]
     uploadStatus[type] = null
     uploadProgress[type] = 0
   }
@@ -435,6 +523,23 @@ const removeFile = (type) => {
   files[type] = null
   uploadStatus[type] = null
   uploadProgress[type] = 0
+}
+
+const getSelectedFiles = (type) => {
+  const value = files[type]
+  if (!value) return []
+  return Array.isArray(value) ? value : [value]
+}
+
+const getSelectedFileName = (type) => {
+  const selectedFiles = getSelectedFiles(type)
+  if (selectedFiles.length === 0) return ''
+  if (selectedFiles.length === 1) return selectedFiles[0].name
+  return selectedFiles.map(file => file.name).join('、')
+}
+
+const getSelectedFileSize = (type) => {
+  return getSelectedFiles(type).reduce((total, file) => total + file.size, 0)
 }
 
 const normalizePublishedLayer = (type, payload = {}) => {
@@ -464,8 +569,10 @@ const loadUploadedLayerMetadata = async () => {
         publishedLayers[stateKey] = normalizePublishedLayer(metadataKey, item)
         if (stateKey === 'ecologyUploaded') {
           descriptions.ecology = item.description || descriptions.ecology
-        } else if (stateKey === 'economy' || stateKey === 'engineering') {
-          descriptions[stateKey] = item.description || descriptions[stateKey]
+        } else if (stateKey === 'economy' || stateKey.startsWith('economy')) {
+          descriptions.economy = item.description || descriptions.economy
+        } else if (stateKey === 'engineering' || stateKey.startsWith('engineering')) {
+          descriptions.engineering = descriptions.engineering || item.description || ''
         }
       } else {
         publishedLayers[stateKey] = null
@@ -601,11 +708,6 @@ const uploadFile = async (type) => {
   uploadProgress[type] = 0
   
   try {
-    const formData = new FormData()
-    formData.append('file', files[type])
-    formData.append('data_type', type)
-    formData.append('description', descriptions[type] || '')
-    
     // 根据类型确定上传端点（注意：URL必须以斜杠结尾）
     let endpoint = ''
     if (type === 'ecology') {
@@ -615,25 +717,55 @@ const uploadFile = async (type) => {
     } else if (type === 'engineering') {
       endpoint = buildApiUrl(API_ENDPOINTS.OVERLAY_ANALYSIS.UPLOAD_ENGINEERING_VECTOR)
     }
-    
-    const response = await request.upload(endpoint, formData, {
-      skipAuth: true,
-      onUploadProgress: (progressEvent) => {
-        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-        uploadProgress[type] = percentCompleted
+
+    const selectedFiles = getSelectedFiles(type)
+    const responses = []
+    for (let index = 0; index < selectedFiles.length; index += 1) {
+      const currentFile = selectedFiles[index]
+      const formData = new FormData()
+      formData.append('file', currentFile)
+      formData.append('data_type', type)
+      formData.append('description', descriptions[type] || '')
+
+      const response = await request.upload(endpoint, formData, {
+        skipAuth: true,
+        onUploadProgress: (progressEvent) => {
+          const currentPercent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          uploadProgress[type] = Math.round(((index * 100) + currentPercent) / selectedFiles.length)
+        }
+      })
+      responses.push({ response, file: currentFile })
+    }
+
+    const failed = responses.find(item => !item.response?.success)
+    if (!failed) {
+      if (type === 'economy' || type === 'engineering') {
+        clearPublishedVectorGroup(type)
       }
-    })
-    
-    if (response.success) {
-      const publishedStateKey = type === 'ecology' ? 'ecologyUploaded' : type
-      publishedLayers[publishedStateKey] = normalizePublishedLayer(type === 'ecology' ? 'ecology_uploaded' : type, response.metadata || {
-        file_name: response.file_name || files[type]?.name,
-        description: response.description || descriptions[type],
-        layer_name: response.layer_name
+      responses.forEach(({ response, file }) => {
+        const resultLayers = Array.isArray(response.results) && response.results.length > 0
+          ? response.results
+          : [{
+              data_type: response.data_type || type,
+              metadata: response.metadata,
+              file_name: response.file_name,
+              description: response.description,
+              layer_name: response.layer_name
+            }]
+
+        resultLayers.forEach((result) => {
+          const responseType = result.data_type || type
+          const publishedStateKey = getPublishedLayerKey(responseType)
+          publishedLayers[publishedStateKey] = normalizePublishedLayer(responseType === 'ecology' ? 'ecology_uploaded' : responseType, result.metadata || {
+            file_name: result.file_name || response.file_name || file?.name,
+            description: result.description || response.description || descriptions[type],
+            layer_name: result.layer_name || response.layer_name
+          })
+        })
       })
       uploadStatus[type] = {
         type: 'success',
-        message: response.message || '上传成功！数据已发布到GeoServer'
+        message: responses[0]?.response?.message || '上传成功！数据已发布到地图'
       }
       
       // 3秒后清空文件选择
@@ -645,11 +777,15 @@ const uploadFile = async (type) => {
       // 触发地图刷新事件
       emitRefreshMap(type === 'ecology' ? 'ecology_uploaded' : type, 'updated')
     } else {
-      const publishedStateKey = type === 'ecology' ? 'ecologyUploaded' : type
-      publishedLayers[publishedStateKey] = null
+      if (type === 'economy' || type === 'engineering') {
+        clearPublishedVectorGroup(type)
+      } else {
+        const publishedStateKey = getPublishedLayerKey(type)
+        publishedLayers[publishedStateKey] = null
+      }
       uploadStatus[type] = {
         type: 'error',
-        message: response.message || '上传失败'
+        message: failed.response?.message || '上传失败'
       }
     }
   } catch (error) {
@@ -668,8 +804,12 @@ const uploadFile = async (type) => {
       type: 'error',
       message: errorMessage
     }
-    const publishedStateKey = type === 'ecology' ? 'ecologyUploaded' : type
-    publishedLayers[publishedStateKey] = null
+    if (type === 'economy' || type === 'engineering') {
+      clearPublishedVectorGroup(type)
+    } else {
+      const publishedStateKey = getPublishedLayerKey(type)
+      publishedLayers[publishedStateKey] = null
+    }
   } finally {
     uploading[type] = false
   }
@@ -680,8 +820,14 @@ const deleteUploadedLayer = async (type) => {
     ? 'ecologySynced'
     : type === 'ecology_uploaded'
       ? 'ecologyUploaded'
-      : type
-  const deletingKey = type.startsWith('ecology_') ? 'ecology' : type
+      : getPublishedLayerKey(type)
+  const deletingKey = type.startsWith('ecology_')
+    ? 'ecology'
+    : type.startsWith('engineering')
+      ? 'engineering'
+      : type.startsWith('economy')
+        ? 'economy'
+        : type
   deleting[deletingKey] = true
   uploadStatus[deletingKey] = { type: 'info', message: '正在删除图层...' }
   try {
@@ -691,7 +837,11 @@ const deleteUploadedLayer = async (type) => {
       params: { data_type: type }
     })
 
-    publishedLayers[stateKey] = null
+    if (type === 'economy' || type === 'engineering') {
+      clearPublishedVectorGroup(type)
+    } else {
+      publishedLayers[stateKey] = null
+    }
     if (type === 'ecology_uploaded') {
       files.ecology = null
       uploadProgress.ecology = 0
@@ -706,10 +856,28 @@ const deleteUploadedLayer = async (type) => {
         message: response.message || '图层已删除'
       }
     } else {
-      files[type] = null
-      uploadProgress[type] = 0
-      descriptions[type] = ''
-      uploadStatus[type] = {
+      if (type === 'economy' || type === 'engineering') {
+        files[type] = null
+        uploadProgress[type] = 0
+        descriptions[type] = ''
+      } else if (type.startsWith('engineering')) {
+        if (getPublishedVectorGroupLayers('engineering').length === 0) {
+          files.engineering = null
+          uploadProgress.engineering = 0
+          descriptions.engineering = ''
+        }
+      } else if (type.startsWith('economy')) {
+        if (getPublishedVectorGroupLayers('economy').length === 0) {
+          files.economy = null
+          uploadProgress.economy = 0
+          descriptions.economy = ''
+        }
+      } else {
+        files[type] = null
+        uploadProgress[type] = 0
+        descriptions[type] = ''
+      }
+      uploadStatus[deletingKey] = {
         type: response.success ? 'success' : 'error',
         message: response.message || '图层已删除'
       }
@@ -724,7 +892,7 @@ const deleteUploadedLayer = async (type) => {
         }
       : uploadStatus.ecology
     if (!type.startsWith('ecology_')) {
-      uploadStatus[type] = {
+      uploadStatus[deletingKey] = {
         type: 'error',
         message: getRequestErrorMessage(error, '删除图层失败')
       }

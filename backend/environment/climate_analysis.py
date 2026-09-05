@@ -192,7 +192,7 @@ class ClimateDataAnalyzer:
                         continue
                 else:
                     raise ValueError("无法使用任何编码格式读取CSV文件")
-            elif self.file_type.lower() == 'xlsx':
+            elif self.file_type.lower() in {'xlsx', 'xls'}:
                 try:
                     self.df = pd.read_excel(self.file_path)
                     logger.info("成功加载Excel文件")
@@ -480,8 +480,37 @@ def analyze_climate_data(file_path: str, file_type: str, preferred_metric: Optio
             zip_source_type = _inspect_zip_source_type(file_path)
             if zip_source_type == ZIP_SOURCE_SHAPEFILE:
                 return analyze_climate_vector(file_path, preferred_metric=preferred_metric)
+            if zip_source_type == ZIP_SOURCE_TABLE:
+                cleanup_dir = None
+                try:
+                    table_path, cleanup_dir = _extract_zip_member_for_analysis(
+                        file_path,
+                        ('.csv', '.xlsx', '.xls'),
+                        'climate_table_',
+                    )
+                    table_type = Path(table_path).suffix.lstrip('.').lower()
+                    return ClimateDataAnalyzer(table_path, table_type).analyze()
+                finally:
+                    if cleanup_dir:
+                        remove_tree(cleanup_dir)
+            if zip_source_type == ZIP_SOURCE_RASTER:
+                cleanup_dir = None
+                try:
+                    raster_path, cleanup_dir = _extract_zip_member_for_analysis(
+                        file_path,
+                        ('.tif', '.tiff'),
+                        'climate_raster_',
+                    )
+                    return analyze_climate_raster(
+                        raster_path,
+                        Path(raster_path).suffix.lstrip('.'),
+                        preferred_metric=preferred_metric,
+                    )
+                finally:
+                    if cleanup_dir:
+                        remove_tree(cleanup_dir)
             if zip_source_type == ZIP_SOURCE_UNKNOWN:
-                return {'error': 'ZIP 文件未识别为 ADF 栅格目录，也不是完整的 Shapefile 压缩包'}
+                return {'error': 'ZIP 中未找到可识别的表格、GeoTIFF、ADF 栅格目录或完整 Shapefile 组件'}
         return analyze_climate_raster(file_path, file_type, preferred_metric=preferred_metric)
 
     analyzer = ClimateDataAnalyzer(file_path, file_type)
@@ -520,6 +549,8 @@ CLIMATE_MISSING_VALUE_SENTINELS = [9999, 9999.0, 9999.9, 99999, 99999.0, -9999, 
 
 ZIP_SOURCE_SHAPEFILE = 'shapefile_zip'
 ZIP_SOURCE_ADF = 'adf_zip'
+ZIP_SOURCE_RASTER = 'raster_zip'
+ZIP_SOURCE_TABLE = 'table_zip'
 ZIP_SOURCE_UNKNOWN = 'unknown_zip'
 
 
@@ -594,10 +625,61 @@ def _inspect_zip_source_type(file_path: str) -> str:
 
         if any(name.endswith('.adf') for name in names):
             return ZIP_SOURCE_ADF
+
+        if any(name.endswith(('.tif', '.tiff')) for name in names):
+            return ZIP_SOURCE_RASTER
+
+        if any(name.endswith(('.csv', '.xlsx', '.xls')) for name in names):
+            return ZIP_SOURCE_TABLE
     except Exception as exc:
         logger.warning(f"识别ZIP来源类型失败: {exc}")
 
     return ZIP_SOURCE_UNKNOWN
+
+
+def _find_zip_member(zip_path: str, suffixes: Tuple[str, ...]) -> Optional[str]:
+    """Find the shortest matching file path in a ZIP archive."""
+    with zipfile.ZipFile(zip_path, 'r') as zf:
+        candidates = [
+            member.filename for member in zf.infolist()
+            if not member.is_dir() and member.filename.lower().endswith(suffixes)
+        ]
+    return sorted(candidates, key=lambda item: (len(Path(item).parts), len(item)))[0] if candidates else None
+
+
+def _extract_zip_member_for_analysis(
+    zip_path: str,
+    suffixes: Tuple[str, ...],
+    prefix: str,
+) -> Tuple[str, str]:
+    """Extract one supported ZIP member while rejecting path traversal."""
+    member_name = _find_zip_member(zip_path, suffixes)
+    if not member_name:
+        raise ValueError(f"ZIP 中未找到可用的 {', '.join(suffixes)} 文件")
+
+    extract_dir = tempfile.mkdtemp(prefix=prefix, dir=os.path.dirname(zip_path))
+    try:
+        relative_name = Path(member_name)
+        if relative_name.is_absolute() or '..' in relative_name.parts:
+            raise ValueError('ZIP 文件包含不安全的文件路径')
+
+        target_path = os.path.join(extract_dir, *relative_name.parts)
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        with zipfile.ZipFile(zip_path, 'r') as zf, zf.open(member_name, 'r') as source, open(target_path, 'wb') as target:
+            target.write(source.read())
+        return target_path, extract_dir
+    except Exception:
+        remove_tree(extract_dir)
+        raise
+
+
+def _zip_member_for_source_type(file_path: str, source_type: str) -> Optional[str]:
+    suffixes = {
+        ZIP_SOURCE_RASTER: ('.tif', '.tiff'),
+        ZIP_SOURCE_TABLE: ('.csv', '.xlsx', '.xls'),
+        ZIP_SOURCE_ADF: ('.adf',),
+    }.get(source_type)
+    return _find_zip_member(file_path, suffixes) if suffixes else None
 
 
 def _extract_shapefile_zip_for_analysis(zip_path: str) -> Tuple[str, str]:
@@ -795,6 +877,54 @@ def detect_climate_file_capabilities(file_path: str, file_type: Optional[str] = 
             capability = detect_climate_raster_capabilities(file_path)
             capability['source_type'] = ZIP_SOURCE_ADF
             return capability
+        if source_type == ZIP_SOURCE_RASTER:
+            member_name = _zip_member_for_source_type(file_path, source_type)
+            capability = detect_climate_raster_capabilities(member_name or file_path)
+            capability['source_type'] = ZIP_SOURCE_RASTER
+            capability['detected_category'] = 'zipped_climate_raster'
+            capability['filename_hint'] = os.path.basename(member_name or file_path).lower()
+            return capability
+        if source_type == ZIP_SOURCE_TABLE:
+            member_name = _zip_member_for_source_type(file_path, source_type)
+            cleanup_dir = None
+            try:
+                table_path, cleanup_dir = _extract_zip_member_for_analysis(
+                    file_path,
+                    ('.csv', '.xlsx', '.xls'),
+                    'climate_table_',
+                )
+                table_type = Path(table_path).suffix.lstrip('.').lower()
+                analyzer = ClimateDataAnalyzer(table_path, table_type)
+                if not analyzer.load_data():
+                    return {
+                        'detected_mode': 'climate_table',
+                        'inferred_metric': None,
+                        'supported_metrics': [],
+                        'unsupported_for_climate': True,
+                        'manual_selection_required': False,
+                        'detected_category': 'table_zip',
+                        'reason': 'ZIP 中的表格无法按气候数据字段解析，请检查日期、温度、降水量、湿度和风速列。',
+                        'filename_hint': os.path.basename(member_name or file_path).lower(),
+                        'source_type': ZIP_SOURCE_TABLE,
+                    }
+
+                field_mapping = _detect_climate_metric_fields(analyzer.df.columns.tolist())
+                supported_metrics = list(field_mapping.keys())
+                return {
+                    'detected_mode': 'climate_table',
+                    'inferred_metric': supported_metrics[0] if len(supported_metrics) == 1 else None,
+                    'supported_metrics': supported_metrics,
+                    'unsupported_for_climate': not bool(supported_metrics),
+                    'manual_selection_required': False,
+                    'detected_category': 'table_zip',
+                    'reason': None if supported_metrics else 'ZIP 中的表格未检测到温度、降水、湿度或风速字段。',
+                    'filename_hint': os.path.basename(member_name or file_path).lower(),
+                    'source_type': ZIP_SOURCE_TABLE,
+                    'field_mapping': field_mapping,
+                }
+            finally:
+                if cleanup_dir:
+                    remove_tree(cleanup_dir)
         return {
             'detected_mode': 'unknown',
             'inferred_metric': None,
@@ -802,9 +932,39 @@ def detect_climate_file_capabilities(file_path: str, file_type: Optional[str] = 
             'unsupported_for_climate': True,
             'manual_selection_required': False,
             'detected_category': 'unknown_zip',
-            'reason': 'ZIP 文件未识别为 ADF 栅格目录，也不是完整的 Shapefile 压缩包。',
+            'reason': 'ZIP 中未找到可识别的表格、GeoTIFF、ADF 栅格目录或完整 Shapefile 组件。',
             'filename_hint': os.path.basename(file_path).lower(),
             'source_type': ZIP_SOURCE_UNKNOWN,
+        }
+
+    if normalized_type in {'csv', 'xlsx', 'xls'}:
+        analyzer = ClimateDataAnalyzer(file_path, normalized_type)
+        if not analyzer.load_data():
+            return {
+                'detected_mode': 'climate_table',
+                'inferred_metric': None,
+                'supported_metrics': [],
+                'unsupported_for_climate': True,
+                'manual_selection_required': False,
+                'detected_category': 'climate_table',
+                'reason': '表格无法按气候数据解析，请检查日期、温度、降水量、湿度和风速列。',
+                'filename_hint': os.path.basename(file_path).lower(),
+                'source_type': 'climate_table',
+            }
+
+        field_mapping = _detect_climate_metric_fields(analyzer.df.columns.tolist())
+        supported_metrics = list(field_mapping.keys())
+        return {
+            'detected_mode': 'climate_table',
+            'inferred_metric': supported_metrics[0] if len(supported_metrics) == 1 else None,
+            'supported_metrics': supported_metrics,
+            'unsupported_for_climate': not bool(supported_metrics),
+            'manual_selection_required': False,
+            'detected_category': 'climate_table',
+            'reason': None if supported_metrics else '表格未检测到温度、降水、湿度或风速字段。',
+            'filename_hint': os.path.basename(file_path).lower(),
+            'source_type': 'climate_table',
+            'field_mapping': field_mapping,
         }
 
     capability = detect_climate_raster_capabilities(file_path)

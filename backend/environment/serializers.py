@@ -244,7 +244,9 @@ class ClimateDataFileUploadSerializer(serializers.ModelSerializer):
                 "请将完整 Shapefile 组件打包为一个 ZIP 后上传，系统会自动读取属性表进行气候统计分析"
             )
         if not lower_name.endswith(('.csv', '.xlsx', '.xls', '.tif', '.tiff', '.zip')):
-            raise serializers.ValidationError("只支持 CSV、Excel、GeoTIFF、ADF ZIP，或完整 Shapefile ZIP")
+            raise serializers.ValidationError(
+                "支持 CSV、Excel、GeoTIFF 直接上传；ADF 或完整 Shapefile 组件请打包为 ZIP 后上传"
+            )
         return value
 
 
